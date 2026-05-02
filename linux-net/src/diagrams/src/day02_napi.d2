@@ -36,7 +36,7 @@ budget: |md
   - `netdev_budget_usecs = 2000` (max 2ms per softirq run)
   - Hit either limit → return early, reschedule
   - Polling continues on next softirq tick
-| {shape: callout; style.fill: "#fef3c7"}
+| {style.fill: "#fef3c7"}
 
 before -> napi: "evolved" {style.stroke-dash: 4}
 napi -> budget

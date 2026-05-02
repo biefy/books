@@ -1,106 +1,27 @@
-/* Inline kernel source viewer styling. */
+/* Inline kernel-source link styling.
+ * Code spans matching `path/to/file.c[:N]` get wrapped in an <a> by kernel-source.js
+ * and styled here as a clickable link to GitHub.
+ */
 
 #content code.ksrc-link {
+  /* legacy class, kept harmless */
   cursor: pointer;
+}
+
+#content a.ksrc-link-wrap {
+  text-decoration: none;
   border-bottom: 1px dashed currentColor;
   text-decoration-skip-ink: none;
 }
-#content code.ksrc-link:hover {
+#content a.ksrc-link-wrap:hover {
   background: rgba(255, 180, 84, 0.18);
+  border-bottom-style: solid;
 }
-
-.ksrc-details {
-  margin: 0.8rem 0 1.2rem;
-  border: 1px solid var(--theme-popup-border, #ccc);
-  border-radius: 6px;
-  background: var(--quote-bg, #f8f8f8);
-}
-.ksrc-details > summary {
+#content a.ksrc-link-wrap > code {
   cursor: pointer;
-  padding: 0.5rem 0.9rem;
-  user-select: none;
-  font-size: 0.95rem;
-  color: var(--fg, #555);
-  list-style: none;
 }
-.ksrc-details > summary::-webkit-details-marker { display: none; }
-.ksrc-details > summary::before {
-  content: "▶ ";
-  display: inline-block;
-  transition: transform 0.15s;
-  margin-right: 0.3rem;
-}
-.ksrc-details[open] > summary::before {
-  transform: rotate(90deg);
-}
-.ksrc-body {
-  padding: 0.6rem 0.9rem 0.9rem;
-}
-
-.ksrc-header {
-  font-size: 0.95rem;
-  margin-bottom: 0.5rem;
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-}
-.ksrc-header a {
-  color: var(--links, #1f6feb);
-  text-decoration: none;
-  font-weight: 600;
-}
-.ksrc-header a:hover { text-decoration: underline; }
-.ksrc-header .ksrc-meta {
-  color: var(--fg, #888);
-  font-weight: normal;
-  font-family: inherit;
+#content a.ksrc-link-wrap::after {
+  content: " ↗";
   font-size: 0.85em;
+  opacity: 0.7;
 }
-
-.ksrc-code {
-  background: var(--quote-bg, #fff);
-  border: 1px solid var(--theme-popup-border, #e0e0e0);
-  border-radius: 4px;
-  padding: 0.6rem 0.4rem;
-  margin: 0;
-  max-height: 32rem;
-  overflow-y: auto;
-  font-size: 0.95rem;
-  line-height: 1.45;
-}
-.ksrc-code code {
-  background: transparent;
-  padding: 0;
-  font-size: inherit;
-}
-.ksrc-line {
-  display: block;
-  padding-left: 0.4rem;
-}
-.ksrc-line-target {
-  background: rgba(255, 180, 84, 0.25);
-  border-left: 3px solid var(--accent, #d6730e);
-  padding-left: calc(0.4rem - 3px);
-  font-weight: 500;
-}
-.ksrc-lineno {
-  display: inline-block;
-  width: 3.5em;
-  color: var(--fg, #666);
-  opacity: 0.65;
-  user-select: none;
-  text-align: right;
-  padding-right: 0.7em;
-  border-right: 1px solid var(--theme-popup-border, #d0d0d0);
-  margin-right: 0.6em;
-}
-.ksrc-linetext {
-  white-space: pre;
-  color: var(--fg, #222);
-}
-
-.ksrc-loading,
-.ksrc-error {
-  font-style: italic;
-  color: var(--fg, #666);
-  font-size: 0.95rem;
-}
-.ksrc-error a { color: var(--links, #1f6feb); }
