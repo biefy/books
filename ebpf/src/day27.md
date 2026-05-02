@@ -1,46 +1,60 @@
 # Day 27 — scx_central: read a real BPF scheduler
 
-> **Today's mission:** read `scx_central.bpf.c` — a production-grade BPF scheduler with central-dispatch architecture. Understand the patterns experienced sched_ext authors use. Total time: ~75 minutes. Reading-heavy, not coding-heavy.
+> **Today's mission:** read `scx_central.bpf.c` — a more sophisticated sched_ext scheduler with central-dispatch architecture. Understand the patterns experienced sched_ext authors use. Total time: ~75 minutes. Reading-heavy, not coding-heavy.
 
 ## Why read this one
 
-`scx_simple` is illustrative but trivial. `scx_central` is the next step up: realistic. It handles per-CPU dispatch queues, cross-CPU coordination, central scheduling decisions, and the kinds of details you'd hit on day one of writing a real scheduler.
+`scx_simple` is illustrative but trivial. It dispatches everything to one global queue with vtime ordering — a thin shell over CFS-equivalent fairness. `scx_central` is the next step up: realistic. It handles per-CPU dispatch queues, cross-CPU coordination, central scheduling decisions, and the kinds of details you'd hit on day one of writing a real scheduler.
 
-Reading code that someone else wrote — *and understanding why they wrote it that way* — is a separate skill from writing your own. Today is for that.
+Reading code that someone else wrote — *and understanding why they wrote it that way* — is a separate skill from writing your own. Today is for that skill.
 
-## DSQ patterns
+## DSQ patterns: three architectures
 
 ![DSQ patterns](diagrams/day27_dsq_patterns.png)
 
 Three architectures show up across the in-tree examples:
 
-1. **Global DSQ** — `scx_simple`. One queue, all CPUs.
-2. **Per-CPU DSQs** — each CPU pulls from its own.
-3. **Central DSQ** — one CPU dispatches for all others.
+### 1. Global DSQ (scx_simple)
 
-`scx_central` is option 3 with a twist: a designated CPU runs all dispatch logic; other CPUs only consume. This sounds like a bottleneck — and it is — but it lets you put complex policy in one place without per-CPU coordination.
+One queue, all CPUs pull from it. Easy to write. Suffers from cache locality (any task can run on any CPU) and lock contention at scale. Fine for ~few-CPU systems or low-rate scheduling.
 
-## What to read
+### 2. Per-CPU DSQs
+
+Each CPU has its own queue. Tasks inserted directly to the CPU they should run on; CPUs only pull from their own queue. Excellent cache locality. Cross-CPU coordination requires explicit logic — when one CPU's queue is empty and another's is full, the empty one steals work. This is what CFS does in C with elaborate load-balancing logic.
+
+### 3. Central DSQ (scx_central)
+
+One CPU is designated *central*. Other CPUs only consume from per-CPU DSQs. The central CPU runs the dispatch logic for everyone — handles enqueue, decides which CPU each task should go to, IPI-kicks the destination CPU when work arrives.
+
+This sounds like a bottleneck — and it is — but the central architecture trades throughput for **simplicity**. All scheduling decisions live in one place; no cross-CPU coordination logic; the central CPU is just a single-threaded decision-maker. For research workloads or specialized scheduling (anti-thrashing, latency-priority queues, gang scheduling), this is often the easiest path to a correct scheduler.
+
+## Reading `scx_central.bpf.c`
 
 Open `tools/sched_ext/scx_central.bpf.c`. ~350 lines. Walk through it in this order:
 
-### 1. Global state
+### 1. Globals
 
-Look at the maps and globals near the top:
+Look near the top:
 
 ```c
-const volatile s32 central_cpu;        /* which CPU is "central" */
-const volatile u32 nr_cpu_ids;
+const volatile s32 central_cpu;        /* which CPU is "central" — set from userspace */
+const volatile u32 nr_cpu_ids;          /* number of CPUs on the system */
+
+struct cpu_ctx {
+    bool                   gimme_task;
+    /* ... per-CPU state ... */
+};
+
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __type(value, struct cpu_state);
+    __type(value, struct cpu_ctx);
     __uint(max_entries, 1);
-} cpu_state SEC(".maps");
+} cpu_ctx_map SEC(".maps");
 ```
 
-`central_cpu` is set from userspace at attach time. `cpu_state` is per-CPU local state.
+`central_cpu` is set from userspace at attach time. `cpu_ctx` is per-CPU local state — read with `bpf_map_lookup_elem(&cpu_ctx_map, &zero)`.
 
-### 2. The init callback
+### 2. The `init` callback
 
 ```c
 SEC("struct_ops/central_init")
@@ -50,52 +64,55 @@ s32 BPF_STRUCT_OPS(central_init)
 }
 ```
 
-Just creates a fallback DSQ. The work happens later.
+Just creates a fallback DSQ. The interesting work happens in dispatch.
 
-### 3. The select_cpu callback
+### 3. The `select_cpu` callback
 
 ```c
 SEC("struct_ops/central_select_cpu")
 s32 BPF_STRUCT_OPS(central_select_cpu, struct task_struct *p, ...)
 {
-    /* always pick central_cpu */
+    /* Always pick central_cpu. */
     return central_cpu;
 }
 ```
 
-When a task wakes, route it to the central CPU. The central CPU will then enqueue and dispatch.
+When a task wakes, route it to the central CPU. The central CPU will then enqueue and dispatch. **This is the key inversion**: in scx_simple, tasks wake on whatever CPU last ran them. In scx_central, tasks wake on the central CPU so it can do all the dispatch work.
 
-### 4. The enqueue callback
+### 4. The `enqueue` callback
 
 ```c
 SEC("struct_ops/central_enqueue")
 void BPF_STRUCT_OPS(central_enqueue, struct task_struct *p, u64 enq_flags)
 {
-    /* push into a single DSQ that the central CPU consumes */
+    /* Push into the fallback DSQ; central CPU will pick it up. */
     scx_bpf_dispatch(p, FALLBACK_DSQ, SCX_SLICE_INF, enq_flags);
-    bpf_kick_cpu(central_cpu, 0);   /* wake central CPU if asleep */
+
+    /* Make sure central CPU is awake to handle this */
+    bpf_kick_cpu(central_cpu, 0);
 }
 ```
 
-`bpf_kick_cpu` is a kfunc that triggers an IPI to the named CPU. This is how you ensure the central CPU dispatches when work appears.
+`bpf_kick_cpu` is a kfunc that triggers an IPI to the named CPU, ensuring it wakes up to run dispatch logic. This is how you ensure the central CPU dispatches when work appears, even if the central CPU is currently idle.
 
-### 5. The dispatch callback
+### 5. The `dispatch` callback
 
 ```c
 SEC("struct_ops/central_dispatch")
 void BPF_STRUCT_OPS(central_dispatch, s32 cpu, struct task_struct *prev)
 {
-    if (cpu != central_cpu) return;     /* only central decides */
+    if (cpu != central_cpu)
+        return;     /* Only central decides. Other CPUs just consume. */
 
     bpf_for(i, 0, nr_cpu_ids) {
         struct task_struct *p = scx_bpf_consume(FALLBACK_DSQ);
         if (!p) break;
-        /* dispatch p to CPU `i` */
+        /* dispatch p to CPU `i` (with appropriate logic) */
     }
 }
 ```
 
-The pattern: only `central_cpu`'s call into `dispatch` actually does work. Others receive the kick from enqueue and drop into idle.
+The pattern: only `central_cpu`'s call into `dispatch` actually does work. Other CPUs receive the kick from enqueue and drop into idle.
 
 ### 6. The vtable
 
@@ -103,44 +120,55 @@ The pattern: only `central_cpu`'s call into `dispatch` actually does work. Other
 SEC(".struct_ops.link")
 struct sched_ext_ops central_ops = {
     .select_cpu = (void *)central_select_cpu,
-    .enqueue = (void *)central_enqueue,
-    .dispatch = (void *)central_dispatch,
-    .init = (void *)central_init,
-    .name = "central",
+    .enqueue    = (void *)central_enqueue,
+    .dispatch   = (void *)central_dispatch,
+    .init       = (void *)central_init,
+    .name       = "central",
 };
 ```
 
-`SEC(".struct_ops.link")` is a newer variant that creates a link FD (lifecycle bound, like tcx).
+`SEC(".struct_ops.link")` is the modern variant that creates a link FD (lifecycle bound to userspace process; closes when userspace exits).
 
-> ### There are no Dumb Questions
->
-> **Q: Why would anyone want a single-CPU bottleneck for scheduling?**
->
-> A: Centralization simplifies policy. If you want anti-thrashing, latency-priority queues, gang scheduling, or any decision that requires global state, central architecture means you don't need cross-CPU locking. Cost is a single CPU's worth of overhead — measurable but bounded.
->
-> **Q: How does `scx_central` avoid the watchdog?**
->
-> A: The central CPU keeps dispatching. As long as it's not stalled itself (e.g., looping), tasks get dispatched promptly. If the central CPU somehow stalls (e.g., infinite loop in your BPF), watchdog ejects.
->
-> **Q: Is `scx_central` actually production-deployable?**
->
-> A: It's an example, not a production scheduler. Real schedulers (Meta's `scx_layered`, others) are richer — multiple priority queues, energy awareness, NUMA topology. But the patterns in `scx_central` (per-CPU select, central dispatch, kick) generalize.
+## Why central architecture works
 
-## What about scx_flatcg?
+The central CPU is a bottleneck *for scheduling decisions*, but **not for actual task execution**. Tasks run on every CPU; only the *decision of where to run* is centralized. For workloads where:
 
-If you have appetite for more reading, open `tools/sched_ext/scx_flatcg.bpf.c`. ~600 lines. Same shape but cgroup-aware: each cgroup gets its own DSQ; vtime is per-cgroup; dispatch picks the cgroup with the lowest vtime first.
+- The total scheduling rate is bounded (a few hundred thousand decisions per second per central CPU).
+- The scheduling logic benefits from global state (the central CPU sees all decisions, can apply global policy).
+- Cache locality of the *running* task matters more than cache locality of the *scheduling*.
 
-This is closer to how a real "fair-share + isolation" scheduler looks.
+...this trades a single CPU's worth of overhead for simpler, more correct scheduling logic.
+
+For workloads where the scheduling rate exceeds what one CPU can sustain, you need per-CPU dispatchers (`scx_layered`, `scx_lavd`, real production schedulers).
+
+## scx_flatcg — read after this one
+
+If you have appetite for more reading, open `tools/sched_ext/scx_flatcg.bpf.c`. ~600 lines. Same shape as scx_central but cgroup-aware: each cgroup gets its own DSQ; vtime is per-cgroup; dispatch picks the cgroup with the lowest vtime first.
+
+This is closer to how a real "fair-share + isolation" scheduler looks — like CFS with cgroup awareness, but in BPF.
+
+## What to read in the kernel
+
+- **`tools/sched_ext/scx_central.bpf.c`** — the file we just walked through. Read end to end with the diagram above as a guide.
+
+- **`tools/sched_ext/scx_central.c`** — the userspace driver. ~200 lines. Note how it sets `central_cpu` before attach and runs a stats loop.
+
+- **`tools/sched_ext/scx_flatcg.bpf.c`** — the cgroup-aware scheduler. Read after central. Notice the per-cgroup vtime tracking.
+
+- **`kernel/sched/ext.c`** — search for `scx_bpf_kick_cpu`. The kfunc that triggers an IPI. Read how `kick_cpu` decides whether to actually IPI or whether the target CPU is already running and doesn't need a kick.
+
+- **`include/scx/common.bpf.h`** in `tools/sched_ext/include/scx/` — kfunc declarations. The "API" your BPF scheduler can call.
+
+- **`Documentation/scheduler/sched-ext.rst`** — particularly the section on patterns and best practices.
 
 ## Bullet Points
 
-- `scx_central` shows the **central-dispatch** pattern: one CPU makes all scheduling decisions.
-- `scx_bpf_kick_cpu(cpu, 0)` triggers an IPI to wake a CPU.
-- `SEC(".struct_ops.link")` (vs `.struct_ops`) creates link-managed scheduler instances.
+- `scx_central` shows the **central-dispatch** pattern: one CPU makes all scheduling decisions; others consume from per-CPU DSQs.
+- **`scx_bpf_kick_cpu(cpu, 0)`** triggers an IPI to wake a CPU that's currently idle.
+- **`SEC(".struct_ops.link")`** (vs `.struct_ops`) creates link-managed scheduler instances; closes with userspace process exit.
 - Read order: globals → init → select_cpu → enqueue → dispatch → vtable.
-- `scx_flatcg` is the next step up — cgroup-aware fair-share with per-cgroup DSQs.
-
----
+- **scx_flatcg** is the next step up: cgroup-aware fair-share with per-cgroup DSQs.
+- For very-high-rate scheduling, central architecture isn't enough — production schedulers go fully per-CPU.
 
 ## Check question
 
@@ -149,7 +177,17 @@ In `scx_central`, every task wake-up is routed to `central_cpu`. Why doesn't thi
 <details>
 <summary>Click to reveal answer</summary>
 
-**Answer:** Because `select_cpu` returning `central_cpu` doesn't actually run the task there — it just routes the *enqueue* and *dispatch* logic to that CPU. The task itself is dispatched (in the dispatch callback's loop) to whichever CPU has capacity. The central CPU is a **policy** bottleneck, not a **mechanism** bottleneck. The task ultimately runs on a peer CPU; only the decision is centralized.
+**Answer:** Because `select_cpu` returning `central_cpu` doesn't actually run the task there — it just routes the *enqueue* and *dispatch* logic to that CPU. The task itself is dispatched (in the dispatch callback's loop) to whichever CPU has capacity. The central CPU is a **policy** bottleneck, not a **mechanism** bottleneck.
+
+The flow:
+1. Task `T` wakes up. `select_cpu(T)` returns `central_cpu` → kernel's wake-up logic targets central_cpu.
+2. Central CPU's `enqueue(T)` runs: puts T on the FALLBACK_DSQ, kicks central_cpu (no-op since we're already on it).
+3. Central CPU's `dispatch()` callback runs (because the kernel just gave central CPU its slot back): consumes T from FALLBACK_DSQ, decides "T should run on CPU 5" via dispatch logic, places T on CPU 5's local DSQ via `scx_bpf_dispatch_to_cpu` (or similar).
+4. CPU 5 finishes its current task, calls `dispatch`, consumes T, runs T.
+
+So T actually runs on CPU 5. The central CPU's overhead is one trip through dispatch logic plus an IPI; T's wake-up latency is ~microseconds, dominated by IPI delivery.
+
+The bottleneck only matters at the **rate** of scheduling decisions: one CPU's worth of decision-making caps the system at maybe 1–2 million scheduling events per second. Past that, you need per-CPU dispatchers.
 
 </details>
 
@@ -157,4 +195,4 @@ In `scx_central`, every task wake-up is routed to `central_cpu`. Why doesn't thi
 
 ## Tomorrow
 
-Day 28–30: capstone. Pick one project, build it, ship it.
+Days 28–30: capstone. Pick one project, build it, ship it.
