@@ -1,0 +1,30 @@
+[book]
+title = "Practical eBPF in 30 Days"
+authors = ["biefy"]
+description = "A hands-on, experiment-driven path through modern eBPF on Linux 7.x. Head First style. Builds on kernel-internals knowledge."
+language = "en"
+src = "src"
+
+[output.html]
+default-theme = "rust"
+preferred-dark-theme = "ayu"
+git-repository-icon = "fa-github"
+edit-url-template = ""
+mathjax-support = false
+no-section-label = false
+fold = { enable = true, level = 1 }
+playground = { editable = false, copyable = true }
+
+[output.html.search]
+enable = true
+limit-results = 30
+teaser-word-count = 30
+use-boolean-and = true
+boost-title = 2
+boost-hierarchy = 1
+boost-paragraph = 1
+expand = true
+heading-split-level = 2
+
+[output.html.print]
+enable = true

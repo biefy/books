@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>biefy / books</title>
+<style>
+  :root {
+    --bg: #1f2226;
+    --fg: #e6e6e6;
+    --accent: #ffb454;
+    --muted: #98a3ad;
+    --card: #292c33;
+    --card-hover: #34383f;
+    --border: #3a3f47;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #fafafa;
+      --fg: #2a2a2a;
+      --accent: #d6730e;
+      --muted: #6a6a6a;
+      --card: #ffffff;
+      --card-hover: #f0f0f0;
+      --border: #e0e0e0;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.6;
+  }
+  main {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 4rem 1.5rem;
+  }
+  h1 {
+    font-size: 2.2rem;
+    margin: 0 0 0.5rem;
+    font-weight: 600;
+  }
+  .tagline {
+    color: var(--muted);
+    margin: 0 0 3rem;
+    font-size: 1.1rem;
+  }
+  .book {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.6rem 1.8rem;
+    margin-bottom: 1.2rem;
+    transition: background 0.15s, transform 0.15s, border-color 0.15s;
+  }
+  .book:hover {
+    background: var(--card-hover);
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+  .book h2 {
+    margin: 0 0 0.4rem;
+    color: var(--accent);
+    font-size: 1.35rem;
+  }
+  .book p {
+    margin: 0;
+    color: var(--muted);
+  }
+  .book .meta {
+    margin-top: 0.6rem;
+    font-size: 0.9rem;
+    color: var(--muted);
+  }
+  .order {
+    background: rgba(255, 180, 84, 0.1);
+    border-left: 3px solid var(--accent);
+    padding: 1rem 1.2rem;
+    margin: 2.5rem 0 0;
+    font-size: 0.95rem;
+    border-radius: 0 6px 6px 0;
+  }
+  footer {
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<main>
+  <h1>biefy / books</h1>
+  <p class="tagline">Hands-on, experiment-driven books on Linux kernel internals.</p>
+
+  <a class="book" href="linux-net/">
+    <h2>Linux Network Subsystem in 30 Days</h2>
+    <p>The kernel network stack from <code>sk_buff</code> to MPTCP. RX/TX paths, netfilter, conntrack, traffic control, kTLS, the modern features. Each day points at specific kernel files and functions.</p>
+    <div class="meta">30 days · 51 diagrams · ~20k words · verified against kernel 7.x</div>
+  </a>
+
+  <a class="book" href="ebpf/">
+    <h2>Practical eBPF in 30 Days</h2>
+    <p>Modern eBPF on Linux 7.x. libbpf + CO-RE workflow, the verifier, tracing with fentry/fexit, networking BPF, kfuncs, struct_ops, and sched_ext. No bcc, no legacy.</p>
+    <div class="meta">30 days · 62 diagrams · ~40k words · capstone project on day 30</div>
+  </a>
+
+  <div class="order">
+    <strong>Read order:</strong> the network book first, then eBPF. The BPF book assumes you know the kernel network stack — that's what BPF programs hook into.
+  </div>
+
+  <footer>
+    Source on <a href="https://github.com/biefy/books">GitHub</a>. Built with <a href="https://rust-lang.github.io/mdBook/">mdbook</a>. Content licensed CC BY-SA 4.0.
+  </footer>
+</main>
+</body>
+</html>
