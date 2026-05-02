@@ -94,11 +94,12 @@ You should see `table_id=99` (your custom table) when the source matches the rul
 
 You add `ip rule add from 192.168.1.0/24 lookup 100 priority 50` and `ip rule add fwmark 0x42 lookup 200 priority 100`. A packet has src 192.168.1.5 AND fwmark 0x42. Which table is consulted?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** Table 100. Rules are walked in priority order; the lower number is checked first. The packet matches the priority-50 rule (`from 192.168.1.0/24`), the lookup happens against table 100, and rule walking stops.
+
+</details>
 
 ## Tomorrow
 

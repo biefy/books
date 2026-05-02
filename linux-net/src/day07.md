@@ -159,11 +159,12 @@ ip neigh show 10.99.99.99
 
 You set `net.ipv4.neigh.default.gc_thresh3=128` on a server with 500 active client peers. What symptoms appear?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** "Neighbour table overflow" messages in `dmesg`. New connections to peers whose ARP entries got evicted will hang briefly while ARP re-resolves; if entries are evicted faster than they're re-resolved, traffic stalls. The fix is to raise `gc_thresh3` (and `gc_thresh1/2` proportionally — typically 4096/8192/16384 for a busy server). The kernel doesn't drop packets directly because of this; it just refuses to create new entries, which manifests as resolution failures.
+
+</details>
 
 ---
 

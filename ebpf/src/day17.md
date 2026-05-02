@@ -218,11 +218,12 @@ Atomically swap one program for another. No window where the hook is empty.
 
 You attach three programs to tcx-ingress on `eth0`. The first returns `TC_ACT_OK`, the second `TC_ACT_SHOT`, the third *would* return `TC_ACT_OK`. Is the third program invoked?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** No. `TC_ACT_SHOT` ends the chain. The third program is never called for this packet. This is the design: each program is a **filter** in the pipeline, and any one of them can short-circuit. Counters and observability programs use `TC_ACT_OK`; firewalls and policy programs use `TC_ACT_SHOT` to stop the chain. Order them so observability runs before drop.
+
+</details>
 
 ---
 

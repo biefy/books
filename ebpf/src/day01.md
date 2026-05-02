@@ -345,11 +345,12 @@ It prints the same `hello.skel.h` your Makefile generated. Read it once. You'll 
 
 If two CPUs concurrently call `bpf_ringbuf_reserve(&rb, 64, 0)`, can the records overlap?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** No. Reserve atomically advances the producer position with `cmpxchg`; each caller gets a disjoint slice. Submit/discard order may differ from reserve order, which the consumer handles via the `BUSY` bit on each record header. The consumer does not see a record until `BUSY` is cleared by `submit`/`discard`.
+
+</details>
 
 ---
 

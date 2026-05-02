@@ -174,11 +174,12 @@ The driver counts wire packets, not skb count. So a `wire_pkts >> tx_packets_ker
 
 You run `iperf3` and observe 30 Gbps throughput on a 25 Gbps NIC. Wait, that's higher than line rate. What's happening?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** TSO is making the kernel see more "throughput" than wire actually carries. iperf3 measures bytes through the userspace socket. With TSO, those bytes leave the kernel in 64 KB skbs and the NIC chops them. iperf3's bytes-per-second is correct for the *application*, but it's measuring socket throughput, not wire throughput. Wire is bounded at 25 Gbps. The 30 Gbps reading means about 5 Gbps of "stack-level throughput" exists only briefly as the kernel hands a 64 KB chunk over and TSO segments it out. (Unlikely scenario in practice — typically iperf3 throughput tracks wire — but illustrative.)
+
+</details>
 
 ---
 

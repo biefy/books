@@ -78,11 +78,12 @@ You'll see the load split across the two PIDs.
 
 If a worker process exits, what happens to its in-flight SYNs that were already hashed to it?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** They're routed to the surviving workers via the kernel's reuseport group lookup at `__inet_lookup_listener` time. The hash function changes implicitly when a socket is removed from the group, so flows previously hitting the dead worker re-hash to a survivor. Connections that had completed `accept()` on the dead worker but weren't fully closed get an RST when the socket is closed (the dying process's FD table tear-down).
+
+</details>
 
 ## Tomorrow
 

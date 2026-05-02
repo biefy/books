@@ -76,11 +76,12 @@ sudo nft add element inet filter port_to_action { 22 : accept, 80 : accept, 443 
 
 You write `nft add rule inet filter input tcp dport 22 accept` and `iptables -A INPUT -p tcp --dport 22 -j ACCEPT` on the same system. Do they conflict?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** Depends. If `iptables` is the iptables-nft compat tool, both end up as nftables rules in different tables (the compat tool uses a `mangle/filter/nat` table set; nft commands use whatever table you named). They coexist. If you have legacy iptables (xtables backend) running alongside nftables, both run independently against the same hook — order is determined by registration priority. To avoid surprises, pick one and stick with it.
+
+</details>
 
 ## Tomorrow
 

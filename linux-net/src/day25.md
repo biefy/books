@@ -50,11 +50,12 @@ The `TCP_ULP` ("Upper Layer Protocol") sockopt activates the TLS module on the s
 
 Why doesn't Linux just do the TLS handshake in the kernel too?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** TLS handshakes involve certificate validation, complex state machines, and (for newer protocols) constantly-evolving key exchange protocols. Putting that in-kernel would balloon the attack surface and require kernel updates with every TLS protocol change. The handshake stays in userspace OpenSSL/etc., where it's well-tested and easy to update; only the steady-state record encryption — which is just AES-GCM streaming — moves into the kernel where the throughput wins.
+
+</details>
 
 ## Tomorrow
 

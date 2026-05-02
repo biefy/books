@@ -181,11 +181,12 @@ Add `.pkts_acked = (void *)my_pkts_acked,` to the vtable. Now you have two BPF p
 
 You add `bpf_ringbuf_reserve` to a struct_ops callback that fires per ACK at line rate. What's the worst-case impact on TCP performance?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** Each callback adds ~50–100ns. At 1Mpps (high-rate flow), that's 5–10% extra CPU. If the ringbuf fills (consumer slow), `bpf_ringbuf_reserve` returns NULL and you skip the emit; TCP itself is unaffected. The bigger risk is if your BPF logic *blocks* somehow (it can't — non-sleepable struct_ops can't sleep) or modifies TCP state (it can — be careful). Pure observation is safe; mutation needs caution.
+
+</details>
 
 ---
 

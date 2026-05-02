@@ -295,11 +295,12 @@ But: if `next` could be NULL or invalid, `BPF_CORE_READ` returns 0 instead of cr
 
 You attach a tp_btf to `sched_switch`. Inside your program, you save `prev` (a `task_struct *`) into a hash map for use later. Will dereferencing it later still work?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** No. The pointer was *trusted* during the tracepoint callback because the kernel handed it to you with a guarantee that the task is alive for the duration of the callback. Once the callback returns, that guarantee is gone — the task may be freed. Storing the raw pointer for later use is a use-after-free risk and the Verifier rejects it. To save a reference safely, you'd use `bpf_task_acquire` (a kfunc — Day 20) which atomically takes a refcount, then `bpf_task_release` later. Or, simpler: store *fields* (pid, comm) rather than the pointer.
+
+</details>
 
 ---
 

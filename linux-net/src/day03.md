@@ -181,11 +181,12 @@ sudo tc qdisc replace dev eth0 root fq_codel
 
 You call `send(fd, buf, 1MB, 0)` on a TCP socket whose RTT is 100ms and BDP is much smaller than 1MB. The send returns immediately with the full 1MB written. Where are those bytes physically right now?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** In the kernel's `sk_write_queue` — copied from userspace into a chain of skbs hanging off the socket. The send returned because `sk_sndbuf` was big enough to accept the queueing; it doesn't mean the bytes left the box. They'll trickle out as the receiver ACKs and the congestion window opens. If you read `/proc/<pid>/status` you'd see them counted against the kernel's TCP memory accounting, not against your process's RSS. To know how much is actually on the wire vs queued, run `ss -tim` and look at `unacked` (sent but not ACKed) vs `wmem_queued` (queued).
+
+</details>
 
 ---
 

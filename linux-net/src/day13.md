@@ -71,11 +71,12 @@ sudo killall bpftrace
 
 Why do `struct tcp_sock` and `struct udp_sock` both embed `struct inet_sock` as their first field, rather than just `struct sock`?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** `inet_sock` adds IPv4/IPv6-common fields (rcv_saddr, daddr, sport, dport, ttl, etc.) that any IP-based protocol needs. By inheriting from `inet_sock`, TCP and UDP both share these fields without duplication. UNIX sockets (`struct unix_sock`) skip `inet_sock` and embed `sock` directly because they don't have IP semantics.
+
+</details>
 
 ## Tomorrow
 

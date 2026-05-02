@@ -48,11 +48,12 @@ Cilium does this extensively: XDP for L3 load balancing on a few hot tuples; tc-
 
 You attach XDP that returns DROP for some packets and PASS for others. Does iptables/nftables see the dropped ones?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** No. XDP runs *before* skb allocation. Dropped packets never reach netfilter, never reach the stack at all. iptables sees only the ones XDP passed. This is why XDP is preferred for high-rate DDoS drop — it's the cheapest place to drop, and netfilter overhead is avoided.
+
+</details>
 
 ## Tomorrow
 

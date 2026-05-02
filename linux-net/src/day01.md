@@ -190,11 +190,12 @@ sudo perf trace --no-syscalls -e skb:kfree_skb 2>&1 | awk '{print $NF}' | sort |
 
 You receive a packet at the NIC. The driver allocates an skb via `napi_alloc_skb(napi, 1500)`. The packet is 100 bytes of Ethernet + IP + TCP. Walk through what the four pointers (`head`, `data`, `tail`, `end`) look like just after the driver finishes setup but before `ip_rcv` runs.
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** `head` points at the start of the linear allocation. `data` points at the start of the Ethernet header (driver placed bytes there after reserving `NET_SKB_PAD = 64` bytes of headroom). `tail` points at byte 100 past `data` (the packet bytes). `end` is at the linear buffer's end (1500 + alignment). So: `headroom = 64`, `len = 100`, `data_len = 0`, `tailroom = ~1400`. By the time `ip_rcv` runs, `eth_type_trans` has advanced `data` past the Ethernet header (adjusting `mac_header` etc.), so `data` now points at the IP header.
+
+</details>
 
 ---
 

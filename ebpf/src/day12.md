@@ -228,11 +228,12 @@ When do you actually need sleepable? When dropping the event isn't acceptable (s
 
 You write a sleepable fentry program that calls `bpf_copy_from_user` to read a 4 KB buffer. The user pointer is valid but the page isn't currently in memory. What happens to the BPF program's execution timeline?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** The helper detects the missing page, the kernel takes a fault, the current thread is descheduled while the page is paged in. The BPF program is *suspended* at the helper call (still inside `srcu_read_lock`). When the page becomes available, the thread resumes, the copy completes, the helper returns. From the BPF program's perspective, the helper call took ~ms (instead of ~ns) but otherwise behaved normally. From the kernel's perspective, the sleepable program correctly held its SRCU read-side lock across the schedule and the grace-period machinery handled it.
+
+</details>
 
 ---
 

@@ -86,11 +86,12 @@ sudo apt install liburing-dev
 
 Why is `EPOLLEXCLUSIVE` important for accepting connections in a multi-worker server?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** Without it, when a SYN arrives at a listening socket, all N workers waiting on that socket via epoll get woken; N-1 immediately call `accept` and return EAGAIN; only one succeeds. That's "thundering herd" — wasted wakeups, scheduling churn. `EPOLLEXCLUSIVE` (added 4.5) tells the kernel to wake only one waiter per event. Linux's `SO_REUSEPORT` (Day 24) is a more powerful alternative — multiple sockets sharing the listening port, kernel hashes incoming SYNs across them deterministically.
+
+</details>
 
 ## End of Phase 3
 

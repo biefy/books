@@ -316,11 +316,12 @@ Raw tracepoints give you what the kernel chose to copy. For more, switch to `tp_
 
 Why can your `fentry` program directly deref `f->f_pos`, but your `kprobe` program cannot?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** In `fentry`, the trampoline saves arguments and `BPF_PROG` casts them to your declared types. The Verifier matches your declared types against the function's BTF signature, marking each parameter as `PTR_TO_BTF_ID` — a trusted, typed kernel pointer the Verifier knows it can deref safely. In `kprobe`, the ctx is `struct pt_regs *` — a saved register snapshot. The Verifier doesn't bind those register values to the function's BTF signature (kprobe is generic; it doesn't know which function it's tracing at load time the way fentry does). So the cast `(struct file *)PT_REGS_PARM1(ctx)` produces a *scalar* (`SCALAR_VALUE`) from the Verifier's perspective, not a typed pointer. Scalars can't be derefed; you have to round-trip through `bpf_probe_read_kernel`, which fault-handles.
+
+</details>
 
 ---
 

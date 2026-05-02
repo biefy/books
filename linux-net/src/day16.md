@@ -76,11 +76,12 @@ You'll see different cwnd distributions per algorithm.
 
 Why doesn't the kernel just always use BBR (since it's newer)?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** BBR is delay-based — it estimates path bandwidth and RTT and paces accordingly. On networks where the bottleneck is at a buffer that's also serving other CUBIC flows, BBR is unfriendly: it underestimates the real BDP, takes more share than fairness would give, and can starve CUBIC neighbors. Use BBR when *all* flows on the path are BBR-aware (modern public clouds), or for explicit pacing-friendly use cases. CUBIC remains the default because it's been validated across the public internet for two decades.
+
+</details>
 
 ## Tomorrow
 

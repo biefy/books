@@ -204,11 +204,12 @@ Glob expands to zero matches. libbpf fails attach with `-ENOENT`. Friendly: sile
 
 You attach `kprobe.multi/tcp_*` and observe `bpf_get_func_ip` returning some IPs that don't match what `cat /proc/kallsyms | grep tcp_` shows. What might cause this?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** `bpf_get_func_ip` returns the IP **after** the kprobe trampoline's adjustment — typically the address of the patched instruction (function entry). `/proc/kallsyms` shows the symbol's actual entry. They should match, but: (a) KASLR can shift symbols across boots; resolve at the same boot. (b) Some functions have `_start` aliases — multiple symbols at the same IP. (c) On older kernels `bpf_get_func_ip` returned the trampoline call site, off by a few bytes from the symbol. Use `bpf_get_func_ip` consistently for all comparisons rather than mixing it with kallsyms-derived addresses.
+
+</details>
 
 ---
 

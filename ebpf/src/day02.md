@@ -263,11 +263,12 @@ Without `bpf_map_delete_elem` somewhere, every TID that ever called `vfs_read` g
 
 Two CPUs simultaneously execute the program for the same PID, both observe `cnt == NULL`, and both try `bpf_map_update_elem(..., BPF_NOEXIST)`. What happens?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** The first to acquire the bucket lock (in `htab_map_update_elem`) succeeds and inserts. The second observes the entry now exists and returns `-EEXIST`. The losing CPU's increment is lost — value is 1 instead of 2. To avoid this entirely, use `BPF_MAP_TYPE_PERCPU_HASH` (no cross-CPU contention) or detect `-EEXIST` and retry with `__sync_fetch_and_add` on the now-existing entry.
+
+</details>
 
 ---
 

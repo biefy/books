@@ -62,11 +62,12 @@ sudo bpftrace -e 'fentry:tcp_set_state {
 
 Why does TIME_WAIT exist? What problem does it solve?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** Two: **(1)** Ensure the closing side's final ACK is received. If lost, peer retransmits FIN; you need to be in TIME_WAIT to ACK that retransmit (otherwise you'd send RST). **(2)** Prevent old packets from a previous incarnation of the (4-tuple) being delivered to a new connection. 2*MSL = ~1 minute is roughly the maximum lifetime of an in-flight IP packet; after that, old packets have certainly been discarded by routers.
+
+</details>
 
 ## Tomorrow
 

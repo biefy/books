@@ -195,11 +195,12 @@ This is the canonical example of "how a kfunc family is built." If you ever want
 
 You write `extern int my_fn(int x) __ksym;` and reference `my_fn`. The kernel doesn't have a kfunc by that name. What happens?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** libbpf load fails: `cannot find kernel BTF type ID of 'my_fn'`. The reference is checked at load time against vmlinux BTF. There's no "stub" or graceful fallback — typos and version drift produce immediate, descriptive errors.
+
+</details>
 
 ---
 

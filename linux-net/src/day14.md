@@ -60,11 +60,12 @@ fentry:udp_rcv     { printf("recv on %p\n", args->skb); }
 
 Why does UDP have a per-socket receive queue (`sk_receive_queue`) but no send queue?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** Because UDP doesn't buffer outbound — each `sendmsg` builds an skb and immediately enters the IP output path; nothing is held back at the socket. TCP holds skbs in `sk_write_queue` because it must retransmit them later. UDP can't retransmit (no ACKs), so there's no reason to keep the skb around once IP has it.
+
+</details>
 
 ## Tomorrow
 

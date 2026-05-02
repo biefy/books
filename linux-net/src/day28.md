@@ -59,11 +59,12 @@ The kernel pins the user pages (no copy), DMAs through the NIC, then notifies us
 
 If you submit `IORING_OP_RECV` and immediately call `io_uring_wait_cqe`, what does that look like compared to `recv()`?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** Functionally similar — both block until data arrives. But io_uring's path through the kernel is different: instead of the recv() syscall handler waiting on the socket, the io_uring infrastructure registers a wait on the socket, you exit to userspace, when the wait fires the kernel posts a completion to your CQE ring, then the wait_cqe call returns it. For a single recv this is overkill; the win is when you have hundreds in flight at once — io_uring batches submission and completion at one syscall apiece.
+
+</details>
 
 ## Tomorrow
 

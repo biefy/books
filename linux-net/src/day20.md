@@ -65,11 +65,12 @@ ping -c 2 8.8.8.8
 
 When you write `iptables -A INPUT ...`, which kernel hook does the rule attach to?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** `NF_INET_LOCAL_IN`. The `INPUT` chain in iptables/nftables corresponds to packets routed to local sockets after the routing decision. `OUTPUT` corresponds to `LOCAL_OUT`, `FORWARD` to `FORWARD`, `PREROUTING` to `PRE_ROUTING`, `POSTROUTING` to `POST_ROUTING`. The chain names are nearly 1:1 with the hook names.
+
+</details>
 
 ## Tomorrow
 

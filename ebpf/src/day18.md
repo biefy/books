@@ -220,11 +220,12 @@ Real NICs have multiple RX queues. Spawn one userspace thread per queue, one AF_
 
 If you don't refill the FILL ring, what's the symptom?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** The kernel runs out of UMEM buffers to DMA new packets into. New packets are silently dropped at the driver level (an NIC stat increments). Your RX ring stays empty even though traffic is hitting the wire. The "feed me more" half of the loop is FILL ring refilling — every consumed packet's address must be returned for reuse, or you starve the driver.
+
+</details>
 
 ---
 

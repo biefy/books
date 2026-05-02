@@ -192,11 +192,12 @@ Mostly zeros nowadays — the cache is gone, but the proc file remains for compa
 
 You add `ip route add 10.0.0.0/24 via 192.168.1.1 dev eth0`. A packet with daddr `10.0.0.5` enters. Walk the lookup.
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** `ip_rcv_finish` → `ip_route_input_noref` → `fib_lookup` walks rules; first match is the kernel's default `from all lookup main`. `fib_table_lookup(main, &flowi4)` walks the LC-trie, hits the `10.0.0.0/24` entry. `fib_result` has `prefix=10.0.0.0`, `prefixlen=24`, `nhc->nh_gw4=192.168.1.1`, `nhc->nh_dev=eth0`. The route is the gateway form, so the kernel knows to ARP for 192.168.1.1 (Day 7's neighbour subsystem) when transmitting. An rtable is built and attached to the skb; `dst->input = ip_forward` (assuming we're not 10.0.0.5 ourselves), and forwarding proceeds.
+
+</details>
 
 ---
 

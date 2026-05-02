@@ -9,7 +9,6 @@ src = "src"
 default-theme = "rust"
 preferred-dark-theme = "ayu"
 git-repository-url = "https://github.com/biefy/books"
-git-repository-icon = "fa-github"
 edit-url-template = "https://github.com/biefy/books/edit/main/linux-net/{path}"
 site-url = "/books/linux-net/"
 mathjax-support = false

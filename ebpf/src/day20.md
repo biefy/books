@@ -172,11 +172,12 @@ Rejected: `release on non-acquired reference` (the first release closed the id; 
 
 Why does the verifier check release lifetimes statically rather than at runtime?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** Static checking is fast and total. A runtime ref-leak detector would either (a) impose per-call overhead or (b) only catch leaks after the fact (not preventing them). Static analysis catches every leak at load time, before the program ever runs. The verifier already tracks every register's type, so adding reference-id tracking is a small extension. Trade-off: programs with conditional release require explicit care from the writer.
+
+</details>
 
 ---
 

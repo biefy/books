@@ -174,11 +174,12 @@ Watch `softnet_stat` shift.
 
 Why does the kernel run softirqs (and thus most of the RX path) outside of hardware IRQ context?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** Hardware IRQ context has strict constraints: it preempts the running task, runs with limited stack, blocks other IRQs at the same priority, and cannot sleep. Doing the full RX path (route lookup, BPF programs, conntrack, packet delivery) in IRQ context would (1) starve other CPU work — receive livelock under high traffic; (2) impose a tight time budget that complex paths can't meet; (3) force every helper called from the RX path to be IRQ-safe. Softirqs run at a slightly higher priority than user threads but lower than IRQs, with their own per-CPU stack, and can be preempted by IRQs. NAPI splits the RX work: IRQ just signals "more work"; softirq does the actual processing under a budget.
+
+</details>
 
 ---
 

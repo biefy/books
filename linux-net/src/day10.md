@@ -89,11 +89,12 @@ sudo bpftrace -e 'fentry:ipv6_skip_exthdr { printf("skip nexthdr=%d\n", args->ne
 
 A node receives an IPv6 packet whose extension header chain ends in `nexthdr=0` (hop-by-hop options). What action is the kernel obligated to take?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** Process the hop-by-hop options. Hop-by-hop is special — every router on the path must inspect it (unlike destination options, which only end-hosts process). Hop-by-hop after the base header is *required*; the kernel processes it via `ipv6_parse_hopopts`. If the option is unknown and has high-bit set in its type, the packet is silently dropped or ICMPv6 error is returned per the unknown-option-action bits.
+
+</details>
 
 ## Tomorrow
 

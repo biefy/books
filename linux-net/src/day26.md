@@ -63,11 +63,12 @@ Configurable via sysctl `net.mptcp.scheduler`.
 
 If one subflow's RTT spikes (e.g., cellular degrades), what does MPTCP do?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** The default scheduler steers new segments to the better subflow. Already-in-flight segments remain on the slow subflow until ACKed or retransmitted. The MPTCP-level retransmit can recover via the other subflow if needed. Result: applications see a connection that gracefully shifts traffic to the fast path without breaking. Tunable: how aggressively to shift (some schedulers are sticky, others reactive).
+
+</details>
 
 ## End of Phase 4
 

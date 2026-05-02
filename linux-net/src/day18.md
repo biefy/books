@@ -82,11 +82,12 @@ cc /tmp/tcpinfo.c -o /tmp/tcpinfo && /tmp/tcpinfo
 
 Why might `TCP_NODELAY` and `TCP_CORK` look like opposites but be set on the same socket at different times?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** They serve different needs at different points. A request/response server might `CORK` while building a multi-piece response (header + body), then *uncork* — kernel sends one large segment. After response, `NODELAY` for any tail data so it doesn't wait. Real apps use both: cork for batching prepared output, nodelay for ad-hoc small writes between batches.
+
+</details>
 
 ## Tomorrow
 

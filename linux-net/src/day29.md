@@ -79,11 +79,12 @@ This dramatically lowers the cost of adding new netlink ops — each new feature
 
 Why is `kfree_skb_reason` strictly better than `kfree_skb` in new code?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** It feeds the drop monitor with a *category* enum, making "where do my drops come from?" answerable. Plain `kfree_skb` just disposes of the skb; `kfree_skb_reason(skb, SKB_DROP_REASON_X)` does the same plus emits a tracepoint `skb:kfree_skb` that includes the reason. Tools like dropwatch/perf can then aggregate by reason, helping diagnose why things are getting dropped (PROTO_MEM full, SOCKET_FILTER, IP_INHDR_INVALID, etc.).
+
+</details>
 
 ## Tomorrow
 

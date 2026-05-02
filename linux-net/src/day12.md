@@ -98,11 +98,12 @@ The `allowed-ips` field is both source and destination filter — packets to tho
 
 A VXLAN tunnel is configured. Why do users sometimes see MTU issues with TCP through the tunnel?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** Each VXLAN frame adds ~50 bytes of overhead (outer Ethernet 14 + IP 20 + UDP 8 + VXLAN 8). If the underlying link MTU is 1500 and the tunnel doesn't account for the overhead, an inner 1500-byte packet won't fit (1550 wire). Solutions: (1) lower the tunnel netdev's MTU to 1450; (2) ensure path-MTU discovery works (ICMP "frag needed" propagates); (3) use TCP MSS clamping (`-mss 1410` in iptables/nftables) so endpoints negotiate smaller segments. Linux's tunnel netdevs default to a sensible reduced MTU, but if endpoints set DF=1 and underlay drops without ICMP, you get black-holed connections.
+
+</details>
 
 ## End of Phase 2
 

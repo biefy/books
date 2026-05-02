@@ -8,8 +8,9 @@ src = "src"
 [output.html]
 default-theme = "rust"
 preferred-dark-theme = "ayu"
-git-repository-icon = "fa-github"
-edit-url-template = ""
+git-repository-url = "https://github.com/biefy/books"
+edit-url-template = "https://github.com/biefy/books/edit/main/ebpf/{path}"
+site-url = "/books/ebpf/"
 mathjax-support = false
 no-section-label = false
 fold = { enable = true, level = 1 }

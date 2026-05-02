@@ -271,11 +271,12 @@ For Day 3, both forms work. Internalize: **direct deref for kernel-handed-to-you
 
 You compile your program against kernel A. Field `task_struct.real_parent` is at offset 1872. You ship the `.o` to a machine running kernel B where the same field is at offset 1920. Your program does `BPF_CORE_READ(task, real_parent, tgid)`. Walk through what happens at load time.
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** libbpf opens `/sys/kernel/btf/vmlinux` on kernel B, parses it, finds the type `task_struct` and its field `real_parent`, computes byte offset 1920. It walks every CO-RE relocation in your `.o`. For the `real_parent` access, it overwrites the placeholder offset (the `0xC0RE...` immediate the compiler emitted) with `1920`. Same for `tgid`. Then `BPF_PROG_LOAD` is called with the patched instructions. The Verifier accepts. The program runs, reading the correct fields on kernel B.
+
+</details>
 
 ---
 

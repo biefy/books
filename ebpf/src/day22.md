@@ -179,11 +179,12 @@ Try `SEC("struct_ops/dctcp_cong_avoid")` with custom logic. As long as the signa
 
 If you load a BPF struct_ops module that defines only some callbacks (e.g., `init` and `ssthresh` but not `cong_avoid`), what happens to connections using your CC?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** Unset slots fall back to default implementations defined in the kernel. For TCP CC, `cong_avoid` defaults to `tcp_reno_cong_avoid`. So your CC behaves like Reno-with-custom-ssthresh. This is *partial implementation* — useful when you only want to override one or two policies and inherit the rest.
+
+</details>
 
 ---
 

@@ -219,11 +219,12 @@ The kernel sees the kptr in the deleted entry and calls `bpf_task_release` for y
 
 You xchg a new task into a map slot but don't check the return. The slot was previously empty. What happens?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** Verifier load fails. Even though the slot was empty (xchg returns NULL), the verifier doesn't know that statically — it has to assume xchg returns *some* refcounted pointer. You must capture the return and call release if non-NULL. The check is a runtime no-op when slot was empty (NULL release path), but the static check forces correctness for the case when the slot wasn't empty.
+
+</details>
 
 ---
 

@@ -101,11 +101,12 @@ You'll see two MAC entries learned, one per port.
 
 A bridge has 4 ports. A frame with dst MAC `aa:bb:cc:dd:ee:ff` arrives on port 1. The FDB has no entry. What ports does the frame go out on?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** Ports 2, 3, and 4 — the bridge floods to all ports except the input port (split-horizon). Once a reply comes back from one of those ports with src `aa:bb:cc:dd:ee:ff`, the FDB learns and subsequent unicast frames go directly to that port.
+
+</details>
 
 ## Tomorrow
 

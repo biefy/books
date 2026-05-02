@@ -70,11 +70,12 @@ sudo bpftrace -e 'fentry:tcp_enter_recovery { @ = count(); } interval:s:10 { pri
 
 Why does losing 1% of packets cause much more than 1% throughput loss on a long-RTT path?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** Each loss causes Reno/CUBIC to halve cwnd. On a 100ms RTT path, recovery (growing cwnd back) takes seconds. A 1% loss rate translates to one halving every ~100 packets, meaning cwnd never converges to its ideal value. The Mathis formula approximates: throughput ≈ MSS / (RTT * sqrt(loss)). 1% loss on 100ms RTT caps you at about 100 Mbps regardless of path bandwidth. BBR partially fixes this because it doesn't depend on loss as a signal.
+
+</details>
 
 ## Tomorrow
 

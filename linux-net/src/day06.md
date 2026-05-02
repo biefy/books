@@ -156,11 +156,12 @@ Now `eth_type_trans` sees this MAC as "us." Frames addressed here are PACKET_HOS
 
 A frame arrives at eth0 with VLAN tag 100, but no `eth0.100` device exists. What happens?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** The kernel hits `vlan_skb_recv` (or its equivalent in HW-accelerated path), sees no registered VLAN device for (eth0, 100), and drops the frame — incrementing the `vlans_dropped` stat. The frame doesn't bubble up to L3. To accept untagged "unknown VLAN" traffic, you'd configure the bridge with VLAN-aware filtering, or use `ip link set eth0 type bridge_slave vlan_tunnel on`.
+
+</details>
 
 ---
 

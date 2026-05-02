@@ -289,11 +289,12 @@ External: **Brendan Gregg's USE method** posts and `bpftrace` examples for uprob
 
 Why is `bpf_probe_read_user_str` necessary instead of just dereferencing the userspace string pointer directly?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** Two reasons. **(1) Memory safety:** the user pointer might be invalid (NULL, freed, mid-tearing of the calling process); direct deref would oops the BPF program. `bpf_probe_read_user_str` uses `copy_from_user` semantics that fault-handle gracefully, returning `-EFAULT` if the memory isn't accessible. **(2) Address-space awareness:** uprobes fire in process context with the user's mm active, but the BPF runtime treats userspace memory as "untrusted" and requires the explicit helper that knows it's reading from the user page tables. The Verifier rejects raw deref of pointers from `pt_regs` for the same reason.
+
+</details>
 
 ---
 

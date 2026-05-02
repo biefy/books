@@ -220,11 +220,12 @@ The two views are independent.
 
 Two TCP servers run, one in init_net and one in netns "red", both bound to `0.0.0.0:80`. Both have full read/write to their socket. A client in init_net connects to `127.0.0.1:80`. Which server gets the connection?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** The init_net server. Socket bind tables are per-ns: `0.0.0.0:80` in init_net is one entry; `0.0.0.0:80` in red is a separate entry. The kernel routes the SYN by namespace: the client is in init_net, the SYN goes through init_net's stack, lookup in init_net's bind table finds the init_net listener. Red's listener never sees the packet. To reach red's listener, you'd need a process in red to connect (e.g., `ip netns exec red curl 127.0.0.1`), or a route + nftables setup that forwards traffic into red.
+
+</details>
 
 ---
 

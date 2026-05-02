@@ -276,11 +276,12 @@ Each layer needs its own bounds check. Forget any one and the Verifier rejects w
 
 You attach an XDP program that always returns `XDP_PASS`. Why might it still affect performance compared to no program at all?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** Two reasons. **(1)** Native XDP requires the driver to call into the BPF program for every packet — that's a function call (~10-30 ns) plus your logic. Even an empty program has measurable cost at line rate. **(2)** Some drivers disable certain optimizations (large receive offload, GRO) when XDP is attached, because XDP needs to see one packet at a time, not coalesced bursts. So even a passthrough XDP can reduce throughput by ~10% on workloads dependent on those features. For tracing/observability, this is fine; just be aware before deploying on a production load-balancer NIC.
+
+</details>
 
 ---
 

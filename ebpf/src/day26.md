@@ -143,11 +143,12 @@ This is more deterministic than vtime tricks. Closer to how production scheduler
 
 If your priority cgroup gets too much CPU (starves other tasks for >30s), what happens?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** Watchdog ejects your scheduler. Other tasks have been runnable but undispatched (because you kept favoring priority tasks). System reverts to CFS, fairness restored. The watchdog enforces a minimum service guarantee: no matter how clever your policy, every runnable task must dispatch within 30 seconds.
+
+</details>
 
 ---
 

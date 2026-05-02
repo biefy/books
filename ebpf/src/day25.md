@@ -169,11 +169,12 @@ You're now observing every scheduler decision in real-time. Throughput considera
 
 What guarantees that loading a BPF scheduler doesn't permanently freeze your machine?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** The 30-second dispatch watchdog. The kernel monitors task wait times; if any task has been runnable but not dispatched for 30 seconds, the framework concludes the BPF scheduler is broken and ejects it, re-enabling CFS. Recovery is automatic. The watchdog is hardcoded into `kernel/sched/ext.c`'s safety logic and is not bypassable from BPF. This is the design that makes BPF scheduling practical — without it, no one would risk loading user code into the scheduler hot path.
+
+</details>
 
 ---
 

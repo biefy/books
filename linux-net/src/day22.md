@@ -68,11 +68,12 @@ sudo conntrack -L | grep 8.8.8.8
 
 A SYN packet arrives, conntrack creates a NEW entry. Netfilter chains run; the rule says DROP. Does the conntrack entry persist?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** No. Conntrack entries are *created* in PRE_ROUTING but *confirmed* (inserted into the global hash) only when the packet completes the verdict pipeline with ACCEPT. If DROP, the unconfirmed entry is freed. This way a port-scanning probe doesn't fill up your conntrack table with NEW entries that never see a reply.
+
+</details>
 
 ## Tomorrow
 

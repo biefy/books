@@ -265,11 +265,12 @@ The full log goes to `kern_log` if your loader doesn't capture it; `dmesg | tail
 
 The Verifier's `mark_ptr_or_null_regs` runs after each conditional jump that compares an OR_NULL register against zero. Why does it have to run on *both* branches, not just the "non-NULL" one?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** Because the "NULL branch" needs the register marked as scalar zero — otherwise the Verifier wouldn't know that subsequent code on that branch dealing with the register knows it's NULL. Concretely, on the NULL branch, the Verifier wants to allow you to e.g. do `return 0` (which doesn't touch the pointer), or even further conditional logic that depends on having proved NULLness. Both transitions matter; the function name says "regs" plural because both branches' register states get marked.
+
+</details>
 
 ---
 

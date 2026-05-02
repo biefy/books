@@ -248,11 +248,12 @@ External reference (skim once): https://www.brendangregg.com/flamegraphs.html
 
 Two CPUs simultaneously call `bpf_get_stackid` with identical stacks. Do they get the same stackid? Same map slot? Race?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** They get the same stackid (the hash of the frames is the same). They both target the same map slot. The kernel uses bucket-level locking inside the stack map — one CPU's insert wins; the other sees the existing entry and returns the same stackid without re-inserting. No race observable from BPF. The dedup is the whole point of this map type.
+
+</details>
 
 ---
 

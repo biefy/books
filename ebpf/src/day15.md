@@ -256,11 +256,12 @@ Update map definition's value type, parse CIDR with `inet_pton(AF_INET6, ...)`, 
 
 You add `10.0.0.0/8` and `10.1.0.0/16` to the denylist. A packet from `10.1.5.20` arrives. Which entry matches, and what's the lookup cost?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** Both prefixes match, but LPM returns the **longest** — `10.1.0.0/16`. Cost is O(prefix length matched) — about 16 bit comparisons, plus tree-walking overhead. The trie nodes are visited in the order: root → /8 → /16, returning the value at /16. ~30 ns total on modern hardware.
+
+</details>
 
 ---
 

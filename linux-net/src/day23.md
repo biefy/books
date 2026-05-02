@@ -81,11 +81,12 @@ Now SSH gets up to 30Mbit, default traffic 20Mbit, etc.
 
 You set `tc qdisc replace dev eth0 root pfifo_fast` and saturate uplink. SSH becomes unresponsive. Why?
 
-.  
-.  
-.
+<details>
+<summary>Click to reveal answer</summary>
 
 **Answer:** pfifo_fast is drop-tail with three priority bands but no flow isolation and no AQM. Bulk transfer fills the buffer; SSH packets queue behind, waiting for the bulk to drain. Latency goes from ms to seconds. fq_codel solves both: per-flow isolation prevents bulk from starving SSH; CoDel-driven drops prevent latency runaway. Restore: `tc qdisc replace dev eth0 root fq_codel`.
+
+</details>
 
 ## Tomorrow
 
