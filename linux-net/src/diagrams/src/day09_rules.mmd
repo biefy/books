@@ -1,25 +1,27 @@
-flowchart TD
-    Pkt["packet/flow key<br/><b>does:</b> supplies src, dst, mark, iif/oif, tos<br/><b>why next:</b> policy rules match these fields<br/><b>state:</b> flowi4/flowi6 lookup key"]
-    Rules["fib_rules walk<br/><b>does:</b> checks rules in ascending priority<br/><b>why next:</b> first matching rule selects an action/table<br/><b>state:</b> current rule cursor"]
-    Custom{"custom rule matches?<br/><b>example:</b> from 10.99.0.0/24 lookup 100"}
-    CustomTable["table 100 lookup<br/><b>does:</b> longest-prefix match in selected table<br/><b>why next:</b> route result found or lookup fails<br/><b>state:</b> fib_result or no route"]
-    Local["priority 0: local table<br/><b>does:</b> catches local/broadcast routes<br/><b>why next:</b> unmatched traffic falls through<br/><b>state:</b> may produce local delivery result"]
-    Main["priority 32766: main table<br/><b>does:</b> normal route lookup<br/><b>why next:</b> most packets resolve here<br/><b>state:</b> nexthop, route type, metrics"]
-    Default["priority 32767: default table<br/><b>does:</b> last policy fallback if populated<br/><b>state:</b> final chance before ENETUNREACH"]
-    Result["fib_result<br/><b>does:</b> carries route type, nexthop, scope, prefsrc<br/><b>why next:</b> route code builds dst/rtable<br/><b>state:</b> selected table's answer"]
+flowchart LR
+    Key["<b>packet / flow key</b><br/>src, dst, mark, TOS,<br/>input/output interface"]
 
-    Pkt --> Rules --> Custom
-    Custom -->|yes| CustomTable
-    Custom -->|no| Local
-    Local -->|no route| Main -->|no route| Default
-    CustomTable -->|found| Result
-    Local -->|found| Result
-    Main -->|found| Result
-    Default -->|found| Result
+    Scan["<b>priority-ordered rule scan</b><br/>lowest priority number first<br/>stop when an action returns a route"]
 
-    classDef key fill:#dbeafe,stroke:#2563eb
-    classDef rule fill:#fef3c7,stroke:#d97706
-    classDef out fill:#dcfce7,stroke:#16a34a
-    class Pkt key
-    class Rules,Custom,Local,Main,Default rule
-    class CustomTable,Result out
+    Rule["<b>each rule = predicate + target</b><br/><b>predicate:</b> from 10.99.0.0/24<br/><b>target:</b> lookup table 100"]
+
+    Table["<b>selected routing table</b><br/>longest-prefix lookup in local,<br/>main, default, or custom table"]
+
+    Result["<b>fib_result</b><br/>route type, nexthop, scope,<br/>metrics, preferred source"]
+
+    Miss["<b>no match / no route</b><br/>continue to next rule;<br/>if none produce a route, fail lookup"]
+
+    Key --> Scan --> Rule --> Table --> Result
+    Table -. lookup miss .-> Miss -. next rule .-> Scan
+
+    Defaults["<b>default rule order</b><br/>0 → local table<br/>32766 → main table<br/>32767 → default table"]
+    Scan -. typical built-ins .-> Defaults
+
+    classDef key fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+    classDef rule fill:#fef3c7,stroke:#d97706,stroke-width:2px
+    classDef out fill:#dcfce7,stroke:#16a34a,stroke-width:2px
+    classDef miss fill:#fee2e2,stroke:#dc2626,stroke-width:2px
+    class Key key
+    class Scan,Rule,Defaults rule
+    class Table,Result out
+    class Miss miss

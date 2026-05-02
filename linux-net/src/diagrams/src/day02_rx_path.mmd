@@ -1,35 +1,28 @@
-flowchart TD
-    HW["NIC hardware<br/><b>does:</b> DMAs frame bytes into RX ring memory<br/><b>why next:</b> interrupt moderation says a batch is ready<br/><b>state:</b> descriptor points at packet buffer"]
-    IRQ["Hardware IRQ<br/><b>does:</b> wakes the driver interrupt handler<br/><b>why next:</b> do minimal work in IRQ context<br/><b>state:</b> device interrupts are acknowledged"]
-    Sched["IRQ handler: napi_schedule()<br/><b>does:</b> disables more RX IRQs and queues NAPI<br/><b>why next:</b> move packet work to softirq budget<br/><b>state:</b> napi_struct is on this CPU's poll_list"]
-    Soft["NET_RX_SOFTIRQ<br/><b>does:</b> runs net_rx_action outside hard IRQ<br/><b>why next:</b> process a bounded packet batch<br/><b>state:</b> CPU owns a poll budget"]
+flowchart LR
+    HW["<b>1. NIC + NAPI batch</b><br/>DMA fills RX descriptors, IRQ schedules NAPI<br/><b>handoff:</b> poll budget moves work out of hard IRQ<br/><b>state:</b> driver owns packet buffers"]
 
-    Poll["__napi_poll(napi, budget)<br/><b>does:</b> calls the driver's poll method<br/><b>why next:</b> driver knows its RX descriptors<br/><b>state:</b> budget limits receive work"]
-    Drv["driver poll()<br/><b>does:</b> reaps completed RX descriptors<br/><b>why next:</b> each descriptor becomes an xdp_buff<br/><b>state:</b> packet is still driver RX memory"]
-    XDP["native XDP (if attached)<br/><b>does:</b> runs before skb allocation<br/><b>why next:</b> only XDP_PASS enters normal stack<br/><b>state:</b> packet may be dropped, redirected, TX'd, or passed"]
-    Build["build_skb / napi_build_skb<br/><b>does:</b> wraps passed RX buffer in struct sk_buff<br/><b>why next:</b> rest of network stack speaks skb<br/><b>state:</b> skb has data/head/tail pointers"]
-    Proto["eth_type_trans()<br/><b>does:</b> records L3 protocol and advances data past Ethernet<br/><b>why next:</b> stack needs a packet_type dispatch key<br/><b>state:</b> skb->protocol = IPv4/IPv6/ARP/etc."]
-    GRO["napi_gro_receive()<br/><b>does:</b> coalesces compatible TCP segments<br/><b>why next:</b> flush when flow changes, timeout, or budget ends<br/><b>state:</b> one skb may represent many segments"]
+    XDP["<b>2. driver poll + native XDP</b><br/>driver reaps descriptors and runs XDP before skb allocation<br/><b>handoff:</b> only XDP_PASS enters the normal stack<br/><b>state:</b> packet may be dropped, redirected, TX'd, or passed"]
 
-    NIRX["netif_receive_skb()<br/><b>does:</b> enters generic RX core<br/><b>why next:</b> centralizes taps, VLAN, tc, protocol dispatch<br/><b>state:</b> skb is stack-owned"]
-    Core["__netif_receive_skb_core()<br/><b>does:</b> runs taps, VLAN handling, tc ingress, packet_type lookup<br/><b>why next:</b> selected packet_type handler owns L3 parsing<br/><b>state:</b> pt_prev->func is chosen"]
-    IPRcv["ip_rcv()<br/><b>does:</b> validates IPv4 header and length<br/><b>why next:</b> valid packet enters PREROUTING policy<br/><b>state:</b> malformed packets are dropped early"]
-    Hook["NF_HOOK(PRE_ROUTING)<br/><b>does:</b> conntrack/NAT/filter callbacks run in priority order<br/><b>why next:</b> ACCEPT invokes ip_rcv_finish<br/><b>state:</b> skb may be accepted, dropped, queued, or rewritten"]
-    Finish["ip_rcv_finish()<br/><b>does:</b> route lookup attaches dst<br/><b>why next:</b> dst->input decides local vs forward<br/><b>state:</b> skb has routing decision"]
-    Local["ip_local_deliver / ip_forward<br/><b>does:</b> deliver locally or route onward<br/><b>why next:</b> local packets need L4 handler; transit packets need output path<br/><b>state:</b> skb leaves RX path"]
-    L4["udp_rcv / tcp_v4_rcv / ...<br/><b>does:</b> protocol-specific socket lookup and delivery<br/><b>state:</b> bytes reach the transport layer"]
+    SKB["<b>3. skb + protocol setup</b><br/>build_skb/napi_build_skb, eth_type_trans, optional GRO<br/><b>handoff:</b> generic stack needs skb metadata and protocol key<br/><b>state:</b> skb has L2/L3 offsets, protocol, and possible GRO aggregate"]
 
-    HW --> IRQ --> Sched --> Soft --> Poll --> Drv --> XDP
-    XDP -->|XDP_PASS: normal stack wants skb| Build --> Proto --> GRO --> NIRX --> Core --> IPRcv --> Hook --> Finish --> Local --> L4
-    XDP -.->|DROP/TX/REDIRECT: no skb path| Done["XDP consumes packet<br/>normal RX path stops"]
+    CORE["<b>4. RX core policy</b><br/>taps, VLAN handling, tc ingress, packet_type dispatch<br/><b>handoff:</b> IPv4/IPv6 handler owns L3 parsing<br/><b>state:</b> skb is stack-owned and handler-selected"]
 
-    classDef hw fill:#fee2e2,stroke:#dc2626
-    classDef napi fill:#fef3c7,stroke:#d97706
-    classDef gen fill:#dbeafe,stroke:#2563eb
-    classDef ip fill:#dcfce7,stroke:#16a34a
-    classDef exit fill:#f3f4f6,stroke:#6b7280
-    class HW,IRQ hw
-    class Sched,Soft,Poll,Drv,XDP,Build,Proto,GRO napi
-    class NIRX,Core gen
-    class IPRcv,Hook,Finish,Local,L4 ip
-    class Done exit
+    IP["<b>5. IP + Netfilter</b><br/>header validation, PREROUTING, route lookup<br/><b>handoff:</b> ACCEPT plus dst decides local delivery or forwarding<br/><b>state:</b> skb may be rewritten, dropped, queued, or routed"]
+
+    OUT["<b>6. local or forward path</b><br/>transport socket lookup or forwarding output path<br/><b>handoff:</b> L4 owns local payload, TX path owns transit skb<br/><b>state:</b> bytes reach TCP/UDP or leave RX path"]
+
+    DONE["<b>XDP non-PASS</b><br/>normal skb path stops"]
+
+    HW --> XDP --> SKB --> CORE --> IP --> OUT
+    XDP -. DROP / TX / REDIRECT .-> DONE
+
+    classDef hw fill:#fee2e2,stroke:#dc2626,stroke-width:2px
+    classDef napi fill:#fef3c7,stroke:#d97706,stroke-width:2px
+    classDef stack fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+    classDef ip fill:#dcfce7,stroke:#16a34a,stroke-width:2px
+    classDef exit fill:#f3f4f6,stroke:#6b7280,stroke-width:2px
+    class HW hw
+    class XDP,SKB napi
+    class CORE stack
+    class IP,OUT ip
+    class DONE exit

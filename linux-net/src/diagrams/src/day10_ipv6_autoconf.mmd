@@ -1,22 +1,20 @@
-flowchart TD
-    Up["interface goes up<br/><b>does:</b> enables IPv6 device state and joins solicited-node multicast<br/><b>why next:</b> link-local address is required before routers/neighbors<br/><b>state:</b> tentative IPv6 configuration"]
-    LL["link-local address<br/><b>does:</b> derives fe80::/64 address from stable secret/MAC policy<br/><b>why next:</b> address must pass DAD before use<br/><b>state:</b> tentative link-local address"]
-    DAD["Duplicate Address Detection<br/><b>does:</b> sends Neighbor Solicitation for own address<br/><b>why next:</b> duplicate means address cannot be assigned<br/><b>state:</b> preferred address or duplicate failure"]
-    RA["Router Advertisement<br/><b>does:</b> provides prefixes plus A/M/O flags and default router info<br/><b>why next:</b> flags decide SLAAC vs DHCPv6 handoff<br/><b>state:</b> prefix lifetimes and router learned"]
-    Flags{"RA flags/prefix<br/><b>does:</b> A=autonomous prefix, M=managed DHCPv6<br/><b>state:</b> chosen address configuration path"}
-    SLAAC["SLAAC global address<br/><b>does:</b> combines prefix with stable/random interface ID<br/><b>why next:</b> global address also needs DAD<br/><b>state:</b> tentative global address"]
-    DHCP["DHCPv6 client<br/><b>does:</b> asks server for address or other config when flags require<br/><b>why next:</b> assigned address/options feed IPv6 stack<br/><b>state:</b> managed address or DNS/options"]
-    NDP["NDP usable<br/><b>does:</b> resolves neighbors and maintains reachability cache<br/><b>state:</b> IPv6 can send to local-link next hops"]
+flowchart LR
+    Start["<b>1. interface enables IPv6</b><br/>joins required multicast groups and prepares link-local state<br/><b>handoff:</b> every IPv6 node needs a usable link-local address<br/><b>state:</b> tentative device IPv6 configuration"]
 
-    Up --> LL --> DAD --> RA --> Flags
-    Flags -->|A=1| SLAAC --> DAD
-    Flags -->|M=1 or other config| DHCP --> NDP
-    DAD -->|no duplicate| NDP
-    DAD -->|duplicate| Up
+    LinkLocal["<b>2. link-local + DAD</b><br/>derive fe80:: address and probe for duplicates<br/><b>handoff:</b> no duplicate means control traffic can use the link<br/><b>state:</b> link-local address is preferred or rejected"]
 
-    classDef init fill:#dbeafe,stroke:#2563eb
-    classDef decision fill:#fef3c7,stroke:#d97706
-    classDef ready fill:#dcfce7,stroke:#16a34a
-    class Up,LL,RA init
-    class DAD,Flags decision
-    class SLAAC,DHCP,NDP ready
+    RA["<b>3. Router Advertisement</b><br/>learn prefixes, lifetimes, default router, A/M/O flags<br/><b>handoff:</b> flags select SLAAC, DHCPv6, or both<br/><b>state:</b> router and prefix policy are known"]
+
+    Addr["<b>4. address configuration</b><br/>SLAAC forms an address, DHCPv6 obtains managed data<br/><b>handoff:</b> each new address must pass DAD before use<br/><b>state:</b> global address and options are installed"]
+
+    Ready["<b>5. NDP-ready interface</b><br/>neighbor discovery resolves next hops and tracks reachability<br/><b>state:</b> IPv6 can send to local-link neighbors and routers"]
+
+    Start --> LinkLocal --> RA --> Addr --> Ready
+    LinkLocal -. duplicate .-> Start
+
+    classDef init fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+    classDef decision fill:#fef3c7,stroke:#d97706,stroke-width:2px
+    classDef ready fill:#dcfce7,stroke:#16a34a,stroke-width:2px
+    class Start,RA init
+    class LinkLocal,Addr decision
+    class Ready ready

@@ -1,18 +1,19 @@
-flowchart TD
-    CALLER["caller enters do_unlinkat(dfd, name)<br/><b>state:</b> normal kernel call/args in registers"]
-    PATCH["fentry patch site<br/><b>does:</b> architecture ftrace/BPF machinery replaces NOPs with an entry call path<br/><b>why next:</b> trampoline must run before the function body<br/><b>state:</b> original args are still available"]
-    TRAMP["BPF trampoline<br/><b>does:</b> saves argument registers into the BPF calling convention<br/><b>why next:</b> verifier-approved BPF program expects typed args<br/><b>state:</b> ctx/typed args ready"]
-    BPF["your fentry BPF program<br/><b>does:</b> observes dfd/name before unlink logic runs<br/><b>why next:</b> returns 0 to continue kernel execution<br/><b>state:</b> optional event data prepared"]
-    RING["ringbuf submit<br/><b>does:</b> copies observation to userspace-visible buffer<br/><b>why next:</b> tracing side effect is complete"]
-    RESTORE["trampoline epilogue<br/><b>does:</b> restores registers and returns to patched function entry<br/><b>state:</b> kernel can run as if tracing were transparent"]
-    BODY["do_unlinkat body<br/><b>does:</b> path lookup, permission checks, unlink<br/><b>state:</b> real syscall behavior continues"]
-    RET["return to caller"]
+flowchart LR
+    Patch["<b>1. patched function entry</b><br/>architecture ftrace/BPF machinery turns NOP space into an entry call path<br/><b>handoff:</b> trampoline must run before the function body<br/><b>state:</b> original arguments are still available"]
 
-    CALLER --> PATCH --> TRAMP --> BPF --> RING --> RESTORE --> BODY --> RET
+    Tramp["<b>2. BPF trampoline</b><br/>saves argument registers and builds the BPF calling convention<br/><b>handoff:</b> verifier-approved program expects typed args/ctx<br/><b>state:</b> BPF-visible arguments are ready"]
+
+    Prog["<b>3. fentry program</b><br/>observes do_unlinkat arguments before unlink logic runs<br/><b>handoff:</b> return 0 continues kernel execution<br/><b>state:</b> optional event data is prepared"]
+
+    Event["<b>4. tracing side effect</b><br/>ringbuf or map update exposes observation to userspace<br/><b>handoff:</b> trampoline can restore normal execution<br/><b>state:</b> event is recorded without changing syscall behavior"]
+
+    Body["<b>5. original function body</b><br/>registers restored, do_unlinkat performs lookup, permission checks, unlink<br/><b>state:</b> caller sees the normal kernel return value"]
+
+    Patch --> Tramp --> Prog --> Event --> Body
 
     classDef hot fill:#ffe5b4,stroke:#d97706,stroke-width:2px
     classDef bpf fill:#dbeafe,stroke:#2563eb,stroke-width:2px
-    classDef kern fill:#e5e7eb,stroke:#374151,stroke-width:1px
-    class PATCH,TRAMP hot
-    class BPF,RING bpf
-    class CALLER,RESTORE,BODY,RET kern
+    classDef kern fill:#e5e7eb,stroke:#374151,stroke-width:2px
+    class Patch,Tramp hot
+    class Prog,Event bpf
+    class Body kern

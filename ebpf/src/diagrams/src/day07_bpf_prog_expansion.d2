@@ -1,4 +1,4 @@
-direction: down
+direction: right
 
 title: |md
   ## How BPF_PROG unpacks trampoline arguments
@@ -63,5 +63,5 @@ expanded: "Generated wrapper" {
   |
 }
 
-src -> ctx: "load-time attach target provides signature"
-ctx -> expanded: "macro casts slots by position"
+src -> ctx
+ctx -> expanded

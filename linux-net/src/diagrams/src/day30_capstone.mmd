@@ -1,23 +1,23 @@
-flowchart TD
-    Pick["Choose one real packet<br/><b>does:</b> fixes a concrete 5-tuple and direction<br/><b>why next:</b> every later observation needs the same packet identity<br/><b>state:</b> expected src/dst/proto/ports"]
-    Driver["driver RX / XDP<br/><b>does:</b> receives DMA buffer and may run XDP before skb allocation<br/><b>why next:</b> XDP_PASS is the handoff into the skb stack<br/><b>state:</b> packet consumed by XDP or wrapped as skb"]
-    GRO["skb + GRO<br/><b>does:</b> creates skb metadata and may coalesce segments<br/><b>why next:</b> protocol dispatch needs skb protocol and headers<br/><b>state:</b> skb has L2/L3 offsets and possible GRO aggregate"]
-    Core["__netif_receive_skb_core<br/><b>does:</b> runs ingress taps, tc, and packet_type dispatch<br/><b>why next:</b> IPv4 handler owns ETH_P_IP packets<br/><b>state:</b> skb delivered to ip_rcv or diverted/dropped"]
-    Pre["PREROUTING<br/><b>does:</b> defrag/conntrack/DNAT/filter before route lookup<br/><b>why next:</b> route must see any destination rewrite<br/><b>state:</b> nfct attached, dst may be changed"]
-    Route["route lookup<br/><b>does:</b> maps flow to local delivery or forwarding<br/><b>why next:</b> dst->input selects the next stack function<br/><b>state:</b> skb_dst points at rtable"]
-    Decision{"destination?"}
-    Local["LOCAL_IN + transport<br/><b>does:</b> applies host policy then looks up TCP/UDP socket<br/><b>why next:</b> accepted data wakes application receive path<br/><b>state:</b> skb queued or consumed by protocol"]
-    Forward["FORWARD + POST_ROUTING<br/><b>does:</b> applies transit policy and final SNAT/output checks<br/><b>why next:</b> accepted skb can enter device output path<br/><b>state:</b> skb has egress route/device"]
-    App["application read<br/><b>does:</b> copies socket receive data to user buffer<br/><b>state:</b> packet's payload is now app-visible"]
-    Tx["qdisc + driver TX<br/><b>does:</b> schedules frame and gives descriptors to NIC<br/><b>state:</b> forwarded packet leaves the host"]
+flowchart LR
+    Pick["<b>1. choose one packet</b><br/>fix a concrete 5-tuple and direction<br/><b>handoff:</b> every probe needs the same packet identity<br/><b>state:</b> expected src, dst, proto, ports"]
 
-    Pick --> Driver --> GRO --> Core --> Pre --> Route --> Decision
-    Decision -->|local| Local --> App
-    Decision -->|forwarded| Forward --> Tx
+    Entry["<b>2. RX entry</b><br/>driver, optional XDP, skb creation, GRO, RX core dispatch<br/><b>handoff:</b> accepted skb reaches the IP handler<br/><b>state:</b> skb has protocol metadata and possible GRO aggregate"]
 
-    classDef observe fill:#dbeafe,stroke:#2563eb
-    classDef hook fill:#fef3c7,stroke:#d97706
-    classDef state fill:#dcfce7,stroke:#16a34a
-    class Pick,App,Tx observe
-    class Driver,Core,Pre,Forward hook
-    class GRO,Route,Decision,Local state
+    Policy["<b>3. ingress policy</b><br/>tc ingress, PREROUTING, conntrack, DNAT, filters<br/><b>handoff:</b> route lookup must see any rewrites<br/><b>state:</b> nfct may be attached, dst may be changed"]
+
+    Route["<b>4. route decision</b><br/>FIB rules and tables choose local delivery or forwarding<br/><b>handoff:</b> dst input/output selects the next subsystem<br/><b>state:</b> skb_dst points at the chosen route"]
+
+    Local["<b>5a. local receive</b><br/>LOCAL_IN and TCP/UDP socket lookup deliver payload<br/><b>state:</b> data is queued for application read"]
+
+    Forward["<b>5b. forwarding</b><br/>FORWARD, POST_ROUTING, qdisc, driver TX<br/><b>state:</b> packet leaves through the selected egress device"]
+
+    Pick --> Entry --> Policy --> Route
+    Route --> Local
+    Route --> Forward
+
+    classDef observe fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+    classDef hook fill:#fef3c7,stroke:#d97706,stroke-width:2px
+    classDef state fill:#dcfce7,stroke:#16a34a,stroke-width:2px
+    class Pick,Entry observe
+    class Policy,Forward hook
+    class Route,Local state

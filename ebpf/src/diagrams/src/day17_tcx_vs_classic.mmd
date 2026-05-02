@@ -1,21 +1,16 @@
 flowchart LR
-    subgraph Old["Classic tc-bpf attach"]
-        T1["create clsact qdisc<br/><b>does:</b> installs ingress/egress hook scaffold<br/><b>why next:</b> filter attach needs hook slots<br/><b>state:</b> qdisc object persists on device"]
-        T2["tc filter add ... bpf<br/><b>does:</b> loads/attaches program at priority/handle<br/><b>why next:</b> packet path walks filters by priority<br/><b>state:</b> attachment owned by tc state, not an FD"]
-        T3["packet hits tc hook<br/><b>does:</b> filters run in configured order<br/><b>state:</b> verdict can pass/drop/redirect"]
-        T4["manual detach<br/><b>does:</b> delete filter and qdisc explicitly<br/><b>state:</b> crash can leave stale attachments"]
-        T1 --> T2 --> T3 --> T4
-    end
+    Classic["<b>Classic tc-bpf attach</b><br/><b>does:</b> create clsact qdisc, add tc filter, run filters by priority<br/><b>handoff:</b> packet path walks qdisc-owned filter state<br/><b>state:</b> attachment is owned by tc objects and must be deleted explicitly"]
 
-    subgraph New["tcx attach"]
-        X1["bpf_program__attach_tcx<br/><b>does:</b> attaches directly to tcx ingress/egress hook<br/><b>why next:</b> kernel returns link ownership<br/><b>state:</b> bpf_link fd owns attachment"]
-        X2["mprog ordering<br/><b>does:</b> BPF_F_BEFORE/AFTER/REPLACE mutates ordered chain<br/><b>why next:</b> independent programs can compose safely<br/><b>state:</b> deterministic hook order"]
-        X3["packet hits tcx hook<br/><b>does:</b> runs link-owned programs until terminal verdict<br/><b>state:</b> skb allowed, dropped, or redirected"]
-        X4["close link fd<br/><b>does:</b> automatically detaches that program<br/><b>state:</b> lifecycle follows userspace owner"]
-        X1 --> X2 --> X3 --> X4
-    end
+    TCX["<b>tcx attach</b><br/><b>does:</b> attach BPF program directly to ingress/egress tcx hook<br/><b>handoff:</b> kernel returns a bpf_link fd for ownership and ordering<br/><b>state:</b> link close detaches, mprog flags control before/after/replace order"]
 
-    classDef old fill:#fee2e2,stroke:#dc2626
-    classDef new fill:#dcfce7,stroke:#16a34a
-    class T1,T2,T3,T4 old
-    class X1,X2,X3,X4 new
+    Packet["<b>packet verdict</b><br/>both paths run on skb at tc ingress/egress<br/><b>state:</b> program verdict can pass, drop, redirect, or continue"]
+
+    Classic --> Packet
+    TCX --> Packet
+
+    classDef old fill:#fee2e2,stroke:#dc2626,stroke-width:2px
+    classDef new fill:#dcfce7,stroke:#16a34a,stroke-width:2px
+    classDef pkt fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+    class Classic old
+    class TCX new
+    class Packet pkt

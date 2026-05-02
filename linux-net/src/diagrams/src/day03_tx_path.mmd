@@ -1,26 +1,23 @@
-flowchart TD
-    App["Application send()<br/><b>does:</b> copies intent into a socket syscall<br/><b>why next:</b> kernel must turn bytes into protocol data<br/><b>state:</b> user buffer + socket fd"]
-    Sock["socket send path<br/><b>does:</b> resolves fd to struct socket/sk and calls proto sendmsg<br/><b>why next:</b> TCP owns SOCK_STREAM byte semantics<br/><b>state:</b> locked sock and msg iterator"]
-    Queue["tcp_sendmsg_locked<br/><b>does:</b> copies bytes into skbs on write queue<br/><b>why next:</b> push policy/window says data may be transmitted<br/><b>state:</b> queued skbs with sequence numbers"]
-    Xmit["tcp_write_xmit<br/><b>does:</b> applies cwnd, rwnd, pacing, and SACK/loss state<br/><b>why next:</b> selected skb is allowed on the wire<br/><b>state:</b> skb chosen and TCP header fields ready"]
-    TCPHdr["tcp_transmit_skb<br/><b>does:</b> finalizes TCP header/checksum metadata<br/><b>why next:</b> IP must route an L4 packet<br/><b>state:</b> skb contains TCP segment"]
-    Route["ip_queue_xmit / route<br/><b>does:</b> finds dst, source address, MTU, gateway<br/><b>why next:</b> output path needs dst->output and nexthop<br/><b>state:</b> skb_dst points at rtable"]
-    LocalOut["LOCAL_OUT + POST_ROUTING<br/><b>does:</b> applies local policy, conntrack/NAT, mangle<br/><b>why next:</b> accepted skb can leave IP stack<br/><b>state:</b> marks/NAT/checksums may be changed"]
-    Neigh["neighbour output<br/><b>does:</b> resolves L2 destination (ARP/ND) and builds L2 header<br/><b>why next:</b> device queue needs a complete frame<br/><b>state:</b> skb has output device and L2 header"]
-    DevQ["dev_queue_xmit<br/><b>does:</b> runs tcx/tc egress and chooses qdisc path<br/><b>why next:</b> packet must be scheduled against device queue<br/><b>state:</b> skb may be marked, dropped, redirected, or enqueued"]
-    Qdisc["qdisc / __qdisc_run<br/><b>does:</b> shapes, orders, and dequeues packets<br/><b>why next:</b> driver ring has transmit budget<br/><b>state:</b> skb handed to driver start_xmit"]
-    Driver["ndo_start_xmit<br/><b>does:</b> maps skb data for DMA and fills TX descriptors<br/><b>why next:</b> NIC owns descriptors after doorbell<br/><b>state:</b> bytes are pending hardware transmit"]
-    Wire["NIC / wire<br/><b>does:</b> transmits frame and later completes descriptors<br/><b>state:</b> skb can be freed after TX completion"]
+flowchart LR
+    App["<b>1. userspace → socket</b><br/>send/write resolves fd to socket<br/><b>handoff:</b> TCP sendmsg owns stream bytes<br/><b>state:</b> locked sock + msg iterator"]
 
-    App --> Sock --> Queue --> Xmit --> TCPHdr --> Route --> LocalOut --> Neigh --> DevQ --> Qdisc --> Driver --> Wire
+    TCP["<b>2. TCP write queue</b><br/>copy/zerocopy user bytes into skbs<br/><b>handoff:</b> push policy and windows permit send<br/><b>state:</b> skbs have sequence numbers"]
 
-    classDef us fill:#dbeafe,stroke:#2563eb
-    classDef tcp fill:#fef3c7,stroke:#d97706
-    classDef ip fill:#dcfce7,stroke:#16a34a
-    classDef dev fill:#e0e7ff,stroke:#6366f1
-    classDef hw fill:#fee2e2,stroke:#dc2626
-    class App,Sock us
-    class Queue,Xmit,TCPHdr tcp
-    class Route,LocalOut,Neigh ip
-    class DevQ,Qdisc,Driver dev
-    class Wire hw
+    Segment["<b>3. TCP transmit decision</b><br/>apply cwnd, rwnd, Nagle, pacing, SACK/loss<br/><b>handoff:</b> chosen segment may enter IP<br/><b>state:</b> TCP header/checksum metadata ready"]
+
+    IP["<b>4. IP + Netfilter</b><br/>route lookup, LOCAL_OUT, POST_ROUTING, NAT/filter<br/><b>handoff:</b> accepted skb has dst and nexthop<br/><b>state:</b> rtable, marks, MTU, gateway known"]
+
+    L2["<b>5. neighbour + device queue</b><br/>resolve ARP/ND and build L2 header<br/><b>handoff:</b> complete frame can be scheduled<br/><b>state:</b> output device + L2 destination"]
+
+    Dev["<b>6. qdisc → driver → NIC</b><br/>tcx/tc, shaping, dequeue, DMA descriptors<br/><b>handoff:</b> NIC doorbell owns TX descriptors<br/><b>state:</b> bytes leave; skb freed after completion"]
+
+    App --> TCP --> Segment --> IP --> L2 --> Dev
+
+    classDef us fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+    classDef tcp fill:#fef3c7,stroke:#d97706,stroke-width:2px
+    classDef ip fill:#dcfce7,stroke:#16a34a,stroke-width:2px
+    classDef dev fill:#e0e7ff,stroke:#6366f1,stroke-width:2px
+    class App us
+    class TCP,Segment tcp
+    class IP,L2 ip
+    class Dev dev

@@ -1,20 +1,18 @@
-flowchart TD
-    Call["BPF program calls a function<br/><b>does:</b> source names helper or __ksym kfunc<br/><b>why next:</b> loader/verifier must resolve callable target<br/><b>state:</b> call site in BPF bytecode"]
-    Kind{"which mechanism?"}
-    HelperID["helper path<br/><b>does:</b> compiler encodes BPF_FUNC_* enum id<br/><b>why next:</b> verifier has per-program-type helper proto table<br/><b>state:</b> stable UAPI helper number"]
-    HelperVerify["helper verification<br/><b>does:</b> checks arg/return types against bpf_func_proto<br/><b>why next:</b> runtime can dispatch through helper table<br/><b>state:</b> allowed helper call"]
-    HelperRun["helper runtime<br/><b>does:</b> calls fixed kernel helper implementation<br/><b>state:</b> UAPI semantics remain stable across kernels"]
-    Ksym["kfunc path<br/><b>does:</b> libbpf records symbol name with __ksym relocation<br/><b>why next:</b> target kernel BTF must contain matching function<br/><b>state:</b> unresolved-by-name call"]
-    KVerify["kfunc verification<br/><b>does:</b> checks BTF signature, flags, acquire/release rules<br/><b>why next:</b> direct kernel call is safe only with type proof<br/><b>state:</b> typed kfunc call or load failure"]
-    KRun["kfunc runtime<br/><b>does:</b> calls in-kernel function directly<br/><b>state:</b> not UAPI; availability can vary by kernel"]
+flowchart LR
+    Call["<b>BPF call site</b><br/>source names either a helper or a __ksym kfunc<br/><b>handoff:</b> loader/verifier resolves the callable target<br/><b>state:</b> call instruction is in BPF bytecode"]
 
-    Call --> Kind
-    Kind -->|frozen UAPI helper| HelperID --> HelperVerify --> HelperRun
-    Kind -->|BTF-exposed kfunc| Ksym --> KVerify --> KRun
+    Helper["<b>helper path</b><br/>compiler encodes a stable BPF_FUNC_* UAPI number<br/><b>verification:</b> program-type helper table supplies arg and return prototypes<br/><b>state:</b> runtime dispatches through the fixed helper table"]
 
-    classDef root fill:#dbeafe,stroke:#2563eb
-    classDef helper fill:#fef3c7,stroke:#d97706
-    classDef kfunc fill:#dcfce7,stroke:#16a34a
-    class Call,Kind root
-    class HelperID,HelperVerify,HelperRun helper
-    class Ksym,KVerify,KRun kfunc
+    Kfunc["<b>kfunc path</b><br/>libbpf resolves a BTF symbol name from __ksym relocation<br/><b>verification:</b> BTF signature, flags, acquire/release rules must match<br/><b>state:</b> program calls an in-kernel function whose availability can vary"]
+
+    Result["<b>same instruction shape, different contract</b><br/>helpers are stable UAPI, kfuncs are typed kernel extension points<br/><b>state:</b> load succeeds only if the target is allowed for this program"]
+
+    Call --> Helper --> Result
+    Call --> Kfunc --> Result
+
+    classDef root fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+    classDef helper fill:#fef3c7,stroke:#d97706,stroke-width:2px
+    classDef kfunc fill:#dcfce7,stroke:#16a34a,stroke-width:2px
+    class Call,Result root
+    class Helper helper
+    class Kfunc kfunc

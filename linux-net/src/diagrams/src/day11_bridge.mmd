@@ -1,21 +1,22 @@
-flowchart TD
-    In["frame arrives on bridge port<br/><b>does:</b> carries src MAC, dst MAC, VLAN, ingress port<br/><b>why next:</b> bridge must learn source before forwarding destination<br/><b>state:</b> skb associated with br_port"]
-    Learn["FDB learn source<br/><b>does:</b> records src MAC/VLAN -> ingress port and refreshes age<br/><b>why next:</b> future reverse traffic can be unicast<br/><b>state:</b> forwarding database updated"]
-    STP{"port forwarding?<br/><b>does:</b> checks STP/bridge state and policy<br/><b>why next:</b> blocked ports must not forward loops<br/><b>state:</b> frame allowed or dropped"}
-    Lookup["FDB lookup destination<br/><b>does:</b> searches dst MAC/VLAN in bridge table<br/><b>why next:</b> known unicast has one output port; unknown must flood<br/><b>state:</b> destination port or miss"]
-    Forward["known-unicast forward<br/><b>does:</b> clones/queues frame to learned output port<br/><b>why next:</b> egress port qdisc/driver transmits<br/><b>state:</b> single egress skb"]
-    Flood["unknown/broadcast/multicast flood<br/><b>does:</b> sends copies to eligible ports except ingress<br/><b>why next:</b> destination may be behind any port<br/><b>state:</b> multiple cloned skbs"]
-    Drop["drop<br/><b>does:</b> consumes frame due to blocked state or policy<br/><b>state:</b> no egress"]
+flowchart LR
+    In["<b>1. frame enters bridge port</b><br/>skb carries src/dst MAC, VLAN, and ingress port<br/><b>handoff:</b> bridge must learn before it forwards<br/><b>state:</b> skb is associated with a br_port"]
 
-    In --> Learn --> STP
-    STP -->|yes| Lookup
-    STP -->|no| Drop
-    Lookup -->|hit| Forward
-    Lookup -->|miss / broadcast| Flood
+    Learn["<b>2. learn source</b><br/>record src MAC/VLAN to ingress port and refresh age<br/><b>handoff:</b> destination decision can use the updated FDB<br/><b>state:</b> reverse traffic can become known unicast"]
 
-    classDef br fill:#fef3c7,stroke:#d97706
-    classDef ok fill:#dcfce7,stroke:#16a34a
-    classDef bad fill:#fee2e2,stroke:#dc2626
-    class In,Learn,Lookup,STP br
-    class Forward,Flood ok
+    Policy["<b>3. bridge policy</b><br/>check port state, STP, VLAN filtering, and local delivery cases<br/><b>handoff:</b> only forwarding ports may send frames onward<br/><b>state:</b> frame is allowed, locally consumed, or dropped"]
+
+    Lookup["<b>4. destination lookup</b><br/>search FDB for dst MAC/VLAN<br/><b>handoff:</b> hit selects one port, miss/broadcast selects flood set<br/><b>state:</b> egress port list is known"]
+
+    Egress["<b>5. egress copies</b><br/>queue one skb for known unicast or clones for flood<br/><b>handoff:</b> selected ports pass frames to qdisc/driver<br/><b>state:</b> one or many egress skbs"]
+
+    Drop["<b>drop / consume</b><br/>no egress frame"]
+
+    In --> Learn --> Policy --> Lookup --> Egress
+    Policy -. blocked or local .-> Drop
+
+    classDef br fill:#fef3c7,stroke:#d97706,stroke-width:2px
+    classDef ok fill:#dcfce7,stroke:#16a34a,stroke-width:2px
+    classDef bad fill:#fee2e2,stroke:#dc2626,stroke-width:2px
+    class In,Learn,Policy,Lookup br
+    class Egress ok
     class Drop bad
