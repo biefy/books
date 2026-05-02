@@ -1,34 +1,34 @@
 # Day 23 — Modify BPF DCTCP and instrument it
 
-> **Today's mission:** take yesterday's BPF DCTCP, add a ringbuf that emits an event per ACK with `cwnd`, `in_flight`, and `srtt`. Run iperf3 and watch real-time TCP behavior. Total time: ~75 minutes.
+> **Today's mission:** take yesterday's BPF DCTCP, add per-ACK telemetry to a ringbuf, run a real `iperf3` and watch TCP's internal state in real time. Total time: ~75 minutes.
 
-## The exercise
+## Why this exercise
 
-Today is hands-on. Goal: prove that struct_ops modules are normal BPF programs by adding observability to one.
+Yesterday loaded a stranger's BPF DCTCP. Today changes one and observes the effect. This is the most important struct_ops skill: **small, surgical modifications to working code**.
 
-Start from `tools/testing/selftests/bpf/progs/bpf_dctcp.c`. We'll add:
+Goal: emit one event per ACK to a ringbuf, with the connection's current `cwnd`, `in_flight`, and `srtt`. Watch a transfer; correlate transfer events to internal TCP state.
 
-1. A ringbuf for events.
-2. A per-ACK callback that emits `(sk, cwnd, in_flight, srtt)`.
-3. A small userspace consumer that prints what we see.
+This pattern — instrument an existing struct_ops module without changing its policy — is invaluable. You can debug a misbehaving CC algorithm, study how an unfamiliar one works, or feed real-time TCP state into your own monitoring system.
 
-## What's already there
+## What's in `bpf_dctcp.c` already
 
-DCTCP overrides these callbacks in `bpf_dctcp.c`:
+Open `tools/testing/selftests/bpf/progs/bpf_dctcp.c`. Take a minute to skim. Key callbacks DCTCP overrides:
 
-- `init` — set up per-socket state (DCTCP `alpha`, `dctcp_alpha_on_init`).
-- `ssthresh` — slow-start threshold computation.
-- `pkts_acked` — called when ACKs come in; updates ECN counters.
-- `cwnd_event` — congestion window event.
-- `in_ack_event` — fires per ACK; this is where we'll add our hook.
+- **`init`** — set up per-socket DCTCP state (`alpha`, EWMA params).
+- **`ssthresh`** — slow-start threshold computation (uses ECN ratio).
+- **`pkts_acked`** — called when ACKs come in; updates ECN counters.
+- **`cwnd_event`** — handle congestion-window events.
+- **`in_ack_event`** — fires per ACK; *this is where we'll add our telemetry*.
 
-The full vtable is in `SEC(".struct_ops") struct tcp_congestion_ops dctcp = { ... }` at the bottom.
+The full vtable is in `SEC(".struct_ops") struct tcp_congestion_ops dctcp = { ... }` near the bottom.
+
+The `in_ack_event` callback is ideal for our purpose: it fires per incoming ACK, which is roughly per outgoing-data segment ACKed. The argument is `struct sock *sk` plus a flags bitmap.
 
 ## The instrumentation
 
-### Add a ringbuf
+### Step 1: declare a ringbuf
 
-Append to `bpf_dctcp.c`:
+Add near the top of `bpf_dctcp.c`:
 
 ```c
 struct tcp_event {
@@ -36,7 +36,7 @@ struct tcp_event {
     __u32 srtt_us;
     __u32 cwnd;
     __u32 in_flight;
-    __u32 sk_cookie;
+    __u64 sk_cookie;
 };
 
 struct {
@@ -45,55 +45,55 @@ struct {
 } rb SEC(".maps");
 ```
 
-### Hook `in_ack_event`
-
-The kernel's `struct tcp_congestion_ops.in_ack_event` has signature:
-```c
-void in_ack_event(struct sock *sk, u32 flags);
-```
-
-Add:
+### Step 2: a logged version of in_ack_event
 
 ```c
-SEC("struct_ops/dctcp_in_ack_event")
+SEC("struct_ops/dctcp_in_ack_event_logged")
 void BPF_PROG(dctcp_in_ack_event_logged, struct sock *sk, __u32 flags)
 {
-    /* keep the original DCTCP logic by calling the inline function the
-       reference uses; for brevity we omit and just log */
-
     struct tcp_sock *tp = (void *)sk;
+
+    /* Reserve a ringbuf entry; skip if full */
     struct tcp_event *e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
     if (!e) return;
-    e->ts_ns = bpf_ktime_get_ns();
-    e->srtt_us = tp->srtt_us >> 3;       /* srtt in 8ths */
-    e->cwnd = tp->snd_cwnd;
+
+    e->ts_ns     = bpf_ktime_get_ns();
+    e->srtt_us   = tp->srtt_us >> 3;          /* srtt is stored in eighths of a us */
+    e->cwnd      = tp->snd_cwnd;
     e->in_flight = tp->packets_out - (tp->sacked_out + tp->lost_out);
     e->sk_cookie = bpf_get_socket_cookie(sk);
+
     bpf_ringbuf_submit(e, 0);
+
+    /* For correctness we'd also want to call the original DCTCP logic here.
+     * For pure observability we can omit the original (the system will still
+     * work but DCTCP's internal state won't update from this callback). */
 }
 ```
 
-Replace the existing `.in_ack_event` slot in the vtable:
+### Step 3: replace the slot in the vtable
+
+Find the `SEC(".struct_ops") struct tcp_congestion_ops dctcp = { ... }` block. Replace the `.in_ack_event` slot:
 
 ```c
 SEC(".struct_ops")
 struct tcp_congestion_ops dctcp = {
     /* existing entries... */
     .in_ack_event = (void *)dctcp_in_ack_event_logged,
-    .name = "bpf_dctcp_logged",   /* new name so we don't collide */
+    .name = "bpf_dctcp_logged",        /* new name to avoid colliding with the original */
 };
 ```
 
-### Userspace consumer
+## Userspace consumer
 
-Standard ringbuf consumer + skeleton load. Print:
+Standard ringbuf consumer + skeleton load + struct_ops attach. Print per event:
 
 ```c
-printf("[sk=%u t=%lluns] cwnd=%u in_flight=%u srtt=%uus\n",
+printf("[sk=%llu t=%lluns] cwnd=%u in_flight=%u srtt=%uus\n",
        e->sk_cookie, e->ts_ns, e->cwnd, e->in_flight, e->srtt_us);
 ```
 
-### Run
+## Run
 
 ```bash
 make
@@ -109,73 +109,86 @@ iperf3 -c 127.0.0.1 -C bpf_dctcp_logged
 Output:
 
 ```
-[sk=11234 t=...] cwnd=10  in_flight=0   srtt=0us
-[sk=11234 t=...] cwnd=11  in_flight=10  srtt=152us
-[sk=11234 t=...] cwnd=22  in_flight=21  srtt=148us
+[sk=11234 t=12345...] cwnd=10  in_flight=0   srtt=0us
+[sk=11234 t=12346...] cwnd=11  in_flight=10  srtt=152us
+[sk=11234 t=12348...] cwnd=22  in_flight=21  srtt=148us
 ...
 ```
 
-You're now seeing TCP CC decisions in real-time, per ACK, in a flow that runs through your custom BPF-defined algorithm.
+You're now seeing TCP's internal CC decisions in real-time, per ACK, in a flow that runs through your custom BPF-defined algorithm. Cwnd grows, RTT changes are visible, in_flight tracks how full the pipe is.
 
----
+## What to do with this data
 
-## What to break, in order
+A few things you couldn't do before:
 
-### Break 1 — Wrong field type
+- **Per-flow performance graphs:** export to a TSDB, plot cwnd over time per `sk_cookie`.
+- **Anomaly detection:** alert when `in_flight` collapses (loss event), correlated with RTT spikes.
+- **Verify CC behavior:** see whether your tuning is actually changing TCP's reaction.
+- **Capacity planning:** understand the cwnd distribution of your real workload, not synthetic benchmarks.
+
+## What to break
+
+### Wrong field semantics
 
 ```c
 e->srtt_us = tp->srtt_us;  /* without >> 3 */
 ```
 
-Reading `srtt_us` directly gives "8 × srtt" because that's how Linux stores it (saves a shift on update). Symptom: latency reports look 8× higher than reality. Lesson: **kernel field semantics matter**, not just types.
+`tp->srtt_us` is stored in eighths of a microsecond (gives sub-µs precision without floats). Reading it directly produces values 8× too large. Symptom: latency reports look like RTT is hundreds of ms when it's actually tens. Lesson: **kernel field semantics matter** — read the field's docstring (or `include/linux/tcp.h`) before assuming.
 
-### Break 2 — Forget to release the ringbuf event
+### Forget to release
 
 ```c
 struct tcp_event *e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
 if (!e) return;
 e->ts_ns = ...;
-/* forget submit */
+/* forgot bpf_ringbuf_submit */
+return;
 ```
 
-Verifier rejects: `unreleased reference id=N`. Same as kfunc acquire/release — ringbuf reserve is a refcounted resource until you submit or discard.
+Verifier rejects: `unreleased reference id=N`. The ringbuf-reserve return is a refcounted resource, exactly like a kfunc acquire. Same rules: every path must submit or discard.
 
-### Break 3 — Run with high concurrency
+### Run with high concurrency
 
-Run 100 parallel iperf3 streams. Watch ringbuf drops via the percpu drop counter (Day 13 pattern). At rates approaching 100K events/sec, you'll start dropping. Fix: filter (only emit when `cwnd` changes), or size up the ringbuf, or aggregate per-sk in a map.
+Run `100` parallel iperf3 streams. Watch ringbuf drops via the percpu drop counter (Day 13 pattern). At ~100K events/sec, you'll start dropping. Fix:
 
-### Break 4 — Add another callback
+- Filter (only emit when cwnd changes by > N).
+- Size up the ringbuf.
+- Aggregate per-sk in a map; emit summary periodically.
+
+### Add another callback
 
 Override `pkts_acked` to capture ECN counters per ACK:
 
 ```c
-SEC("struct_ops/dctcp_pkts_acked")
-void BPF_PROG(my_pkts_acked, struct sock *sk, ...)
+SEC("struct_ops/dctcp_pkts_acked_logged")
+void BPF_PROG(my_pkts_acked, struct sock *sk, const struct ack_sample *sample)
 {
-    /* emit counts */
+    /* emit ECN data, packet count, etc. */
 }
 ```
 
-Add `.pkts_acked = (void *)my_pkts_acked,` to the vtable. Now you have two BPF programs in the same struct_ops module.
-
----
+Add `.pkts_acked = (void *)my_pkts_acked` to the vtable. Now you have two BPF programs in the same struct_ops module, both fed real-time data.
 
 ## What to read in the kernel
 
-- **`net/ipv4/tcp_input.c`** — search `in_ack_event`. The C call site that invokes your BPF callback per ACK.
-- **`include/uapi/linux/tcp.h`** — `struct tcp_info` for the fields available via `bpf_get_socket_cookie` and friends.
-- **`tools/testing/selftests/bpf/progs/bpf_cubic.c`** — another struct_ops example, full Cubic implementation.
+- **`net/ipv4/tcp_input.c`** — search `in_ack_event`. The C call site that invokes your BPF callback per incoming ACK. Trace the call path from `tcp_v4_rcv` down to `in_ack_event` invocation. Notice how the kernel calls *every* registered callback: yours runs alongside any other CC's `in_ack_event`.
 
----
+- **`include/uapi/linux/tcp.h`** — `struct tcp_info`. The fields available via `bpf_get_socket_cookie` and similar are also in this struct (used by `getsockopt(TCP_INFO)`). When you wonder "what other state can I expose?" — this is the catalog.
+
+- **`include/linux/tcp.h`** — the kernel-internal `struct tcp_sock`. ~150 fields. Read once. The relationship: `struct tcp_info` (UAPI) is a curated subset of `struct tcp_sock` (internal); BPF programs can read either by casting `struct sock *sk → struct tcp_sock * = (void *)sk`.
+
+- **`tools/testing/selftests/bpf/progs/bpf_cubic.c`** — another struct_ops example, full Cubic implementation. Compare against `bpf_dctcp.c` for stylistic differences.
+
+- **`net/ipv4/tcp_cong.c`** — CC framework. `tcp_register_congestion_control`. How your `bpf_dctcp_logged` ends up callable. Day 16 (network book) covered this in detail.
 
 ## Bullet Points
 
-- struct_ops modules are ordinary BPF programs you can edit, instrument, and test like any other.
-- Add a ringbuf to one callback to get per-event telemetry without modifying the kernel.
-- The verifier still applies; standard reserve/submit and reference rules.
-- This pattern works for any struct_ops vtable: TCP CC, sched_ext, future ones.
-
----
+- struct_ops modules are ordinary BPF programs you can edit, instrument, and test.
+- **Add a ringbuf to one callback** to get per-event telemetry without modifying the kernel.
+- The verifier still applies; standard ringbuf reserve/submit and reference rules.
+- The pattern works for **any struct_ops vtable**: TCP CC, sched_ext, future ones.
+- For high-rate observability, drop counters and rate-limiting filters in BPF are essential.
 
 ## Check question
 
@@ -184,7 +197,11 @@ You add `bpf_ringbuf_reserve` to a struct_ops callback that fires per ACK at lin
 <details>
 <summary>Click to reveal answer</summary>
 
-**Answer:** Each callback adds ~50–100ns. At 1Mpps (high-rate flow), that's 5–10% extra CPU. If the ringbuf fills (consumer slow), `bpf_ringbuf_reserve` returns NULL and you skip the emit; TCP itself is unaffected. The bigger risk is if your BPF logic *blocks* somehow (it can't — non-sleepable struct_ops can't sleep) or modifies TCP state (it can — be careful). Pure observation is safe; mutation needs caution.
+**Answer:** Each callback adds ~50–100 ns. At 1 Mpps (a high-rate flow on a fast link), that's 5–10% extra CPU just for the BPF reserve+submit cost. If the ringbuf fills (consumer can't keep up), `bpf_ringbuf_reserve` returns NULL and your code skips the emit entirely; **TCP itself is unaffected** — the original CC logic still runs.
+
+The bigger risk is if your BPF logic *blocks* somehow. It can't — non-sleepable struct_ops can't sleep, take regular mutexes, or do anything that schedules. It also can't *modify TCP state* in a way the algorithm wasn't expecting (you can — be careful). Pure observation (read fields, emit to ringbuf) is safe up to whatever overhead you can tolerate; **mutation needs explicit care** because you're now changing what the CC algorithm does, not just watching it.
+
+For 99% of telemetry use cases, the worst case is: (a) some events get dropped under load (handle via drop counter); (b) ~5% extra CPU on hot connections. Both manageable.
 
 </details>
 
@@ -192,4 +209,4 @@ You add `bpf_ringbuf_reserve` to a struct_ops callback that fires per ACK at lin
 
 ## Tomorrow
 
-Day 24: BTF spelunking. Find a kfunc you've never used, read its signature, write a program that calls it. End of Phase 4.
+Day 24: BTF spelunking. Find a kfunc on your kernel that you've never used, read its signature, write a program that calls it.

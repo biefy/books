@@ -1,31 +1,51 @@
 # Day 24 — BTF spelunking: finding and using kfuncs you haven't met
 
-> **Today's mission:** find a kfunc on your kernel that you don't know about, read its signature from BTF, write a program that uses it. Total time: ~75 minutes. End of Phase 4.
+> **Today's mission:** find a kfunc on your kernel that you've never used, read its signature from BTF, write a program that calls it. Total time: ~75 minutes. End of Phase 4.
 
 ## Why discoverability matters
 
-The kernel has **hundreds** of kfuncs. They're documented in `Documentation/bpf/kfuncs.rst` but the doc is incomplete. The authoritative source is BTF in your running kernel.
+The kernel has **hundreds** of kfuncs. They're partially documented in `Documentation/bpf/kfuncs.rst` but the doc is incomplete and lags behind the kernel. The authoritative source is **BTF in your running kernel**.
 
 Today's skill: navigate that authoritative source.
 
 ![BTF kinds](diagrams/day24_btf_kinds.png)
 
-## How to find a kfunc
+## How BTF describes the kernel
+
+BTF is a compact debug-info-like format describing every type in the kernel and every (selected) function. It lives in:
+
+- **`/sys/kernel/btf/vmlinux`** — the running kernel's BTF (~5–10 MB binary blob). Generated at kernel build via `pahole` consuming DWARF.
+- **`/sys/kernel/btf/<module>`** — per-module BTF for loadable kernel modules.
+
+Every type, struct, enum, function, and variable the kernel exposes is in there. BPF programs reference kernel symbols **by name** against BTF; libbpf and the verifier resolve the names to BTF entries at load time.
+
+For kfuncs specifically, BTF holds:
+
+- The function's name (string).
+- Its signature: argument types, return type.
+- Source-file annotations.
+
+You can dump BTF in human-readable form with `bpftool`:
+
+```bash
+sudo bpftool btf dump file /sys/kernel/btf/vmlinux | head -20
+sudo bpftool btf dump file /sys/kernel/btf/vmlinux format c | head -30   # as a C header
+```
+
+## Three approaches to finding a kfunc
 
 ![kfunc discovery](diagrams/day24_kfunc_discovery.png)
 
-Three approaches, in order of preference:
+### 1. Search kernel source for `BTF_KFUNCS_START`
 
-### 1. Search kernel source for `register_btf_kfunc_id_set`
-
-Each call registers a set of kfuncs:
+Each kfunc family is declared in a block:
 
 ```bash
 cd ~/code/linux
 grep -rn 'BTF_KFUNCS_START' kernel/bpf net/ drivers/ 2>/dev/null
 ```
 
-You'll see ~30 hits. Each block looks like:
+You'll see ~30+ hits. Each block looks like:
 
 ```c
 BTF_KFUNCS_START(generic_kfunc_set)
@@ -37,49 +57,75 @@ BTF_ID_FLAGS(func, bpf_list_push_front_impl)
 BTF_KFUNCS_END(generic_kfunc_set)
 ```
 
-That tells you what kfuncs exist and their flags (`KF_ACQUIRE`, `KF_RELEASE`, `KF_RCU`, etc.).
+This tells you what kfuncs exist and their flags (`KF_ACQUIRE`, `KF_RELEASE`, `KF_RCU`, `KF_TRUSTED_ARGS`, etc.). Kernel source is the source of truth.
 
 ### 2. Dump kernel BTF and search for FUNC entries
 
 ```bash
-sudo bpftool btf dump file /sys/kernel/btf/vmlinux | grep "FUNC.*bpf_" | head -20
+sudo bpftool btf dump file /sys/kernel/btf/vmlinux \
+    | grep "FUNC.*name=bpf_" | head -20
 ```
 
-You'll see thousands of FUNC entries. Filter for ones that look kfunc-like (often start with `bpf_`).
+Filters all `FUNC` BTF kinds where the name starts with `bpf_`. You'll see thousands. Many are kfuncs; many are helpers; many are internal kernel functions exposed for other reasons. To narrow down to kfuncs, cross-reference with the source method.
 
-### 3. Read the docs
+### 3. Documentation
 
-`Documentation/bpf/kfuncs.rst` lists categories: cpumask, dynptr, lists, refcount, task. Get the names from there, then look up signatures in BTF.
+`Documentation/bpf/kfuncs.rst` lists categories: cpumask, dynptr, lists, refcount, task, etc. Get the names from there, then look up signatures in BTF for the latest details. The doc is a useful tour map but not an inventory.
 
 ## Reading a kfunc signature from BTF
 
 Once you have a name (say, `bpf_cpumask_create`), get the signature:
 
 ```bash
-sudo bpftool btf dump file /sys/kernel/btf/vmlinux \
-    | awk '/FUNC.*name=bpf_cpumask_create/{f=1} f{print; if(/}/ || /^$/)exit}'
-```
-
-Or simpler:
-
-```bash
 sudo bpftool btf dump file /sys/kernel/btf/vmlinux format c \
     | grep -B2 -A5 'bpf_cpumask_create'
 ```
 
-You'll see the prototype:
+Output:
 
 ```c
-extern struct bpf_cpumask *bpf_cpumask_create(void) __ksym;
+struct bpf_cpumask *bpf_cpumask_create(void) __ksym;
 ```
 
-## The lab: use `bpf_cpumask_*` kfuncs
+That's exactly what you'd write in your BPF source.
+
+For more complex signatures (multiple args, struct returns):
+
+```bash
+sudo bpftool btf dump file /sys/kernel/btf/vmlinux \
+    | awk '/FUNC.*name=bpf_dynptr_from_skb/{f=1} f{print; if(/^$/){exit}}'
+```
+
+(Show the FUNC line and the lines describing its prototype.)
+
+## A complete example: `bpf_cpumask_*`
 
 `bpf_cpumask_*` is a family of kfuncs for working with CPU masks (one bit per CPU). Useful for: scheduler hints, CPU affinity inspection, sched_ext.
 
-### `cpumask_demo.bpf.c`
+The family is defined at `kernel/bpf/cpumask.c`. Read the file's `BTF_KFUNCS_START` block to see what's available:
 
 ```c
+BTF_KFUNCS_START(cpumask_kfunc_btf_ids)
+BTF_ID_FLAGS(func, bpf_cpumask_create, KF_ACQUIRE | KF_RET_NULL)
+BTF_ID_FLAGS(func, bpf_cpumask_release, KF_RELEASE)
+BTF_ID_FLAGS(func, bpf_cpumask_acquire, KF_ACQUIRE | KF_TRUSTED_ARGS)
+BTF_ID_FLAGS(func, bpf_cpumask_first, KF_RCU)
+BTF_ID_FLAGS(func, bpf_cpumask_setall)
+BTF_ID_FLAGS(func, bpf_cpumask_set_cpu)
+BTF_ID_FLAGS(func, bpf_cpumask_clear_cpu)
+BTF_ID_FLAGS(func, bpf_cpumask_test_cpu)
+BTF_ID_FLAGS(func, bpf_cpumask_or, KF_RCU)
+BTF_ID_FLAGS(func, bpf_cpumask_equal, KF_RCU)
+/* ... */
+BTF_KFUNCS_END(cpumask_kfunc_btf_ids)
+```
+
+Each is a regular C function in the same file. Read the `__bpf_kfunc` definitions to see what they actually do.
+
+### Using them
+
+```c
+/* cpumask_demo.bpf.c */
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
@@ -95,7 +141,7 @@ SEC("fentry/do_unlinkat")
 int BPF_PROG(p)
 {
     struct bpf_cpumask *m = bpf_cpumask_create();
-    if (!m) return 0;
+    if (!m) return 0;       /* KF_RET_NULL — must check */
 
     /* Set bits for CPUs 0, 2, 4 */
     bpf_cpumask_set_cpu(0, m);
@@ -108,15 +154,12 @@ int BPF_PROG(p)
 
     bpf_printk("cpu0=%d cpu1=%d", b0, b1);
 
-    bpf_cpumask_release(m);
+    bpf_cpumask_release(m);  /* KF_ACQUIRE → must release */
     return 0;
 }
 ```
 
-What's new:
-
-- **`bpf_cpumask_create`** is `KF_ACQUIRE` — you must release.
-- The cast `(struct cpumask *)m` is required because `test_cpu` takes the *base* type, not the BPF wrapper. The verifier accepts the cast for kfuncs that take `struct cpumask *` parameters.
+Note the cast `(struct cpumask *)m` — `bpf_cpumask_test_cpu` takes the *base* type (`struct cpumask`), not the BPF-specific wrapper (`bpf_cpumask`). The verifier accepts the cast because `bpf_cpumask` embeds `cpumask` as its first field. This idiom shows up across the kfunc family.
 
 ### Run
 
@@ -129,15 +172,19 @@ sudo cat /sys/kernel/debug/tracing/trace_pipe
 
 Output: `cpu0=1 cpu1=0`.
 
----
+## What to break
 
-## What to break, in order
+### Forget release
 
-### Break 1 — Forget release
+```c
+struct bpf_cpumask *m = bpf_cpumask_create();
+/* ... use ... */
+return 0;   /* without bpf_cpumask_release */
+```
 
-The verifier rejects with `unreleased reference id=1` — same lesson as Day 20.
+Verifier rejects: `unreleased reference id=1`. `bpf_cpumask_create` is `KF_ACQUIRE`; the rules from Day 20 apply.
 
-### Break 2 — Use a kfunc that's not registered for your program type
+### Use a kfunc not registered for your program type
 
 Try `bpf_cpumask_create` from an XDP program:
 
@@ -149,9 +196,17 @@ int xdp_prog(struct xdp_md *ctx) {
 }
 ```
 
-Verifier rejects with `program type ... can not call kernel function`. Most cpumask kfuncs are registered for tracing and sched_ext, not XDP.
+Verifier rejects: `program type ... can not call kernel function bpf_cpumask_create`. Check `kernel/bpf/cpumask.c`'s registration:
 
-### Break 3 — Discover a new kfunc family
+```c
+register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING, &cpumask_kfunc_set);
+register_btf_kfunc_id_set(BPF_PROG_TYPE_STRUCT_OPS, &cpumask_kfunc_set);
+register_btf_kfunc_id_set(BPF_PROG_TYPE_SYSCALL, &cpumask_kfunc_set);
+```
+
+Cpumask is registered for tracing, struct_ops, and syscall — not XDP. The verifier knows.
+
+### Discover a new family
 
 Try `bpf_dynptr_*`:
 
@@ -159,46 +214,52 @@ Try `bpf_dynptr_*`:
 sudo bpftool btf dump file /sys/kernel/btf/vmlinux format c | grep 'bpf_dynptr'
 ```
 
-You'll see `bpf_dynptr_data`, `bpf_dynptr_read`, `bpf_dynptr_write`, `bpf_dynptr_from_skb`, etc. Try one in a program.
-
-### Break 4 — Look at `kernel/bpf/cpumask.c`
-
-Open the file. ~500 lines, all kfunc registration and implementation. Notice the patterns:
-- One C function per kfunc.
-- Marked with `__bpf_kfunc` annotation.
-- Registered at the bottom in a `BTF_KFUNCS_START`/`BTF_KFUNCS_END` block.
-
-This is the canonical example of "how a kfunc family is built." If you ever want to add one, this is the template.
-
----
+You'll see `bpf_dynptr_data`, `bpf_dynptr_read`, `bpf_dynptr_write`, `bpf_dynptr_from_skb`, etc. These let BPF programs handle variable-size buffers safely. Try one in a program; the kfunc family is a good way to learn the dynptr pattern (a verifier-tracked variable-size pointer).
 
 ## What to read in the kernel
 
-- **`Documentation/bpf/kfuncs.rst`** — read end-to-end.
-- **`kernel/bpf/cpumask.c`** — full kfunc family in one file. Read top to bottom.
-- **`kernel/bpf/helpers.c`** — search `BTF_KFUNCS_START`. The biggest set of generic kfuncs.
-- **`kernel/sched/ext.c`** — sched_ext registers many sched-specific kfuncs. Tomorrow's reading.
+- **`Documentation/bpf/kfuncs.rst`** — the official tour. Read end to end. ~10 pages.
 
----
+- **`kernel/bpf/cpumask.c`** — full kfunc family in one file (~700 lines). Read top to bottom. The structure is:
+  1. Implementation — `__bpf_kfunc` functions.
+  2. ID list — `BTF_KFUNCS_START` block.
+  3. `register_btf_kfunc_id_set` calls at module init.
+
+  This is the **template** for adding kfuncs. If you ever want to add one, this is what your patch will look like.
+
+- **`kernel/bpf/helpers.c`** — search `BTF_KFUNCS_START`. The biggest set of generic kfuncs (`generic_btf_ids`, `common_btf_ids`). Skim to know the catalog.
+
+- **`kernel/sched/ext.c`** — sched_ext registers many sched-specific kfuncs. The eBPF book's Day 25–27 use these.
+
+- **`tools/lib/bpf/btf.c`** — userspace BTF library. The `btf__find_by_name_kind` function is what libbpf uses to resolve `__ksym` references at load time.
+
+- **`include/linux/btf.h`** — `struct btf_type`, `BTF_KIND_*`. The vocabulary of BTF.
+
+- **`bpftool` source** at `tools/bpf/bpftool/btf.c` — useful to read just to learn what BTF queries are easy from the CLI.
 
 ## Bullet Points
 
 - **Discover kfuncs** via: kernel source `BTF_KFUNCS_START` blocks, `bpftool btf dump`, or `Documentation/bpf/kfuncs.rst`.
-- **Signatures** come from BTF; declare with `extern T name(args) __ksym;`.
-- **Acquire/release** semantics from yesterday apply uniformly.
-- **Per-program-type registration** — not all kfuncs are everywhere.
+- **Signatures** come from BTF; declare in BPF code with `extern T name(args) __ksym;`.
+- **Acquire/release** semantics from Day 20 apply uniformly — every kfunc family follows the same model.
+- **Per-program-type registration**: not all kfuncs are everywhere; the verifier rejects unregistered combinations.
 - The kernel's kfunc set grows release-by-release; check `bpftool feature probe` for what's available.
-
----
+- **`bpftool btf dump file ... format c`** gives you C-style declarations you can paste into your BPF source.
 
 ## Check question
 
-You write `extern int my_fn(int x) __ksym;` and reference `my_fn`. The kernel doesn't have a kfunc by that name. What happens?
+You write `extern int my_fn(int x) __ksym;` and reference `my_fn`. The kernel doesn't have a kfunc by that name. What happens at compile time vs at load time?
 
 <details>
 <summary>Click to reveal answer</summary>
 
-**Answer:** libbpf load fails: `cannot find kernel BTF type ID of 'my_fn'`. The reference is checked at load time against vmlinux BTF. There's no "stub" or graceful fallback — typos and version drift produce immediate, descriptive errors.
+**Answer:** **Compile time succeeds.** The `__ksym` attribute is a marker for libbpf, not a compile-time check; the C compiler treats `extern` as "this exists somewhere." The reference compiles fine into a relocation entry in the `.bpf.o` file (saying "I need a symbol named `my_fn`").
+
+**At load time, libbpf fails:** `libbpf: cannot find kernel BTF type ID of 'my_fn'`. libbpf walks the program's relocations, looks up each `__ksym` reference against the running kernel's BTF, and aborts if the name doesn't resolve.
+
+This is the right design: `__ksym` references are resolved at runtime against the *target* kernel's BTF, not at compile time against the *build* kernel. That's how you compile once and run on multiple kernels with potentially different kfunc availability — a kernel that has the kfunc loads your program; a kernel that doesn't returns the descriptive error.
+
+For graceful degradation across kernel versions, combine `__ksym` with `bpf_core_type_exists()` checks — your program tests at runtime whether the kfunc is available and skips the call if not.
 
 </details>
 
@@ -206,6 +267,6 @@ You write `extern int my_fn(int x) __ksym;` and reference `my_fn`. The kernel do
 
 ## End of Phase 4
 
-You can now use kfuncs, store kptrs in maps, write struct_ops modules, instrument them with ringbuf, and discover new kfuncs by reading BTF. That's the modern BPF surface.
+You can now use kfuncs, store kptrs in maps, write struct_ops modules, instrument them with ringbuf, and discover new kfuncs by reading BTF. That's the modern BPF surface as of 2026.
 
 Phase 5 (Days 25–30) is the frontier — sched_ext, BPF schedulers, and a capstone project.
