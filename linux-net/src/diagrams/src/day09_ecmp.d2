@@ -4,44 +4,52 @@ title: |md
   ## ECMP and multipath
 | {near: top-center; shape: text}
 
-setup: "Setup" {
+setup: "Route contains several nexthops" {
   style.fill: "#dbeafe"
   s_body: |md
-    ip route add default \
-      nexthop via 192.168.1.1 weight 1 \
-      nexthop via 192.168.2.1 weight 1
+    `ip route add default \\
+      nexthop via 192.168.1.1 weight 1 \\
+      nexthop via 192.168.2.1 weight 1`
+
+    **Does:** one FIB result carries multiple
+    usable next-hop candidates.
   |
 }
 
-select: "Per-flow selection" {
+hash: "Compute multipath hash" {
+  style.fill: "#fef3c7"
+  h_body: |md
+    **Why:** pick one nexthop per flow so packets
+    do not reorder across paths.
+
+    Kernel default policy **0**:
+    hash src IP + dst IP.
+
+    Optional policy **1**:
+    include L4 ports/proto for better spread
+    between the same endpoint pair.
+  |
+}
+
+select: "Select nexthop" {
   style.fill: "#fef3c7"
   sel_body: |md
-    For each new flow, kernel hashes
-    (src_ip, dst_ip, src_port, dst_port, proto)
-    and selects a nexthop.
-
-    Same flow → same nexthop (no reordering).
-    Different flows → spread across nexthops.
-
-    Hash function: jhash, sysctl
-    `net.ipv4.fib_multipath_hash_policy`:
-    - 0: L3 only (src+dst IP)
-    - 1: L4 (5-tuple)
-    - 2: inner L3 (for tunneled traffic)
+    **Does:** maps hash into weighted nexthop set.
+    **Why next:** selected nexthop provides output
+    device, gateway, MTU, and neighbor lookup key.
+    **State:** skb/rtable has one chosen path.
   |
 }
 
 resilient: "Resilient hashing" {
   style.fill: "#dcfce7"
   rh_body: |md
-    Default ECMP: removing one nexthop
-    re-hashes ALL flows → reordering
+    **Problem:** plain modulo changes when a
+    nexthop is added/removed, so many flows move.
 
-    Resilient nexthop groups (newer):
-    nexthop add id 1 group 10/20 type resilient
-    Removing a nexthop only affects flows
-    that were using it.
+    **Fix:** bucket table remembers assignments;
+    removing one nexthop only remaps its buckets.
   |
 }
 
-setup -> select -> resilient
+setup -> hash -> select -> resilient

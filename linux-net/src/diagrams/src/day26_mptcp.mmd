@@ -1,21 +1,24 @@
 flowchart LR
-    App["app: socket(AF_INET, SOCK_STREAM, IPPROTO_MPTCP)"]
-    Connect["connect(): MPTCP-aware<br/>SYN with MP_CAPABLE option"]
-    Established["primary subflow"]
+    App["Application<br/><b>does:</b> calls socket(..., IPPROTO_MPTCP)<br/><b>why next:</b> explicit opt-in requests MPTCP<br/><b>state:</b> app still sees one SOCK_STREAM"]
+    Msk["MPTCP master socket (msk)<br/><b>does:</b> owns the app-visible byte stream<br/><b>why next:</b> needs TCP subflows to carry bytes<br/><b>state:</b> Data Sequence Number space"]
+    Primary["Primary subflow<br/><b>does:</b> TCP connection with MP_CAPABLE<br/><b>why next:</b> proves peer supports MPTCP<br/><b>state:</b> token/key identify the MPTCP connection"]
+    PM["Path manager<br/><b>does:</b> uses endpoints and peer ADD_ADDR info<br/><b>why next:</b> decides when another path should join<br/><b>state:</b> candidate addresses/subflow limits"]
+    Join["Additional subflow<br/><b>does:</b> MP_JOIN creates another TCP connection<br/><b>why next:</b> scheduler can now choose among paths<br/><b>state:</b> multiple TCP cwnds/RTTs"]
+    Sched["MPTCP scheduler<br/><b>does:</b> picks a subflow for new data using current path state<br/><b>why next:</b> selected subflow has usable window/pacing<br/><b>state:</b> bytes assigned to one TCP subflow"]
+    DSS["DSS mapping<br/><b>does:</b> maps subflow sequence numbers to msk DSNs<br/><b>why next:</b> receiver can reorder/deduplicate<br/><b>state:</b> original byte stream reconstructed"]
+    AppRecv["Application reads<br/><b>state:</b> one ordered stream, despite many TCP paths"]
 
-    Sub1["primary subflow<br/>(eth0, IP1 ↔ peer IP1)"]
-    Sub2["secondary subflow added<br/>via MP_JOIN<br/>(eth1, IP2 ↔ peer IP2)"]
-    Sub3["...optionally more subflows..."]
+    TcpOnly["Ordinary IPPROTO_TCP socket<br/><b>state:</b> stays plain TCP unless a selective tool/BPF hook remaps it"]
 
-    Sched["mptcp scheduler decides<br/>which subflow gets each segment"]
+    App --> Msk --> Primary --> PM --> Join --> Sched --> DSS --> AppRecv
+    Primary --> Sched
+    App -. no opt-in .-> TcpOnly
 
-    Connect --> Established --> Sub1
-    Sub1 --> Sub2 --> Sub3
-    Sub1 --> Sched
-    Sub2 --> Sched
-    Sub3 --> Sched
-
-    classDef sub fill:#dbeafe,stroke:#2563eb
-    classDef hot fill:#fef3c7,stroke:#d97706
-    class Sub1,Sub2,Sub3 sub
-    class Sched hot
+    classDef app fill:#dbeafe,stroke:#2563eb
+    classDef sub fill:#fef3c7,stroke:#d97706
+    classDef mptcp fill:#dcfce7,stroke:#16a34a
+    classDef note fill:#f3f4f6,stroke:#6b7280
+    class App,AppRecv app
+    class Primary,Join sub
+    class Msk,PM,Sched,DSS mptcp
+    class TcpOnly note

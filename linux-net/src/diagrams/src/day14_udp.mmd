@@ -1,30 +1,25 @@
 flowchart LR
-    Send["sendmsg(fd, ...)"]
-    Sock["sock_sendmsg → udp_sendmsg<br/>net/ipv4/udp.c"]
-    Build["build IP+UDP headers"]
-    Out["ip_send_skb → ip_local_out → ..."]
+    Send["sendmsg(fd, buf)<br/><b>does:</b> hands datagram to UDP socket<br/><b>why next:</b> UDP must build one skb per datagram<br/><b>state:</b> user bytes + destination"]
+    UdpSend["udp_sendmsg<br/><b>does:</b> validates size, corking, checksum mode, route<br/><b>why next:</b> IP output owns L3 headers and routing<br/><b>state:</b> skb with UDP header/payload"]
+    IpOut["ip_send_skb / ip_local_out<br/><b>does:</b> applies LOCAL_OUT, route output, POST_ROUTING<br/><b>why next:</b> accepted skb can be queued to device<br/><b>state:</b> dst, marks, NAT/checksum updates"]
+    Wire["wire<br/><b>state:</b> independent datagram; no stream state"]
+    UdpRcv["udp_rcv<br/><b>does:</b> validates checksum and UDP header<br/><b>why next:</b> socket lookup decides owner or ICMP error<br/><b>state:</b> skb ready for UDP demux"]
+    Lookup["__udp4_lib_lookup<br/><b>does:</b> hashes by port/address with reuse rules<br/><b>why next:</b> matching socket gets receive queue ownership<br/><b>state:</b> selected sk or no listener"]
+    Found{"listener found?"}
+    Drop["ICMP port unreachable / drop<br/><b>does:</b> reports no owner when policy allows<br/><b>state:</b> skb consumed"]
+    Queue["socket receive queue<br/><b>does:</b> enqueues skb and charges socket memory<br/><b>why next:</b> sleeping reader must be notified<br/><b>state:</b> datagram waits intact"]
+    Wake["sk_data_ready<br/><b>does:</b> wakes poll/recvmsg waiters<br/><b>why next:</b> app can copy exactly one datagram<br/><b>state:</b> userspace observable readiness"]
+    Recv["recvmsg(fd)<br/><b>does:</b> dequeues one skb and copies payload<br/><b>state:</b> datagram delivered or truncated per flags"]
 
-    Wire["wire"]
-
-    UdpRcv["udp_rcv<br/>net/ipv4/udp.c"]
-    Lookup["__udp4_lib_lookup<br/>(2-tuple hash: dst port)"]
-    Found{Listener?}
-    Drop["icmp dest_unreach"]
-    Queue["sk_receive_queue.tail"]
-    Wake["sk->sk_data_ready(sk)<br/>wakes recvmsg waiter"]
-
-    App["recvmsg(fd, ...)"]
-    Read["read from sk_receive_queue"]
-    User["copy to user buffer"]
-
-    Send --> Sock --> Build --> Out --> Wire
-    Wire --> UdpRcv --> Lookup --> Found
+    Send --> UdpSend --> IpOut --> Wire --> UdpRcv --> Lookup --> Found
     Found -->|no| Drop
-    Found -->|yes| Queue --> Wake
-    App --> Read --> User
-    Wake -.- App
+    Found -->|yes| Queue --> Wake --> Recv
 
-    classDef ok fill:#dcfce7,stroke:#16a34a
+    classDef tx fill:#dbeafe,stroke:#2563eb
+    classDef rx fill:#dcfce7,stroke:#16a34a
+    classDef decision fill:#fef3c7,stroke:#d97706
     classDef bad fill:#fee2e2,stroke:#dc2626
-    class Wake,User ok
+    class Send,UdpSend,IpOut tx
+    class UdpRcv,Lookup,Queue,Wake,Recv rx
+    class Found decision
     class Drop bad

@@ -1,18 +1,24 @@
 flowchart LR
-    Pkt["packet enters PREROUTING"]
-    Find["conntrack lookup<br/>__nf_conntrack_find_get"]
-    State{"existing entry?"}
-    NewEntry["create NEW entry<br/>state = NEW"]
-    Established["state = ESTABLISHED<br/>(or RELATED for ICMP children)"]
-    Confirm["if ACCEPT verdict:<br/>nf_conntrack_confirm<br/>(insert into ct hash)"]
-    Pass["proceed to other chains"]
+    Pkt["packet at Netfilter hook<br/><b>does:</b> presents 5-tuple, zone, direction<br/><b>why next:</b> conntrack needs a tuple key<br/><b>state:</b> skb may not yet have nfct"]
+    Tuple["tuple extraction<br/><b>does:</b> parses L3/L4 headers and reply tuple<br/><b>why next:</b> hash lookup uses normalized original/reply keys<br/><b>state:</b> tuplehash candidate"]
+    Lookup["conntrack lookup<br/><b>does:</b> searches confirmed table for either direction<br/><b>why next:</b> existing flow can update state; miss may create NEW<br/><b>state:</b> nf_conn found or miss"]
+    Existing["existing entry<br/><b>does:</b> updates TCP/UDP/ICMP state and timeout<br/><b>why next:</b> rules need ct state labels<br/><b>state:</b> ESTABLISHED/RELATED/INVALID etc. on skb"]
+    New["unconfirmed NEW entry<br/><b>does:</b> allocates nf_conn and attaches it to skb<br/><b>why next:</b> later verdict decides whether it becomes visible<br/><b>state:</b> skb->nfct points at unconfirmed ct"]
+    Rules["filter/NAT rules<br/><b>does:</b> match ct state, may DNAT/SNAT, may DROP<br/><b>why next:</b> only accepted first packets should be confirmed<br/><b>state:</b> verdict and possibly translated tuple"]
+    Confirm["nf_conntrack_confirm<br/><b>does:</b> inserts accepted NEW ct into global hash<br/><b>why next:</b> replies/future packets can find it<br/><b>state:</b> confirmed conntrack entry"]
+    Drop["DROP/invalid/stress path<br/><b>does:</b> frees or leaves entry unconfirmed<br/><b>state:</b> no reusable flow state"]
 
-    Pkt --> Find --> State
-    State -->|no| NewEntry --> Pass
-    State -->|yes| Established --> Pass
-    Pass --> Confirm
+    Pkt --> Tuple --> Lookup
+    Lookup -->|hit| Existing --> Rules
+    Lookup -->|miss| New --> Rules
+    Rules -->|ACCEPT first packet| Confirm
+    Rules -->|DROP or invalid| Drop
 
-    classDef hot fill:#fef3c7,stroke:#d97706
-    classDef ok fill:#dcfce7,stroke:#16a34a
-    class State,Confirm hot
-    class Pass,Established ok
+    classDef parse fill:#dbeafe,stroke:#2563eb
+    classDef ct fill:#fef3c7,stroke:#d97706
+    classDef out fill:#dcfce7,stroke:#16a34a
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    class Pkt,Tuple parse
+    class Lookup,Existing,New,Rules ct
+    class Confirm out
+    class Drop bad

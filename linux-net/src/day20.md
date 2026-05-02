@@ -33,7 +33,7 @@ enum nf_inet_hooks {
 
 - **LOCAL_IN** runs in `ip_local_deliver` after the routing decision determines the packet is for us. Last chance to drop before delivery to a socket. iptables' `INPUT` chain.
 
-- **FORWARD** runs in `ip_forward` after routing determines the packet is *not* for us. iptables' `FORWARD` chain. This is the only hook traversed by transit traffic — gateway/router rules apply here.
+- **FORWARD** runs in `ip_forward` after routing determines the packet is *not* for us. iptables' `FORWARD` chain. It is the transit-only filter point, but a forwarded packet also passed through PREROUTING before the route lookup and will pass through POSTROUTING before TX.
 
 - **LOCAL_OUT** runs in `__ip_local_out` for packets we're generating, immediately after the IP header is built. Note: this fires *before* the route lookup is final, which is why you can do source-IP rewriting that the route lookup honors.
 
@@ -87,6 +87,7 @@ The kernel uses the macro `NF_HOOK(pf, hook, net, sk, skb, indev, outdev, okfn)`
 - **`NF_STOLEN`** is for hooks that take ownership and will free or forward the skb later (used by IPVS, conntrack defrag).
 - **`NF_QUEUE`** sends the skb to a userspace process via the NFQUEUE protocol (`libnetfilter_queue`). Userspace returns a verdict via netlink.
 - **`NF_REPEAT`** re-runs the same hook (used by some rule engines for re-evaluation after a state change).
+- **`NF_STOP`** remains in the UAPI for compatibility but is deprecated; treat it as historical, not something new code should return.
 
 The verdict can also pack additional data — for `NF_QUEUE`, the queue number; for `NF_DROP`, an errno. The high bits of the return value carry these; `NF_VERDICT_BITS` masks them.
 
@@ -188,9 +189,9 @@ sudo nft delete table inet test
 
 - **`include/uapi/linux/netfilter.h`** — verdicts, hook IDs, and `enum nf_inet_hooks`. The vocabulary file.
 
-- **`net/ipv4/netfilter/ip_tables.c`** — legacy iptables backend. Read the top to see how `xt_table_info` (the rule storage) is consulted; rules are linear, walked top-to-bottom per packet. Compare to nftables (next day) which uses a JIT-compiled bytecode VM.
+- **`net/ipv4/netfilter/ip_tables.c`** — legacy iptables backend. Read the top to see how `xt_table_info` (the rule storage) is consulted; rules are linear, walked top-to-bottom per packet. Compare to nftables (next day), which evaluates compact expression sequences through `nft_do_chain`.
 
-- **`net/netfilter/nf_tables_core.c`** — modern nftables runtime. The bytecode interpreter. Read this *after* tomorrow's nftables intro.
+- **`net/netfilter/nf_tables_core.c`** — modern nftables runtime. The expression interpreter. Read this *after* tomorrow's nftables intro.
 
 - **`net/netfilter/nf_conntrack_core.c`** — conntrack registers at PRE_ROUTING and LOCAL_OUT (the two "first sight" hooks). Day 22 covers this.
 
@@ -203,7 +204,7 @@ sudo nft delete table inet test
 - **Five IPv4 hooks**: PRE_ROUTING, LOCAL_IN, FORWARD, LOCAL_OUT, POST_ROUTING. Same five for IPv6.
 - **PREROUTING** = before routing (DNAT here); **POSTROUTING** = after routing (SNAT here).
 - Each hook has a per-netns list of callbacks ordered by priority.
-- Verdicts: **ACCEPT, DROP, STOLEN, QUEUE, REPEAT, STOP**.
+- Verdicts: **ACCEPT, DROP, STOLEN, QUEUE, REPEAT**; **STOP** is deprecated UAPI compatibility.
 - `nf_hook_slow` is the dispatcher; `NF_HOOK` macro inlines to zero overhead when no hooks registered.
 - iptables, nftables, conntrack, IPVS — **all** plug into the same hook system at different priorities.
 - Inspect with `nft list hooks` (modern) or `iptables -L -v` (legacy).

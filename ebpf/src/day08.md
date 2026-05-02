@@ -12,21 +12,23 @@ When you write a tracer for "every context switch," you don't want to attach to 
 
 Tracepoints exist for: scheduler events, block I/O, networking, memory allocation, filesystem operations, syscalls, and many more.
 
-## The two ways to attach to a tracepoint
+## The three BPF-facing ways to attach to a tracepoint
 
-For every tracepoint, the kernel exposes **two** attach interfaces:
+For tracepoint events, BPF has three related section families:
 
 ![Raw vs tp_btf](diagrams/day08_raw_vs_tp_btf.png)
 
-**Raw tracepoint** (`SEC("tracepoint/group/event")`) gives you a struct of *copied bytes* — whatever fields the tracepoint definition chose to copy out. Stable across kernel versions because the tracepoint format is part of the kernel's API.
+**Regular tracepoint** (`SEC("tracepoint/group/event")`) gives you a struct of *copied bytes* — whatever fields the tracepoint definition chose to copy out. Stable across kernel versions because the tracepoint format is part of the kernel's API.
 
-**tp_btf** (`SEC("tp_btf/event")`) gives you the original *typed kernel pointers* the tracepoint received as arguments. You can dereference any field. Same stability (same attach point), more power.
+**Raw tracepoint** (`SEC("raw_tracepoint/event")`) gives you raw positional arguments in `struct bpf_raw_tracepoint_args`. It avoids the copied event struct, but you unpack by index and lose typed-argument ergonomics.
 
-Same hook, two interfaces. The kernel emits both:
+**tp_btf** (`SEC("tp_btf/event")`) gives you the original *typed kernel pointers* the tracepoint received as arguments. You can dereference fields directly when the pointer is valid for the callback. Same hook, more power.
+
+Same event, three BPF-facing interfaces. The kernel dispatches whichever listener types are attached:
 
 ![Tracepoint dispatch](diagrams/day08_dispatch.png)
 
-When a tracepoint fires, the kernel runs *both* paths if anyone's attached. Raw tracepoint listeners get the copied struct; tp_btf listeners get the live pointers. Cost is bounded: the copy only happens if there are raw listeners.
+When a tracepoint fires, regular `tracepoint/...` listeners get the copied event struct, `raw_tracepoint/...` listeners get raw argument slots, and `tp_btf/...` listeners get typed arguments. Cost is bounded: the event-struct copy only happens for regular tracepoint listeners.
 
 > ### There are no Dumb Questions
 >
@@ -40,7 +42,7 @@ When a tracepoint fires, the kernel runs *both* paths if anyone's attached. Raw 
 >
 > **Q: What about `raw_tracepoint` (with the underscore)?**
 >
-> A: That's an older "I want raw values, not the formatted struct" mode for tracepoints. tp_btf supersedes it for kernels with BTF. You'll see `SEC("raw_tracepoint/...")` in older code — equivalent to tp_btf in spirit but without typed pointers.
+> A: That's the raw positional-argument mode: `ctx->args[0]`, `ctx->args[1]`, and so on. It is distinct from `SEC("tracepoint/...")`, which receives a copied event struct. `tp_btf` supersedes raw tracepoints for most new code on BTF-enabled kernels because it gives typed arguments instead of positional slots.
 
 ## How to find tracepoints on your kernel
 
@@ -211,7 +213,7 @@ Spikes (> 1ms) often correlate with workload, lock contention, scheduler decisio
 
 ## What to break, in order
 
-### Break 1 — Convert to raw tracepoint
+### Break 1 — Convert to regular tracepoint
 
 ```c
 SEC("tracepoint/sched/sched_switch")
@@ -225,7 +227,7 @@ int on_switch(struct trace_event_raw_sched_switch *ctx)
 
 This compiles and works for `prev_pid`, `next_pid`, `prev_comm`, `next_comm` (all in the copied struct). But there's no way to reach `prev->real_parent`, `prev->cgroup`, `prev->mm`, etc. — those would be in the live `task_struct`, which raw tracepoint doesn't give you.
 
-For most tracers, tp_btf is strictly better. Reach for raw tracepoint only when:
+For most tracers, tp_btf is more ergonomic. Reach for regular `tracepoint/...` only when:
 - You explicitly want stability (the raw struct format won't change).
 - The kernel doesn't have BTF (rare; pre-5.4).
 - You want to be portable across BPF runtimes that lack BTF awareness.
@@ -281,7 +283,7 @@ But: if `next` could be NULL or invalid, `BPF_CORE_READ` returns 0 instead of cr
 ## Bullet Points
 
 - **Tracepoints** are explicit instrumentation hooks placed by kernel devs; their format is stable across versions.
-- Every tracepoint has **two attach modes**: raw tracepoint (copied struct) and tp_btf (typed kernel pointers).
+- Tracepoint events have three BPF section families: `tracepoint/...` (copied struct), `raw_tracepoint/...` (raw positional args), and `tp_btf/...` (typed BTF args).
 - **Use tp_btf for new code.** Same hook, lower overhead, full field access via direct deref.
 - The `TP_PROTO(...)` of a tracepoint defines your tp_btf BPF program's argument list.
 - Discover tracepoints in `/sys/kernel/tracing/events/`.

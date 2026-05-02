@@ -60,7 +60,7 @@ struct {
 SEC("struct_ops/central_init")
 s32 BPF_STRUCT_OPS(central_init)
 {
-    return scx_bpf_create_dsq(FALLBACK_DSQ, -1);
+    return scx_bpf_create_dsq(FALLBACK_DSQ_ID, -1);
 }
 ```
 
@@ -86,7 +86,7 @@ SEC("struct_ops/central_enqueue")
 void BPF_STRUCT_OPS(central_enqueue, struct task_struct *p, u64 enq_flags)
 {
     /* Push into the fallback DSQ; central CPU will pick it up. */
-    scx_bpf_dispatch(p, FALLBACK_DSQ, SCX_SLICE_INF, enq_flags);
+    scx_bpf_dsq_insert(p, FALLBACK_DSQ_ID, SCX_SLICE_INF, enq_flags);
 
     /* Make sure central CPU is awake to handle this */
     bpf_kick_cpu(central_cpu, 0);
@@ -105,9 +105,9 @@ void BPF_STRUCT_OPS(central_dispatch, s32 cpu, struct task_struct *prev)
         return;     /* Only central decides. Other CPUs just consume. */
 
     bpf_for(i, 0, nr_cpu_ids) {
-        struct task_struct *p = scx_bpf_consume(FALLBACK_DSQ);
-        if (!p) break;
-        /* dispatch p to CPU `i` (with appropriate logic) */
+        if (!scx_bpf_dsq_move_to_local(FALLBACK_DSQ_ID, 0))
+            break;
+        /* richer versions insert tasks into SCX_DSQ_LOCAL_ON | cpu */
     }
 }
 ```
@@ -182,7 +182,7 @@ In `scx_central`, every task wake-up is routed to `central_cpu`. Why doesn't thi
 The flow:
 1. Task `T` wakes up. `select_cpu(T)` returns `central_cpu` → kernel's wake-up logic targets central_cpu.
 2. Central CPU's `enqueue(T)` runs: puts T on the FALLBACK_DSQ, kicks central_cpu (no-op since we're already on it).
-3. Central CPU's `dispatch()` callback runs (because the kernel just gave central CPU its slot back): consumes T from FALLBACK_DSQ, decides "T should run on CPU 5" via dispatch logic, places T on CPU 5's local DSQ via `scx_bpf_dispatch_to_cpu` (or similar).
+3. Central CPU's `dispatch()` callback runs (because the kernel just gave central CPU its slot back): consumes T from FALLBACK_DSQ, decides "T should run on CPU 5" via dispatch logic, places T on CPU 5's local DSQ via `scx_bpf_dsq_insert(..., SCX_DSQ_LOCAL_ON | 5, ...)` or moves a fallback task local with `scx_bpf_dsq_move_to_local()`.
 4. CPU 5 finishes its current task, calls `dispatch`, consumes T, runs T.
 
 So T actually runs on CPU 5. The central CPU's overhead is one trip through dispatch logic plus an IPI; T's wake-up latency is ~microseconds, dominated by IPI delivery.

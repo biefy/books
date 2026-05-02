@@ -136,7 +136,7 @@ struct {
 } rb SEC(".maps");
 
 SEC("fentry/vfs_read")
-int BPF_PROG(on_enter, struct file *f, char *buf, size_t n)
+int BPF_PROG(on_enter, struct file *f, char *buf, size_t n, loff_t *pos)
 {
     __u64 tid = bpf_get_current_pid_tgid() & 0xffffffff;
     __u64 ts = bpf_ktime_get_ns();
@@ -145,7 +145,7 @@ int BPF_PROG(on_enter, struct file *f, char *buf, size_t n)
 }
 
 SEC("fexit/vfs_read")
-int BPF_PROG(on_exit, struct file *f, char *buf, size_t n, ssize_t ret)
+int BPF_PROG(on_exit, struct file *f, char *buf, size_t n, loff_t *pos, ssize_t ret)
 {
     __u64 id = bpf_get_current_pid_tgid();
     __u64 tid = id & 0xffffffff;
@@ -170,7 +170,7 @@ int BPF_PROG(on_exit, struct file *f, char *buf, size_t n, ssize_t ret)
 ### What's new since Day 1–5
 
 - **Two programs in one object**, sharing maps. The skeleton exposes both as `skel->progs.on_enter` and `skel->progs.on_exit`. Both auto-attach when you call `latency_bpf__attach(skel)`.
-- **`BPF_PROG(on_exit, ..., ssize_t ret)`** — the *last* parameter on fexit is the return value. The `BPF_PROG` macro knows fexit programs receive one extra ctx slot. We meet `BPF_PROG`'s mechanics in detail on Day 7.
+- **`BPF_PROG(on_exit, ..., loff_t *pos, ssize_t ret)`** — fexit receives all function arguments first, then the return value as the *last* parameter. The `BPF_PROG` macro knows fexit programs receive one extra ctx slot. We meet `BPF_PROG`'s mechanics in detail on Day 7.
 - **`bpf_map_update_elem(..., BPF_ANY)`** — insert-or-update. Note we use `BPF_ANY` here, not `BPF_NOEXIST`, because we don't care if the same TID had a stale entry from a missed `fexit` (e.g., the previous call panicked). Overwriting is correct.
 - **`bpf_map_lookup_elem` returns a pointer into live map memory.** You can read it directly. The Verifier requires the null check.
 - **`bpf_map_delete_elem`** — *do not skip this.* It's the line that prevents the map from filling forever.
@@ -252,7 +252,7 @@ Change `SEC("fexit/vfs_read")` to `SEC("kretprobe/vfs_read")`. Rebuild. Things b
 
 1. `BPF_PROG` macro doesn't know about kretprobe — use `BPF_KRETPROBE` instead.
 2. The argument list is wrong. kretprobe's ctx is `struct pt_regs *`, not the typed args + return. You can only get the return value via `PT_REGS_RC(ctx)`.
-3. You can't access `f`, `buf`, `n` — they were the *entry* arguments and are gone by now.
+3. You can't access `f`, `buf`, `n`, or `pos` — they were the *entry* arguments and are gone by now.
 
 This is the operational reason fexit is strictly better. With fexit you have entry args + return value; with kretprobe you have only return value.
 

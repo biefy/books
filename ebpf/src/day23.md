@@ -45,42 +45,42 @@ struct {
 } rb SEC(".maps");
 ```
 
-### Step 2: a logged version of in_ack_event
+### Step 2: add telemetry without replacing the policy
+
+Do **not** replace `.in_ack_event` with a logging-only callback. DCTCP's alpha update depends on that callback. Instead, insert the telemetry at the top of the existing `dctcp_in_ack_event` function and leave the original logic below it unchanged:
 
 ```c
-SEC("struct_ops/dctcp_in_ack_event_logged")
-void BPF_PROG(dctcp_in_ack_event_logged, struct sock *sk, __u32 flags)
+SEC("struct_ops/dctcp_in_ack_event")
+void BPF_PROG(dctcp_in_ack_event, struct sock *sk, __u32 flags)
 {
     struct tcp_sock *tp = (void *)sk;
 
-    /* Reserve a ringbuf entry; skip if full */
     struct tcp_event *e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
-    if (!e) return;
+    if (e) {
+        e->ts_ns     = bpf_ktime_get_ns();
+        e->srtt_us   = tp->srtt_us >> 3;          /* srtt is stored in eighths of a us */
+        e->cwnd      = tp->snd_cwnd;
+        e->in_flight = tp->packets_out - (tp->sacked_out + tp->lost_out);
+        e->sk_cookie = bpf_get_socket_cookie(sk);
+        bpf_ringbuf_submit(e, 0);
+    }
 
-    e->ts_ns     = bpf_ktime_get_ns();
-    e->srtt_us   = tp->srtt_us >> 3;          /* srtt is stored in eighths of a us */
-    e->cwnd      = tp->snd_cwnd;
-    e->in_flight = tp->packets_out - (tp->sacked_out + tp->lost_out);
-    e->sk_cookie = bpf_get_socket_cookie(sk);
-
-    bpf_ringbuf_submit(e, 0);
-
-    /* For correctness we'd also want to call the original DCTCP logic here.
-     * For pure observability we can omit the original (the system will still
-     * work but DCTCP's internal state won't update from this callback). */
+    /* Keep the original DCTCP alpha-update logic here. */
 }
 ```
 
-### Step 3: replace the slot in the vtable
+If you prefer a wrapper, rename the original body to a helper and call it from the wrapper after emitting the event. Either way, the original alpha update must still run.
 
-Find the `SEC(".struct_ops") struct tcp_congestion_ops dctcp = { ... }` block. Replace the `.in_ack_event` slot:
+### Step 3: keep the callback slot, change only the algorithm name
+
+Find the `SEC(".struct_ops") struct tcp_congestion_ops dctcp = { ... }` block. Keep the `.in_ack_event` slot pointed at the DCTCP implementation and change the name to avoid colliding with the original:
 
 ```c
 SEC(".struct_ops")
 struct tcp_congestion_ops dctcp = {
     /* existing entries... */
-    .in_ack_event = (void *)dctcp_in_ack_event_logged,
-    .name = "bpf_dctcp_logged",        /* new name to avoid colliding with the original */
+    .in_ack_event = (void *)dctcp_in_ack_event,
+    .name = "bpf_dctcp_logged",
 };
 ```
 

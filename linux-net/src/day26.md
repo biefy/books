@@ -38,12 +38,7 @@ int sk = socket(AF_INET, SOCK_STREAM, IPPROTO_MPTCP);
 
 That's it. The application sees a regular socket. The kernel handles all subflow management. (`IPPROTO_MPTCP = 262`.)
 
-For applications that don't explicitly request MPTCP, the system can default to it via:
-
-```bash
-sudo sysctl -w net.mptcp.enabled=1
-sudo sysctl -w net.ipv4.tcp_default_mptcp_protocol=1   # makes IPPROTO_TCP map to IPPROTO_MPTCP
-```
+`net.mptcp.enabled=1` controls whether MPTCP sockets can be created; it does **not** remap ordinary `IPPROTO_TCP` sockets to MPTCP. Applications opt in with `IPPROTO_MPTCP`, or an operator can use a selective mechanism such as `mptcpize`/LD_PRELOAD or a BPF socket-create hook to change specific sockets before creation.
 
 ## Endpoint configuration
 
@@ -72,16 +67,17 @@ Endpoint flags:
 
 `net/mptcp/sched.c`. The scheduler decides which subflow gets the next segment:
 
-- **default** (`tcp_default_scheduler`): pick the subflow with the lowest RTT that has window space.
-- **redundant**: send on multiple subflows for reliability (loses bandwidth but survives single-path failures).
-- **round-robin**: evenly distribute across subflows.
-- **BPF-defined**: write a `struct_ops` BPF program implementing `mptcp_sched_ops` (eBPF Day 22 territory).
+- **default** (`mptcp_sched_default`): choose an available subflow using the in-kernel send-time estimate, queued data, pacing rate, window space, and backup status.
 
-Configure:
+The scheduler framework is pluggable (`struct mptcp_sched_ops`), but the set available on your system is exactly what the kernel has registered. Check before configuring:
 
 ```bash
-sudo sysctl net.mptcp.scheduler=bpf  # or 'default', 'redundant'
+cat /proc/sys/net/mptcp/available_schedulers
+cat /proc/sys/net/mptcp/scheduler
+sudo sysctl -w net.mptcp.scheduler=default
 ```
+
+Do not assume `redundant`, `round-robin`, or `bpf` exists unless it appears in `available_schedulers` for the kernel you are running.
 
 ## Path manager
 
@@ -113,12 +109,15 @@ It's worse than plain TCP when:
 ## Today's experiment
 
 ```bash
-# Verify MPTCP support
+# Verify MPTCP support; save the current value if you change it.
+old_mptcp_enabled=$(cat /proc/sys/net/mptcp/enabled)
 sudo sysctl net.mptcp.enabled
-modprobe mptcp_pm 2>/dev/null
+sudo sysctl -w net.mptcp.enabled=1
+trap 'sudo sysctl -w net.mptcp.enabled=$old_mptcp_enabled; rm -f /tmp/mptcp_client /tmp/mptcp_client.c' EXIT
 
 # Use ip mptcp tooling
 sudo ip mptcp endpoint show
+cat /proc/sys/net/mptcp/available_schedulers
 
 # Quick test (need a partner system or use loopback)
 # Server:
@@ -183,7 +182,7 @@ sudo tcpdump -i lo -n -X 'tcp port 9999' | grep -E "MPC|MP_CAPABLE|MP_JOIN|DSS"
 - **Subflows** are real TCP connections; the **msk** (master) coordinates them.
 - Key TCP options: **MP_CAPABLE** (handshake), **MP_JOIN** (add subflow), **DSS** (msk-level seq), **ADD_ADDR** (announce endpoints).
 - **Endpoints** configured via `ip mptcp endpoint`. Flags: `signal`, `subflow`, `backup`, `fullmesh`.
-- **Schedulers**: default (lowest-RTT), redundant, round-robin, BPF-driven.
+- **Schedulers** are pluggable, but current choices are whatever appears in `net.mptcp.available_schedulers`; the in-tree default is `default`.
 - **Mobile / multi-NIC** workloads benefit; single-path low-latency workloads see MPTCP overhead.
 - In-tree since 5.6 (2020); substantial improvements every release through 7.x.
 
@@ -194,7 +193,7 @@ If one subflow's RTT spikes severely (e.g., cellular degrades during a transfer)
 <details>
 <summary>Click to reveal answer</summary>
 
-**Answer:** The default scheduler steers new segments to the better subflow — its decision per segment is "lowest-RTT subflow with window space," so the slow subflow naturally gets less traffic. Already-in-flight segments on the slow subflow stay there until ACKed or retransmitted; MPTCP-level retransmit can also reinject them on the better subflow if the slow one's RTO fires.
+**Answer:** The default scheduler steers new segments to a better available subflow using its send-time estimate, queued data, pacing rate, window space, and backup status. A path with a much worse RTT or no usable window naturally gets less traffic. Already-in-flight segments on the slow subflow stay there until ACKed or retransmitted; MPTCP-level retransmit can also reinject them on the better subflow if the slow one's RTO fires.
 
 **The limit is buffering.** The msk reassembles data in order at the receiver. If subflow A is fast (low RTT, current data) and subflow B is slow (high RTT, older data), the receiver has to buffer A's data while waiting for B's older data to arrive. If the receive buffer is too small (`tcp_rmem`), MPTCP can't take advantage of the path diversity — head-of-line blocking on the slow path stalls the application. Tuning: bump `tcp_rmem` to at least the sum of the BDPs across subflows.
 

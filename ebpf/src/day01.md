@@ -8,7 +8,7 @@ You'd think this would be hard. The kernel is busy. It runs thousands of functio
 
 **You install a doorbell.** That's `fentry`.
 
-Here's the secret. Every kernel function (when `CONFIG_FUNCTION_TRACER=y`, which is basically always) starts with **5 bytes of NOPs**. Just five `nop` instructions. Sitting there. Doing nothing. **Waiting.**
+Here's the secret on x86_64 builds with function tracing enabled. Traceable kernel functions reserve an entry patch site, often shown as a 5-byte NOP slot. It sits there doing nothing until ftrace/BPF turns it into an entry call path.
 
 ```
 do_unlinkat:
@@ -18,7 +18,7 @@ do_unlinkat:
     ...
 ```
 
-When you attach an fentry program, the kernel atomically patches those 5 NOPs into a `jmp` to a tiny generated stub called a **trampoline**. The trampoline saves arguments, calls *your* BPF program with them, restores everything, and returns to `do_unlinkat` as if nothing happened. The function never knew it was being watched.
+When you attach an fentry program, the kernel atomically patches that reserved site into the architecture's ftrace/BPF entry path. That path reaches a generated **trampoline**. The trampoline saves arguments, calls *your* BPF program with them, restores everything, and then lets `do_unlinkat` run as if nothing happened. The exact instruction is architecture- and config-dependent; the important model is patch site → trampoline → original function body.
 
 ![fentry trampoline flow](diagrams/day01_trampoline_flow.png)
 
@@ -30,7 +30,7 @@ When you attach an fentry program, the kernel atomically patches those 5 NOPs in
 >
 > **Q: Why not use kprobe? I keep seeing kprobe in old tutorials.**
 >
-> A: kprobe predates fentry and works differently. It overwrites the function's first instruction with a software breakpoint (`int3` on x86). The CPU traps, a handler runs your code, then it emulates the original instruction and continues. Works on **any** function. Costs **~50 ns** per call because traps are expensive. fentry's `jmp` costs **~10 ns**. Five times faster. Use fentry whenever it's available; kprobe only for the rare functions that lack BTF.
+> A: kprobe predates fentry and works differently. It overwrites the function's first instruction with a software breakpoint (`int3` on x86). The CPU traps, a handler runs your code, then it emulates the original instruction and continues. Works on **any** function. Costs **~50 ns** per call because traps are expensive. fentry's direct entry path costs **~10 ns**. Five times faster. Use fentry whenever it's available; kprobe only for the rare functions that lack BTF.
 >
 > **Q: What does "BTF" mean, and why do you keep mentioning it?**
 >
@@ -38,13 +38,13 @@ When you attach an fentry program, the kernel atomically patches those 5 NOPs in
 
 > ### Sharpen your pencil
 >
-> The compiler reserves **exactly 5 NOP bytes** at the start of every traceable function. Why 5? What instruction needs that much space?
+> On x86_64, the compiler often reserves a **5-byte NOP slot** at the start of a traceable function. Why 5? What instruction size is that designed to fit?
 >
 > .  
 > .  
 > .
 >
-> **Answer:** a near `jmp` on x86_64 is 5 bytes — `e9` opcode + 4-byte signed offset. The reservation is sized to fit the patch. On ARM64 the slot is 8 bytes for the same reason: ARM64 branches are 4 bytes and you sometimes need two for far jumps.
+> **Answer:** a near relative `call` or `jmp` on x86_64 is 5 bytes — 1 opcode byte plus a 4-byte signed offset. The reservation is sized so ftrace can patch the site without moving the function body. Other architectures use their own patch-site shape.
 
 ---
 
@@ -242,8 +242,10 @@ int main(void)
 make
 sudo ./hello
 # in another terminal:
-touch /tmp/x && rm /tmp/x
-ls /tmp | xargs -I{} rm /tmp/{}    # delete a few more, watch the events
+scratch=$(mktemp -d /tmp/ebpf-day01.XXXXXX)
+touch "$scratch/one" "$scratch/two"
+rm "$scratch/one" "$scratch/two"
+rmdir "$scratch"
 ```
 
 Expected output:

@@ -54,12 +54,12 @@ SEC(".struct_ops.link")
 struct tcp_congestion_ops my_dctcp = {
     .init       = (void *)my_init,
     .ssthresh   = (void *)my_ssthresh,
-    .cong_avoid = (void *)tcp_reno_cong_avoid,  /* fall back to Reno's C impl */
+    .cong_avoid = (void *)tcp_reno_cong_avoid,  /* explicit Reno C callback */
     .name       = "my_dctcp",
 };
 ```
 
-Notice the `.cong_avoid = tcp_reno_cong_avoid` line — **you can mix BPF callbacks with the kernel's existing C callbacks**. Unset slots fall back to defaults. Partial overrides are supported.
+Notice the `.cong_avoid = tcp_reno_cong_avoid` line — **you can mix BPF callbacks with the kernel's existing C callbacks** by assigning them explicitly. Required and optional slots are subsystem-specific. For TCP congestion control, the kernel requires `ssthresh`, `undo_cwnd`, and either `cong_avoid` or `cong_control`; other callbacks may be left NULL only if the TCP CC framework defines that as optional.
 
 ## The lifecycle
 
@@ -161,7 +161,7 @@ Shows the vtable bound and which BPF prog FD serves each callback.
 - Each callback is a separate BPF program (`SEC("struct_ops/X")`); the vtable struct lives in `SEC(".struct_ops")` or `.struct_ops.link`.
 - Loading the map auto-registers the implementation with the kernel subsystem (TCP CC, sched_ext, etc.).
 - The **verifier checks each callback's signature** against the kernel's BTF for the vtable struct — mismatches caught at load time.
-- **Partial implementations** are supported: unset slots fall back to default callbacks.
+- **Partial implementations are subsystem-specific**: TCP CC requires `ssthresh`, `undo_cwnd`, and either `cong_avoid` or `cong_control`; optional slots may remain NULL or be explicitly assigned to existing C callbacks.
 - **Used by:** TCP CC, sched_ext, congestion-control modules, struct_ops growing per release.
 - Inspect: `bpftool struct_ops list/dump`.
 
@@ -172,9 +172,9 @@ If you load a BPF struct_ops module that defines only some callbacks (e.g., `ini
 <details>
 <summary>Click to reveal answer</summary>
 
-**Answer:** Unset slots fall back to default implementations defined in the kernel. For TCP CC specifically, `cong_avoid` falls back to `tcp_reno_cong_avoid` (or whatever the framework's default is). So your CC behaves like Reno-with-custom-ssthresh for the unset callback. This is **partial implementation**, and it's useful when you only want to override one or two policies and inherit the rest. The kernel doesn't reject your incomplete vtable — it accepts it and substitutes defaults for missing slots.
+**Answer:** For TCP congestion control, that object is rejected unless the required callbacks are present. TCP CC requires `ssthresh`, `undo_cwnd`, and either `cong_avoid` or `cong_control`. If you want Reno behavior for `cong_avoid`, assign `.cong_avoid = (void *)tcp_reno_cong_avoid` explicitly.
 
-This is the same pattern used by struct_ops users in the rest of the kernel — sched_ext schedulers commonly implement only a subset of `sched_ext_ops` callbacks, letting the framework fill in safe defaults for the rest. It encourages "build minimal, evolve incrementally" — you don't need a 30-callback implementation to test one new idea.
+Struct_ops does not have a universal "unset slots fall back" rule. Each subsystem decides which callbacks are required, which are optional, and what a NULL optional callback means. sched_ext, TCP CC, and future struct_ops users have different contracts.
 
 </details>
 

@@ -1,62 +1,77 @@
 direction: down
 
 title: |md
-  ## AF_XDP: zero-copy packets to userspace
+  ## AF_XDP architecture and ownership
 | {near: top-center; shape: text}
 
-driver: "NIC driver RX" {
+umem: "UMEM registration" {
   style.fill: "#dbeafe"
-  d_body: |md
-    DMA writes packet
-    into UMEM (user memory
-    pre-registered with kernel).
-    No copy — same buffer
-    is visible to user.
+  body: |md
+    **Does:** userspace allocates frames and registers
+    them with the kernel.
+
+    **Why next:** driver/kernel needs packet buffers
+    before RX can start.
+
+    **State:** FILL ring advertises free UMEM frame
+    addresses.
   |
 }
 
-xdp_prog: "XDP program" {
+driver: "driver RX" {
   style.fill: "#fef3c7"
-  x_body: |md
-    Decides: this packet
-    goes to userspace
-    (not the kernel stack).
+  body: |md
+    **Does:** receives packets into driver buffers.
+    With supported NIC/driver zero-copy, DMA targets
+    UMEM frames; otherwise copy mode copies into UMEM.
 
-    Returns:
-    bpf_redirect_map(&xsks, q, 0)
-    + XDP_REDIRECT
+    **Why next:** XDP decides whether stack or AF_XDP
+    owns the packet.
+
+    **State:** packet represented by `xdp_buff`.
   |
 }
 
-ring: "AF_XDP rings" {
+xdp: "XDP redirect" {
+  style.fill: "#fef3c7"
+  body: |md
+    **Does:** `bpf_redirect_map(&xsks_map, qid, 0)`
+    looks up the queue's AF_XDP socket.
+
+    **Why next:** redirect transfers ownership to the
+    XSK RX ring only if a socket is registered.
+
+    **State:** packet is stack-bound or XSK-bound.
+  |
+}
+
+rings: "AF_XDP rings" {
   style.fill: "#dcfce7"
-  r_body: |md
-    4 rings shared between
-    kernel and user:
-    - FILL  (user→kernel: free buffers)
-    - RX    (kernel→user: packets)
-    - TX    (user→kernel: send these)
-    - COMP  (kernel→user: TX done)
+  body: |md
+    **Does:** descriptors move between kernel and user:
+    FILL gives free frames, RX gives received packets,
+    TX submits sends, COMPLETION recycles TX frames.
 
-    No syscalls in fast path —
-    user/kernel poll the rings.
+    **State:** descriptors, not packet copies, are the
+    fast-path currency.
   |
 }
 
-user: "Userspace" {
-  style.fill: "#fef3c7"
-  u_body: |md
-    Reads RX ring → gets buffer descriptor
-    Processes packet **in place**
-    Returns descriptor to FILL ring
+user: "userspace poll loop" {
+  style.fill: "#dcfce7"
+  body: |md
+    **Does:** reads RX descriptors, processes UMEM data,
+    then returns frame addresses to FILL.
 
-    Throughput: **30+ Mpps per core**
-    on commodity hardware.
+    **Why next:** without recycling, RX runs out of
+    buffers and packets drop.
+
+    **State:** ownership returns to kernel for reuse.
   |
 }
 
-driver -> xdp_prog: "frame in UMEM"
-xdp_prog -> ring: "redirect to xsk"
-ring -> user: "RX ring"
-user -> ring: "FILL ring (recycle)"
-user -> ring: "TX ring (send)"
+umem -> driver: "free frame descriptors"
+driver -> xdp: "packet in xdp_buff"
+xdp -> rings: "XDP_REDIRECT to XSKMAP entry"
+rings -> user: "RX descriptors"
+user -> umem: "recycled frame addresses"

@@ -1,24 +1,16 @@
 flowchart LR
-    User["BPF userspace:<br/>'attach this prog to<br/>200 syscalls'"]
-    LinkCreate["BPF_LINK_CREATE<br/>(attach_type =<br/>BPF_TRACE_KPROBE_MULTI)"]
-    Kernel["Kernel:<br/>kprobe_multi_link_attach"]
+    User["userspace attach request<br/><b>does:</b> passes one BPF prog plus many function names/patterns<br/><b>why next:</b> kernel must resolve names before probes exist<br/><b>state:</b> desired attach set"]
+    LinkCreate["BPF_LINK_CREATE<br/><b>does:</b> creates kprobe_multi link request<br/><b>why next:</b> link gives one lifetime owner for all probes<br/><b>state:</b> pending bpf_link fd"]
+    Resolve["name/address resolution<br/><b>does:</b> resolves kallsyms/ftrace locations and sorts addresses<br/><b>why next:</b> ftrace needs concrete instruction sites<br/><b>state:</b> validated address array"]
+    Install["install probes<br/><b>does:</b> attaches ftrace-based probe at each resolved function<br/><b>why next:</b> runtime calls need a dispatch target<br/><b>state:</b> many sites owned by one link"]
+    Runtime["matched function fires<br/><b>does:</b> same BPF program runs and can call bpf_get_func_ip<br/><b>why next:</b> program uses IP to distinguish which function fired<br/><b>state:</b> per-call ctx plus function identity"]
+    Close["close bpf_link<br/><b>does:</b> removes every installed probe atomically as link lifetime ends<br/><b>state:</b> no stray per-function attachments"]
 
-    Resolve["Resolve all 200 names<br/>to addresses via<br/>kallsyms (sorted lookup)"]
-    Install["For each address:<br/>install ftrace-based probe"]
-    Single["Single bpf_link<br/>owns all 200 attachments"]
-
-    Tracepoint["Any matched function fires →<br/>same BPF program runs<br/>(can read which one via<br/>bpf_get_func_ip)"]
-
-    User --> LinkCreate
-    LinkCreate --> Kernel
-    Kernel --> Resolve
-    Resolve --> Install
-    Install --> Single
-    Single --> Tracepoint
+    User --> LinkCreate --> Resolve --> Install --> Runtime --> Close
 
     classDef us fill:#dbeafe,stroke:#2563eb
-    classDef sys fill:#fef3c7,stroke:#d97706
-    classDef rt fill:#dcfce7,stroke:#16a34a
+    classDef kern fill:#fef3c7,stroke:#d97706
+    classDef run fill:#dcfce7,stroke:#16a34a
     class User,LinkCreate us
-    class Kernel,Resolve,Install,Single sys
-    class Tracepoint rt
+    class Resolve,Install kern
+    class Runtime,Close run

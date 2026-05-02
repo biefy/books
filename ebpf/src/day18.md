@@ -1,4 +1,4 @@
-# Day 18 — AF_XDP: zero-copy packets to userspace at line rate
+# Day 18 — AF_XDP: packets to userspace at line rate
 
 > **Today's mission:** redirect raw packets from XDP to a userspace ring at line rate without copying. Build a tiny zero-copy packet receiver. Total time: ~90 minutes.
 
@@ -6,13 +6,13 @@
 
 The Linux network stack is general-purpose. For most workloads that's fine — sockets, retransmits, congestion control, all done for you. But for packet-processing apps (DPI, custom load balancers, network testing, telemetry pipelines), the stack adds overhead you don't want: skb allocation, protocol parsing you'll redo anyway, syscalls per packet.
 
-**AF_XDP** is the kernel's answer to DPDK: zero-copy packet receive directly from the NIC into userspace memory, with no syscalls in the fast path.
+**AF_XDP** is the kernel's answer to DPDK: packet receive directly into userspace-managed rings, with no syscalls in the steady-state receive loop. On NICs and drivers with zero-copy support, packets DMA directly into UMEM; otherwise AF_XDP still works in copy mode with lower throughput.
 
 ![AF_XDP architecture](diagrams/day18_afxdp.png)
 
-The trick: userspace pre-allocates a memory region (UMEM) and registers it with the kernel. The NIC driver DMAs incoming packets directly into that memory. An XDP program redirects to an AF_XDP socket bound to that UMEM. Userspace polls a ring of descriptors pointing into UMEM — no copy, ever.
+The trick: userspace pre-allocates a memory region (UMEM) and registers it with the kernel. In zero-copy mode, the NIC driver DMAs incoming packets directly into that memory. In copy mode, the kernel copies packet data into UMEM but keeps the same ring and descriptor model. An XDP program redirects to an AF_XDP socket bound to that UMEM, and userspace polls descriptors pointing into UMEM.
 
-Throughput on commodity hardware: 30+ Mpps per core. With multi-queue, you scale linearly with cores.
+Throughput on supported zero-copy NICs can reach 30+ Mpps per core. A veth lab is still useful for learning the lifecycle, but it demonstrates functional/copy-mode behavior rather than NIC DMA zero-copy performance.
 
 ## The ring quartet
 
@@ -129,14 +129,19 @@ int main(int argc, char **argv) {
     /* 3. Load and attach the BPF program separately */
     /* (the libxdp default would do this for you, but we want to control it) */
 
-    /* 4. Pre-fill the FILL ring */
+    /* 4. Insert this AF_XDP socket fd into xsks_map at queue 0 */
+    int xsk_fd = xsk_socket__fd(xsk);
+    __u32 qid = 0;
+    bpf_map_update_elem(xsks_map_fd, &qid, &xsk_fd, BPF_ANY);
+
+    /* 5. Pre-fill the FILL ring */
     __u32 idx;
     xsk_ring_prod__reserve(&umem.fq, UMEM_NUM_FRAMES, &idx);
     for (int i = 0; i < UMEM_NUM_FRAMES; i++)
         *xsk_ring_prod__fill_addr(&umem.fq, idx + i) = i * FRAME_SIZE;
     xsk_ring_prod__submit(&umem.fq, UMEM_NUM_FRAMES);
 
-    /* 5. Poll loop */
+    /* 6. Poll loop */
     while (!exiting) {
         __u32 idx_rx, n;
         n = xsk_ring_cons__peek(&rx, 64, &idx_rx);
@@ -161,10 +166,14 @@ int main(int argc, char **argv) {
         /* ...mark these addrs available... */
         xsk_ring_prod__submit(&umem.fq, n);
     }
+
+    bpf_map_delete_elem(xsks_map_fd, &qid);
+    xsk_socket__delete(xsk);
+    xsk_umem__delete(umem.umem);
 }
 ```
 
-This is busier than previous labs because AF_XDP exposes the rings directly. libxdp helps but doesn't hide everything.
+The important lifecycle is: create UMEM, bind an AF_XDP socket to `(ifname, queue)`, put the socket fd in `XSKMAP`, redirect by queue id, then remove the map entry before destroying the socket. This is busier than previous labs because AF_XDP exposes the rings directly. libxdp helps but doesn't hide everything.
 
 ### Run
 
@@ -174,7 +183,7 @@ sudo ./xsk_recv veth1
 ping -c 5 10.0.0.2
 ```
 
-You should see raw frame bytes printed. Throughput-test with packet generators (`pktgen`, `trafgen`) to confirm Mpps.
+You should see raw frame bytes printed. On veth, stop there: it proves the redirect/ring lifecycle. Use a supported physical NIC and driver before making zero-copy throughput claims with packet generators (`pktgen`, `trafgen`).
 
 ---
 
@@ -206,10 +215,10 @@ Real NICs have multiple RX queues. Spawn one userspace thread per queue, one AF_
 
 ## Bullet Points
 
-- **AF_XDP** is kernel-bypass for packet processing — zero copy, polled rings, no syscalls in the fast path.
+- **AF_XDP** is kernel-bypass for packet processing — polled rings and no syscalls in the steady-state receive loop; zero-copy requires driver/NIC support.
 - Architecture: UMEM (user memory) + 4 rings (FILL, RX, TX, COMP) + XDP redirect.
 - BPF side is one line: `bpf_redirect_map(&xsks_map, ctx->rx_queue_index, 0)`.
-- Throughput: **30+ Mpps per core**, scales linearly with multi-queue.
+- Throughput: **30+ Mpps per core** is a supported-NIC zero-copy result; veth/copy mode is for functional learning.
 - Use **libxdp** (`xsk.h`) for ring helpers; raw kernel UAPI is doable but verbose.
 - Modes: zero-copy (best), copy-mode (universal, slower).
 - Cooperates with the kernel — you can split queues between AF_XDP and the kernel stack.

@@ -83,7 +83,7 @@ This is how policy routers, VPN clients (`mwan3`), and per-application VPN confi
 
 ## Multiple FIB tables in detail
 
-You can have up to **256 routing tables** (3 reserved, 253 user-defined). Each is a self-contained FIB. Tables are persistent — they exist as soon as you add a route to them. To list a specific table:
+Routing table IDs are **32-bit values** in modern netlink (`RTA_TABLE`). The familiar 253/254/255 IDs are well-known defaults, and examples often use small numbers like 100 or 200, but the kernel is not capped at 256 tables. Each table is a self-contained FIB and exists as soon as you add a route to it. To list a specific table:
 
 ```bash
 ip route show table 100
@@ -119,10 +119,10 @@ For each new flow, the kernel computes a hash from packet fields and modulo-N's 
 The hash function is configurable via `net.ipv4.fib_multipath_hash_policy`:
 
 - **0** — L3 only: hash `(src_ip, dst_ip)`. **Same source-destination pair always uses one nexthop**, even if it's many connections. Poor balance for client-server workloads with few clients.
-- **1** — L4: hash `(src_ip, dst_ip, src_port, dst_port, proto)`. Different connections from the same client spread across nexthops. Default for most workloads.
+- **1** — L4: hash `(src_ip, dst_ip, src_port, dst_port, proto)`. Different connections from the same client spread across nexthops. Useful when a few client/server pairs carry many connections, but it is an opt-in sysctl setting, not the kernel default.
 - **2** — Inner L3: for tunneled traffic, hash on the *inner* IPs, not the outer. Used when a single tunnel carries many flows that should spread across paths.
 
-Pick mode 1 unless you have a specific reason. Mode 0 produces poor balance when you have a few heavy talkers. Mode 2 is for overlay networks (VXLAN, GRE) where outer addresses are the same for many inner flows.
+The kernel default is mode 0. Pick mode 1 when you want better balancing across many L4 flows between the same endpoints. Mode 2 is for overlay networks (VXLAN, GRE) where outer addresses are the same for many inner flows.
 
 ### The reordering trade-off
 
@@ -146,7 +146,14 @@ Implementation: `net/ipv4/nexthop.c:563` and surrounding (`nh_grp_res_table`). T
 ## Today's experiment
 
 ```bash
-# Source-based test on local interfaces
+# Source-based test on local interfaces. Save cleanup first.
+cleanup() {
+  sudo ip rule del from 10.99.0.0/24 lookup 99 priority 99 2>/dev/null || true
+  sudo ip route del default via 127.0.0.1 table 99 2>/dev/null || true
+  sudo ip route del 10.99.0.0/24 dev lo 2>/dev/null || true
+}
+trap cleanup EXIT
+
 sudo ip route add 10.99.0.0/24 dev lo
 sudo ip rule add from 10.99.0.0/24 lookup 99 priority 99
 sudo ip route add default via 127.0.0.1 table 99
@@ -156,6 +163,7 @@ sudo bpftrace -e '
 fentry:fib_rules_lookup { @rules = count(); }
 fentry:fib_table_lookup { printf("table_id=%d\n", args->tb->tb_id); }
 ' &
+tracer=$!
 
 # Send packet from 10.99 source — should hit table 99
 ping -I 10.99.0.5 -c 1 8.8.8.8
@@ -163,7 +171,7 @@ ping -I 10.99.0.5 -c 1 8.8.8.8
 # And from default — should hit main (254)
 ping -c 1 8.8.8.8
 
-sudo killall bpftrace
+sudo kill "$tracer"
 ```
 
 You'll see `table_id=99` for the first ping and `table_id=254` (main) for the second.
@@ -188,11 +196,11 @@ You'll see `table_id=99` for the first ping and `table_id=254` (main) for the se
 
 - **`fib_rules`** decide *which* routing table to consult. Default: local → main → default.
 - Selectors: `from`, `iif`, `oif`, `tos`, `fwmark`, `uidrange`, `ipproto`, `sport`/`dport`.
-- **Up to 256 tables.** Custom tables via `ip route add … table N`. Names in `/etc/iproute2/rt_tables`.
+- **Routing table IDs are `u32`.** Custom tables via `ip route add … table N`. Names in `/etc/iproute2/rt_tables`.
 - **Source-based routing** is the most common use case; **mark-based** for firewall integration.
 - **`rp_filter=1`** can break source-based routing — set to `2` (loose) on relevant interfaces.
 - **ECMP**: multi-nexthop route, kernel hashes per-flow to pick one. Same flow → same nexthop.
-- **Hash policy**: 0 (L3), 1 (L4 — default for most), 2 (inner L3 for tunnels).
+- **Hash policy**: 0 (L3 — kernel default), 1 (L4, opt-in for better flow spread), 2 (inner L3 for tunnels).
 - **Plain ECMP rehashes everything when nexthops change.** Use **resilient nexthop groups** (`type resilient`) for stable production gateways.
 
 ## Check question

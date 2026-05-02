@@ -76,7 +76,7 @@ Most programs return `TC_ACT_OK` (allow), `TC_ACT_SHOT` (drop), or `TC_ACT_REDIR
 
 char LICENSE[] SEC("license") = "GPL";
 
-SEC("tc")
+SEC("tc_ingress")
 int tc_ingress(struct __sk_buff *skb)
 {
     void *data = (void *)(long)skb->data;
@@ -91,7 +91,7 @@ int tc_ingress(struct __sk_buff *skb)
     return TC_ACT_OK;
 }
 
-SEC("tc")
+SEC("tc_egress")
 int tc_egress(struct __sk_buff *skb)
 {
     /* Drop every UDP packet outbound to demonstrate egress */

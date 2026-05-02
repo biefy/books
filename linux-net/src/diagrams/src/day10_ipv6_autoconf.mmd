@@ -1,21 +1,22 @@
-flowchart LR
-    Iface["NIC enabled IPv6"]
-    LL["assign link-local fe80::/64<br/>auto from MAC (or stable_secret)"]
-    RA["listen for Router Advertisement<br/>(ICMPv6 type 134)"]
-    SLAAC{"SLAAC<br/>(M=0,A=1)?"}
-    Auto["assign global from RA prefix<br/>+ EUI-64 or random"]
-    DHCP["DHCPv6<br/>(M=1)"]
+flowchart TD
+    Up["interface goes up<br/><b>does:</b> enables IPv6 device state and joins solicited-node multicast<br/><b>why next:</b> link-local address is required before routers/neighbors<br/><b>state:</b> tentative IPv6 configuration"]
+    LL["link-local address<br/><b>does:</b> derives fe80::/64 address from stable secret/MAC policy<br/><b>why next:</b> address must pass DAD before use<br/><b>state:</b> tentative link-local address"]
+    DAD["Duplicate Address Detection<br/><b>does:</b> sends Neighbor Solicitation for own address<br/><b>why next:</b> duplicate means address cannot be assigned<br/><b>state:</b> preferred address or duplicate failure"]
+    RA["Router Advertisement<br/><b>does:</b> provides prefixes plus A/M/O flags and default router info<br/><b>why next:</b> flags decide SLAAC vs DHCPv6 handoff<br/><b>state:</b> prefix lifetimes and router learned"]
+    Flags{"RA flags/prefix<br/><b>does:</b> A=autonomous prefix, M=managed DHCPv6<br/><b>state:</b> chosen address configuration path"}
+    SLAAC["SLAAC global address<br/><b>does:</b> combines prefix with stable/random interface ID<br/><b>why next:</b> global address also needs DAD<br/><b>state:</b> tentative global address"]
+    DHCP["DHCPv6 client<br/><b>does:</b> asks server for address or other config when flags require<br/><b>why next:</b> assigned address/options feed IPv6 stack<br/><b>state:</b> managed address or DNS/options"]
+    NDP["NDP usable<br/><b>does:</b> resolves neighbors and maintains reachability cache<br/><b>state:</b> IPv6 can send to local-link next hops"]
 
-    NDP["NDP for neighbours<br/>(replaces ARP for IPv6)"]
-    DAD["Duplicate Address Detection<br/>(send NS for own addr)"]
+    Up --> LL --> DAD --> RA --> Flags
+    Flags -->|A=1| SLAAC --> DAD
+    Flags -->|M=1 or other config| DHCP --> NDP
+    DAD -->|no duplicate| NDP
+    DAD -->|duplicate| Up
 
-    Iface --> LL --> DAD --> RA --> SLAAC
-    SLAAC -->|yes| Auto
-    SLAAC -->|no| DHCP
-    Auto --> NDP
-    DHCP --> NDP
-
-    classDef ok fill:#dcfce7,stroke:#16a34a
-    classDef hot fill:#fef3c7,stroke:#d97706
-    class Auto,DHCP ok
-    class SLAAC hot
+    classDef init fill:#dbeafe,stroke:#2563eb
+    classDef decision fill:#fef3c7,stroke:#d97706
+    classDef ready fill:#dcfce7,stroke:#16a34a
+    class Up,LL,RA init
+    class DAD,Flags decision
+    class SLAAC,DHCP,NDP ready

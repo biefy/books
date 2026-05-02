@@ -1,20 +1,20 @@
 flowchart LR
-    PreRouting["NF_INET_PRE_ROUTING<br/>(after IP header valid)"]
-    Routing{"local or<br/>forward?"}
-    LocalIn["NF_INET_LOCAL_IN<br/>(packets for us)"]
-    Forward["NF_INET_FORWARD<br/>(transit packets)"]
-    LocalOut["NF_INET_LOCAL_OUT<br/>(local generation)"]
-    PostRouting["NF_INET_POST_ROUTING<br/>(just before TX)"]
+    PreRouting["PRE_ROUTING<br/><b>does:</b> first IP-policy point after header validation<br/><b>why next:</b> routing must see any DNAT result<br/><b>typical work:</b> conntrack, defrag, DNAT"]
+    Routing{"route lookup<br/><b>does:</b> decides local vs transit<br/><b>state:</b> dst->input chosen"}
+    LocalIn["LOCAL_IN / INPUT<br/><b>does:</b> final policy for packets to this host<br/><b>why next:</b> accepted packets can reach sockets"]
+    Forward["FORWARD<br/><b>does:</b> transit-only filtering after route lookup<br/><b>why next:</b> accepted packets continue to output path"]
+    LocalOut["LOCAL_OUT / OUTPUT<br/><b>does:</b> policy for locally generated packets<br/><b>why next:</b> packet still needs final output routing/NAT"]
+    PostRouting["POST_ROUTING<br/><b>does:</b> last policy/NAT point before TX<br/><b>why next:</b> accepted packets are ready for qdisc/dev queue<br/><b>typical work:</b> SNAT/masquerade"]
 
-    Stack["IP local delivery<br/>(socket lookup, etc.)"]
-    Out["Routed forward"]
+    Stack["local socket delivery<br/><b>state:</b> transport receives skb"]
+    Tx["device output path<br/><b>state:</b> skb leaves IP stack"]
 
     PreRouting --> Routing
-    Routing -->|local| LocalIn --> Stack
-    Routing -->|transit| Forward --> PostRouting --> Out
+    Routing -->|destination is local| LocalIn --> Stack
+    Routing -->|destination is elsewhere| Forward --> PostRouting --> Tx
     LocalOut --> PostRouting
 
     classDef nf fill:#fef3c7,stroke:#d97706
     classDef path fill:#dcfce7,stroke:#16a34a
     class PreRouting,LocalIn,Forward,LocalOut,PostRouting nf
-    class Stack,Out,Routing path
+    class Stack,Tx,Routing path

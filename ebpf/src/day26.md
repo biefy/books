@@ -40,6 +40,7 @@ Two files to change: `tools/sched_ext/scx_simple.bpf.c` and the userspace driver
 const volatile __u64 priority_cgroup_id = 0;   /* set from userspace */
 
 extern struct cgroup *scx_bpf_task_cgroup(struct task_struct *p) __ksym;
+extern void bpf_cgroup_release(struct cgroup *cgrp) __ksym;
 
 SEC("struct_ops/simple_enqueue")
 void BPF_STRUCT_OPS(simple_enqueue, struct task_struct *p, u64 enq_flags)
@@ -50,7 +51,8 @@ void BPF_STRUCT_OPS(simple_enqueue, struct task_struct *p, u64 enq_flags)
     /* Walk up the cgroup hierarchy looking for the priority cgroup.
      * Bounded loop — verifier requires it. */
     if (priority_cgroup_id) {
-        struct cgroup *cg = scx_bpf_task_cgroup(p);
+        struct cgroup *owned = scx_bpf_task_cgroup(p);
+        struct cgroup *cg = owned;
         for (int i = 0; i < 8 && cg; i++) {
             if (cg->kn->id == priority_cgroup_id) {
                 vtime  -= 1000000;     /* push 1 ms earlier in queue */
@@ -59,9 +61,11 @@ void BPF_STRUCT_OPS(simple_enqueue, struct task_struct *p, u64 enq_flags)
             }
             cg = cg->parent;
         }
+        if (owned)
+            bpf_cgroup_release(owned);
     }
 
-    scx_bpf_dispatch_vtime(p, SHARED_DSQ, slice, vtime, enq_flags);
+    scx_bpf_dsq_insert_vtime(p, SHARED_DSQ, slice, vtime, enq_flags);
 }
 ```
 
@@ -161,26 +165,29 @@ void BPF_STRUCT_OPS(simple_enqueue, struct task_struct *p, u64 enq_flags)
     bool priority = false;
 
     if (priority_cgroup_id) {
-        struct cgroup *cg = scx_bpf_task_cgroup(p);
+        struct cgroup *owned = scx_bpf_task_cgroup(p);
+        struct cgroup *cg = owned;
         for (int i = 0; i < 8 && cg; i++) {
             if (cg->kn->id == priority_cgroup_id) { priority = true; break; }
             cg = cg->parent;
         }
+        if (owned)
+            bpf_cgroup_release(owned);
     }
 
     if (priority)
-        scx_bpf_dispatch(p, PRIO_DSQ, SCX_SLICE_DFL, enq_flags);
+        scx_bpf_dsq_insert(p, PRIO_DSQ, SCX_SLICE_DFL, enq_flags);
     else
-        scx_bpf_dispatch_vtime(p, SHARED_DSQ, SCX_SLICE_DFL, vtime, enq_flags);
+        scx_bpf_dsq_insert_vtime(p, SHARED_DSQ, SCX_SLICE_DFL, vtime, enq_flags);
 }
 
 SEC("struct_ops/simple_dispatch")
 void BPF_STRUCT_OPS(simple_dispatch, s32 cpu, struct task_struct *prev)
 {
     /* Priority queue first */
-    if (scx_bpf_consume(PRIO_DSQ)) return;
+    if (scx_bpf_dsq_move_to_local(PRIO_DSQ, 0)) return;
     /* Fall back to default queue */
-    scx_bpf_consume(SHARED_DSQ);
+    scx_bpf_dsq_move_to_local(SHARED_DSQ, 0);
 }
 ```
 
@@ -188,7 +195,7 @@ This is more deterministic than vtime tricks. Closer to how production scheduler
 
 ## What to read in the kernel
 
-- **`kernel/sched/ext.c`** — search `scx_bpf_dispatch` and `scx_bpf_consume` to see how DSQ ops bind to internals. The functions are kfuncs registered for `BPF_PROG_TYPE_STRUCT_OPS` with sched_ext-specific properties.
+- **`kernel/sched/ext.c`** — search `scx_bpf_dsq_insert` and `scx_bpf_dsq_move_to_local` to see how DSQ ops bind to internals. The functions are kfuncs registered for `BPF_PROG_TYPE_STRUCT_OPS` with sched_ext-specific properties.
 
 - **`kernel/sched/ext.c`** — search `scx_bpf_task_cgroup`. The kfunc that returns a task's cgroup pointer.
 
@@ -203,7 +210,7 @@ This is more deterministic than vtime tricks. Closer to how production scheduler
 ## Bullet Points
 
 - Modifying a sched_ext example is the fastest way to learn the API in depth.
-- **`scx_bpf_task_cgroup(p)`** returns a task's cgroup; walk up via `cg->parent` to find ancestors.
+- **`scx_bpf_task_cgroup(p)`** returns an acquired cgroup reference; walk up via `cg->parent` to find ancestors, then release the acquired reference with `bpf_cgroup_release()`.
 - **Bounded cgroup-hierarchy walks** required by the verifier; cap at 8 levels.
 - **Vtime tricks** (decrement to push earlier) work but are fragile.
 - **Per-cgroup DSQs** are cleaner: separate priority lane consumed first.

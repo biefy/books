@@ -51,8 +51,9 @@ When a task wakes up, this callback decides **which CPU to wake it on**. Optiona
 
 DSQs are kernel-managed FIFO queues that hold runnable tasks waiting to be dispatched. You don't implement them; you consume an API:
 
-- **`scx_bpf_dispatch(p, dsq_id, slice, flags)`** — enqueue task `p` onto the DSQ identified by `dsq_id`, with time slice `slice` (ns).
-- **`scx_bpf_consume(dsq_id)`** — pull the next task from the DSQ; called from `dispatch` to fetch the next runnable.
+- **`scx_bpf_dsq_insert(p, dsq_id, slice, flags)`** — enqueue task `p` onto the FIFO DSQ identified by `dsq_id`, with time slice `slice` (ns).
+- **`scx_bpf_dsq_insert_vtime(p, dsq_id, slice, vtime, flags)`** — enqueue task `p` into a vtime-ordered DSQ.
+- **`scx_bpf_dsq_move_to_local(dsq_id, flags)`** — move the next task from a DSQ to the current CPU's local DSQ; called from `dispatch` to make a task runnable locally.
 - **`scx_bpf_create_dsq(id, node)`** — create a new DSQ with the given numeric id, on NUMA node `node`.
 
 Built-in DSQs:
@@ -106,13 +107,13 @@ void BPF_STRUCT_OPS(simple_enqueue, struct task_struct *p, u64 enq_flags)
 {
     /* Place in global DSQ with default slice */
     u64 vtime = p->scx.dsq_vtime;
-    scx_bpf_dispatch_vtime(p, SHARED_DSQ, SCX_SLICE_DFL, vtime, enq_flags);
+    scx_bpf_dsq_insert_vtime(p, SHARED_DSQ, SCX_SLICE_DFL, vtime, enq_flags);
 }
 
 SEC("struct_ops/simple_dispatch")
 void BPF_STRUCT_OPS(simple_dispatch, s32 cpu, struct task_struct *prev)
 {
-    scx_bpf_consume(SHARED_DSQ);
+    scx_bpf_dsq_move_to_local(SHARED_DSQ, 0);
 }
 ```
 
@@ -132,7 +133,7 @@ Ctrl-C in the `scx_simple` terminal. The watchdog's not needed — scx_simple ex
 
 ### Don't dispatch
 
-Comment out `scx_bpf_consume(SHARED_DSQ)` in `simple_dispatch`. Run; CPUs have nothing to run; tasks pile up in the queue. After ~30s, watchdog ejects:
+Comment out `scx_bpf_dsq_move_to_local(SHARED_DSQ, 0)` in `simple_dispatch`. Run; CPUs have nothing to run; tasks pile up in the queue. After ~30s, watchdog ejects:
 
 ```
 sched_ext: BPF scheduler "simple" disabled by watchdog: stall_us=...

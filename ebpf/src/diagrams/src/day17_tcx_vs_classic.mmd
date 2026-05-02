@@ -1,27 +1,21 @@
 flowchart LR
-    subgraph Old["Classic tc-bpf attach (legacy)"]
-        T1["sudo tc qdisc add dev eth0 clsact"]
-        T2["sudo tc filter add dev eth0 ingress<br/>bpf da obj prog.o sec tc"]
-        T3["BPF program now runs<br/>but no link FD owns it"]
-        T4["To detach:<br/>tc filter del ..."]
-        T5["Multi-program:<br/>manage tc filter priorities by hand"]
-
+    subgraph Old["Classic tc-bpf attach"]
+        T1["create clsact qdisc<br/><b>does:</b> installs ingress/egress hook scaffold<br/><b>why next:</b> filter attach needs hook slots<br/><b>state:</b> qdisc object persists on device"]
+        T2["tc filter add ... bpf<br/><b>does:</b> loads/attaches program at priority/handle<br/><b>why next:</b> packet path walks filters by priority<br/><b>state:</b> attachment owned by tc state, not an FD"]
+        T3["packet hits tc hook<br/><b>does:</b> filters run in configured order<br/><b>state:</b> verdict can pass/drop/redirect"]
+        T4["manual detach<br/><b>does:</b> delete filter and qdisc explicitly<br/><b>state:</b> crash can leave stale attachments"]
         T1 --> T2 --> T3 --> T4
-        T3 --> T5
     end
 
-    subgraph New["tcx attach (modern, 6.6+)"]
-        X1["bpf_program__attach_tcx(prog, ifindex, &opts)"]
-        X2["Returns bpf_link FD"]
-        X3["BPF program runs"]
-        X4["Closing the FD detaches"]
-        X5["Multi-program:<br/>BPF_F_BEFORE / BPF_F_AFTER<br/>declarative ordering"]
-
+    subgraph New["tcx attach"]
+        X1["bpf_program__attach_tcx<br/><b>does:</b> attaches directly to tcx ingress/egress hook<br/><b>why next:</b> kernel returns link ownership<br/><b>state:</b> bpf_link fd owns attachment"]
+        X2["mprog ordering<br/><b>does:</b> BPF_F_BEFORE/AFTER/REPLACE mutates ordered chain<br/><b>why next:</b> independent programs can compose safely<br/><b>state:</b> deterministic hook order"]
+        X3["packet hits tcx hook<br/><b>does:</b> runs link-owned programs until terminal verdict<br/><b>state:</b> skb allowed, dropped, or redirected"]
+        X4["close link fd<br/><b>does:</b> automatically detaches that program<br/><b>state:</b> lifecycle follows userspace owner"]
         X1 --> X2 --> X3 --> X4
-        X3 --> X5
     end
 
-    classDef bad fill:#fee2e2,stroke:#dc2626
-    classDef ok fill:#dcfce7,stroke:#16a34a
-    class T1,T2,T3,T4,T5 bad
-    class X1,X2,X3,X4,X5 ok
+    classDef old fill:#fee2e2,stroke:#dc2626
+    classDef new fill:#dcfce7,stroke:#16a34a
+    class T1,T2,T3,T4 old
+    class X1,X2,X3,X4 new

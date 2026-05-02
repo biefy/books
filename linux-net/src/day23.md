@@ -72,24 +72,33 @@ tc qdisc show dev eth0
 `net/sched/sch_htb.c`. Lets you divide bandwidth among classes hierarchically. The classic example: "give SSH 30 Mbps reserved, mail 50 Mbps, everything else 20 Mbps; allow each class to burst into unused capacity."
 
 ```bash
-sudo tc qdisc add dev eth0 root handle 1: htb default 30
-sudo tc class add dev eth0 parent 1: classid 1:1 htb rate 100mbit
-sudo tc class add dev eth0 parent 1:1 classid 1:10 htb rate 30mbit ceil 100mbit
-sudo tc class add dev eth0 parent 1:1 classid 1:20 htb rate 50mbit ceil 100mbit
-sudo tc class add dev eth0 parent 1:1 classid 1:30 htb rate 20mbit ceil 100mbit
-sudo tc filter add dev eth0 parent 1: protocol ip prio 1 u32 \
+# Use a lab interface, not your real uplink.
+sudo ip link add tc-lab type dummy
+sudo ip link set tc-lab up
+sudo tc qdisc add dev tc-lab root handle 1: htb default 30
+sudo tc class add dev tc-lab parent 1: classid 1:1 htb rate 100mbit
+sudo tc class add dev tc-lab parent 1:1 classid 1:10 htb rate 30mbit ceil 100mbit
+sudo tc class add dev tc-lab parent 1:1 classid 1:20 htb rate 50mbit ceil 100mbit
+sudo tc class add dev tc-lab parent 1:1 classid 1:30 htb rate 20mbit ceil 100mbit
+sudo tc filter add dev tc-lab parent 1: protocol ip prio 1 u32 \
     match ip dport 22 0xffff flowid 1:10
+# cleanup
+sudo ip link del tc-lab
 ```
 
 `rate` = guaranteed minimum; `ceil` = max if there's spare capacity. Filters classify packets into classes. Powerful but complex; for most users `fq_codel` is simpler and as effective.
 
 ## clsact — the BPF hook scaffold
 
-`net/sched/sch_ingress.c`. A special qdisc that has no queueing logic — it just exposes ingress and egress hook points where tc-bpf programs (`SEC("tc")`) can attach. Day 16/17 of the eBPF book covered tc-bpf and the modern tcx replacement.
+`net/sched/sch_ingress.c`. A special qdisc that has no queueing logic — it just exposes ingress and egress hook points where tc-bpf classifier programs can attach. Day 16/17 of the eBPF book covered classic tc-bpf section names such as `SEC("tc_ingress")` and the modern tcx replacement.
 
 ```bash
-sudo tc qdisc add dev eth0 clsact
-sudo tc filter add dev eth0 ingress bpf da obj prog.o sec tc
+sudo ip link add tc-lab type dummy
+sudo ip link set tc-lab up
+sudo tc qdisc add dev tc-lab clsact
+sudo tc filter add dev tc-lab ingress bpf da obj prog.o sec tc_ingress
+# cleanup
+sudo ip link del tc-lab
 ```
 
 Modern code uses **tcx** (`bpf link`-based) instead, which doesn't need `clsact` setup.
@@ -111,7 +120,7 @@ sudo tc qdisc replace dev eth0 root pfifo_fast
 iperf3 -c some-server -t 60 &
 ping -c 5 8.8.8.8                  # may shoot up to seconds
 
-# Restore
+# Restore whatever qdisc your interface had before this test.
 sudo tc qdisc replace dev eth0 root fq_codel
 ```
 
@@ -129,7 +138,9 @@ sudo bpftrace -e '
 fentry:__qdisc_run { @ = count(); }
 interval:s:5 { print(@); clear(@) }'
 
-# Add a token-bucket rate limit (lab on lo)
+# Add a token-bucket rate limit (lab on lo). Save the old qdisc first.
+tc qdisc show dev lo > /tmp/lo.qdisc.before
+trap 'sudo tc qdisc replace dev lo root noqueue 2>/dev/null || true; rm -f /tmp/lo.qdisc.before' EXIT
 sudo tc qdisc replace dev lo root tbf rate 1mbit burst 32kbit latency 50ms
 
 # Test: should be slow
@@ -141,13 +152,15 @@ iperf3 -c 127.0.0.1 -p 5201 -t 5
 tc -s qdisc show dev lo
 # (look for backlog: NNNNb XXp)
 
-# Restore
-sudo tc qdisc replace dev lo root fq_codel
+# Restore loopback's usual noqueue qdisc
+sudo tc qdisc replace dev lo root noqueue
 ```
 
 ### Switch CC to BBR; observe with default qdisc vs fq
 
 ```bash
+old_cc=$(cat /proc/sys/net/ipv4/tcp_congestion_control)
+trap 'sudo sysctl -w net.ipv4.tcp_congestion_control=$old_cc; sudo tc qdisc replace dev lo root noqueue 2>/dev/null || true' EXIT
 sudo modprobe tcp_bbr
 sudo sysctl -w net.ipv4.tcp_congestion_control=bbr
 
@@ -158,7 +171,8 @@ sudo tc qdisc replace dev lo root fq
 iperf3 -c 127.0.0.1 -p 5201 -t 5
 ss -tin       # look for 'ca:bbr' and check cwnd
 
-sudo tc qdisc replace dev lo root fq_codel    # restore
+sudo sysctl -w net.ipv4.tcp_congestion_control=$old_cc
+sudo tc qdisc replace dev lo root noqueue    # restore
 ```
 
 ## What to read in the kernel

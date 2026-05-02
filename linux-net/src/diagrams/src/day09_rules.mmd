@@ -1,23 +1,25 @@
 flowchart TD
-    Pkt["packet enters"]
-    Lookup["fib_lookup(net, &flowi4, &res)"]
-    R0["rule 0: from all<br/>lookup local"]
-    R1["rule 32766: from all<br/>lookup main"]
-    R2["rule 32767: from all<br/>lookup default"]
+    Pkt["packet/flow key<br/><b>does:</b> supplies src, dst, mark, iif/oif, tos<br/><b>why next:</b> policy rules match these fields<br/><b>state:</b> flowi4/flowi6 lookup key"]
+    Rules["fib_rules walk<br/><b>does:</b> checks rules in ascending priority<br/><b>why next:</b> first matching rule selects an action/table<br/><b>state:</b> current rule cursor"]
+    Custom{"custom rule matches?<br/><b>example:</b> from 10.99.0.0/24 lookup 100"}
+    CustomTable["table 100 lookup<br/><b>does:</b> longest-prefix match in selected table<br/><b>why next:</b> route result found or lookup fails<br/><b>state:</b> fib_result or no route"]
+    Local["priority 0: local table<br/><b>does:</b> catches local/broadcast routes<br/><b>why next:</b> unmatched traffic falls through<br/><b>state:</b> may produce local delivery result"]
+    Main["priority 32766: main table<br/><b>does:</b> normal route lookup<br/><b>why next:</b> most packets resolve here<br/><b>state:</b> nexthop, route type, metrics"]
+    Default["priority 32767: default table<br/><b>does:</b> last policy fallback if populated<br/><b>state:</b> final chance before ENETUNREACH"]
+    Result["fib_result<br/><b>does:</b> carries route type, nexthop, scope, prefsrc<br/><b>why next:</b> route code builds dst/rtable<br/><b>state:</b> selected table's answer"]
 
-    Custom["custom rule:<br/>'from 10.99.0.0/24 lookup 100'<br/>added by user"]
+    Pkt --> Rules --> Custom
+    Custom -->|yes| CustomTable
+    Custom -->|no| Local
+    Local -->|no route| Main -->|no route| Default
+    CustomTable -->|found| Result
+    Local -->|found| Result
+    Main -->|found| Result
+    Default -->|found| Result
 
-    Match{Match?}
-    Tab["lookup that table"]
-    Result["fib_result"]
-    NextRule["try next rule"]
-
-    Pkt --> Lookup --> Custom --> Match
-    Match -->|yes| Tab --> Result
-    Match -->|no| R0 --> Match
-    R0 -.- R1 -.- R2
-
-    classDef ok fill:#dcfce7,stroke:#16a34a
-    classDef hot fill:#fef3c7,stroke:#d97706
-    class Result ok
-    class Match,Custom hot
+    classDef key fill:#dbeafe,stroke:#2563eb
+    classDef rule fill:#fef3c7,stroke:#d97706
+    classDef out fill:#dcfce7,stroke:#16a34a
+    class Pkt key
+    class Rules,Custom,Local,Main,Default rule
+    class CustomTable,Result out

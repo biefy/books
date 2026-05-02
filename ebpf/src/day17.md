@@ -71,14 +71,14 @@ static __always_inline void bump(__u32 idx) {
     if (c) (*c)++;
 }
 
-SEC("tc")
+SEC("tcx/ingress")
 int counter(struct __sk_buff *skb)
 {
     bump(0);  /* count all */
     return TC_ACT_OK;
 }
 
-SEC("tc")
+SEC("tcx/ingress")
 int firewall(struct __sk_buff *skb)
 {
     void *data = (void *)(long)skb->data;

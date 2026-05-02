@@ -1,5 +1,3 @@
-/* Click-to-zoom lightbox for content images. */
-
 #lightbox-overlay {
   position: fixed;
   inset: 0;
@@ -52,12 +50,29 @@
 #lightbox-overlay .lightbox-close:hover {
   background: rgba(255, 255, 255, 0.1);
 }
-
-/* Inline images get a zoom hint */
 #content img {
   cursor: zoom-in;
   transition: opacity 0.15s;
 }
 #content img:hover {
   opacity: 0.92;
+}
+#content .diagram-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 1rem 0;
+  padding-bottom: 0.35rem;
+}
+#content .diagram-scroll img.diagram-wide {
+  max-width: none;
+  width: auto;
+  min-width: min(1100px, 160vw);
+  max-height: 560px;
+}
+#content img.diagram-tall {
+  display: block;
+  max-height: 720px;
+  width: auto;
+  margin-left: auto;
+  margin-right: auto;
 }

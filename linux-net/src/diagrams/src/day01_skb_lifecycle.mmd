@@ -1,18 +1,19 @@
 flowchart LR
-    Alloc["alloc_skb(size, gfp)<br/>net/core/skbuff.c"]
-    Clone["skb_clone(skb)<br/>shares data, copies head"]
-    Use["RX/TX path uses skb"]
-    Free["__kfree_skb / kfree_skb_reason"]
-    Cache["skbuff_fclone_cache<br/>or skbuff_head_cache"]
+    Alloc["allocate skb head<br/><b>does:</b> alloc_skb/napi_build_skb creates metadata and data pointers<br/><b>why next:</b> stack needs a mutable packet descriptor<br/><b>state:</b> refcnt=1, head/data/tail/end initialized"]
+    Fill["attach packet bytes<br/><b>does:</b> driver or protocol code sets headers, length, checksum state<br/><b>why next:</b> protocol layers consume offsets and metadata<br/><b>state:</b> skb describes one packet or GRO aggregate"]
+    Share["clone / share data<br/><b>does:</b> skb_clone copies metadata while sharing data area<br/><b>why next:</b> taps/retransmit/segmentation may need another owner<br/><b>state:</b> cloned bit and dataref protect shared bytes"]
+    Mutate{"need to mutate shared bytes?<br/><b>does:</b> checks writability/headroom<br/><b>why next:</b> writers must not corrupt another clone<br/><b>state:</b> copy-on-write or safe in-place edit"}
+    Use["RX/TX protocol path<br/><b>does:</b> updates marks, dst, nfct, socket owner, queues<br/><b>why next:</b> final consumer decides delivery or transmit<br/><b>state:</b> skb ownership moves between subsystems"]
+    Drop["free with reason<br/><b>does:</b> kfree_skb_reason records drop/free cause and releases refs<br/><b>why next:</b> destructor releases dst, nfct, socket, frag refs<br/><b>state:</b> metadata returned to skb cache"]
+    Cache["slab/fclone cache<br/><b>does:</b> recycles skb heads for future packets<br/><b>state:</b> memory available for next allocation"]
 
-    Alloc --> Use
-    Use --> Clone --> Use
-    Use --> Free --> Cache
-    Cache -.- Alloc
+    Alloc --> Fill --> Use
+    Use --> Share --> Mutate --> Use
+    Use --> Drop --> Cache -. reuse .-> Alloc
 
     classDef alloc fill:#dbeafe,stroke:#2563eb
     classDef use fill:#fef3c7,stroke:#d97706
     classDef free fill:#fee2e2,stroke:#dc2626
-    class Alloc,Clone alloc
-    class Use use
-    class Free,Cache free
+    class Alloc,Fill alloc
+    class Share,Mutate,Use use
+    class Drop,Cache free

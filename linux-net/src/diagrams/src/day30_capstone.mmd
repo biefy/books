@@ -1,28 +1,23 @@
 flowchart TD
-    Pick["Pick a real packet"]
-    Wire["enters wire"]
-    Driver["NIC driver receives"]
-    XDP["XDP program if any"]
-    Build["napi_alloc_skb / build_skb"]
-    GRO["napi_gro_receive — coalesce?"]
-    Eth["eth_type_trans — strip L2"]
-    NetIf["__netif_receive_skb_core"]
-    Ptype["packet_type dispatch"]
-    Ip["ip_rcv → ip_rcv_core"]
-    Pre["NF_INET_PRE_ROUTING — conntrack, DNAT, filter"]
-    Route["ip_route_input — FIB lookup"]
-    Decision{"local or forward?"}
-    Local["ip_local_in → NF_INET_LOCAL_IN → ip_local_deliver_finish"]
-    Forward["NF_INET_FORWARD → ip_forward → ip_output → NF_INET_POST_ROUTING"]
-    L4["tcp_v4_rcv / udp_rcv → socket lookup"]
-    Sock["sk->sk_data_ready → wake reader"]
-    User["app reads"]
+    Pick["Choose one real packet<br/><b>does:</b> fixes a concrete 5-tuple and direction<br/><b>why next:</b> every later observation needs the same packet identity<br/><b>state:</b> expected src/dst/proto/ports"]
+    Driver["driver RX / XDP<br/><b>does:</b> receives DMA buffer and may run XDP before skb allocation<br/><b>why next:</b> XDP_PASS is the handoff into the skb stack<br/><b>state:</b> packet consumed by XDP or wrapped as skb"]
+    GRO["skb + GRO<br/><b>does:</b> creates skb metadata and may coalesce segments<br/><b>why next:</b> protocol dispatch needs skb protocol and headers<br/><b>state:</b> skb has L2/L3 offsets and possible GRO aggregate"]
+    Core["__netif_receive_skb_core<br/><b>does:</b> runs ingress taps, tc, and packet_type dispatch<br/><b>why next:</b> IPv4 handler owns ETH_P_IP packets<br/><b>state:</b> skb delivered to ip_rcv or diverted/dropped"]
+    Pre["PREROUTING<br/><b>does:</b> defrag/conntrack/DNAT/filter before route lookup<br/><b>why next:</b> route must see any destination rewrite<br/><b>state:</b> nfct attached, dst may be changed"]
+    Route["route lookup<br/><b>does:</b> maps flow to local delivery or forwarding<br/><b>why next:</b> dst->input selects the next stack function<br/><b>state:</b> skb_dst points at rtable"]
+    Decision{"destination?"}
+    Local["LOCAL_IN + transport<br/><b>does:</b> applies host policy then looks up TCP/UDP socket<br/><b>why next:</b> accepted data wakes application receive path<br/><b>state:</b> skb queued or consumed by protocol"]
+    Forward["FORWARD + POST_ROUTING<br/><b>does:</b> applies transit policy and final SNAT/output checks<br/><b>why next:</b> accepted skb can enter device output path<br/><b>state:</b> skb has egress route/device"]
+    App["application read<br/><b>does:</b> copies socket receive data to user buffer<br/><b>state:</b> packet's payload is now app-visible"]
+    Tx["qdisc + driver TX<br/><b>does:</b> schedules frame and gives descriptors to NIC<br/><b>state:</b> forwarded packet leaves the host"]
 
-    Pick --> Wire --> Driver --> XDP --> Build --> GRO --> Eth --> NetIf --> Ptype --> Ip --> Pre --> Route --> Decision
-    Decision -->|local| Local --> L4 --> Sock --> User
-    Decision -->|transit| Forward
+    Pick --> Driver --> GRO --> Core --> Pre --> Route --> Decision
+    Decision -->|local| Local --> App
+    Decision -->|forwarded| Forward --> Tx
 
-    classDef hot fill:#fef3c7,stroke:#d97706
-    classDef ok fill:#dcfce7,stroke:#16a34a
-    class Decision,Pre,Route hot
-    class User,Sock,Local ok
+    classDef observe fill:#dbeafe,stroke:#2563eb
+    classDef hook fill:#fef3c7,stroke:#d97706
+    classDef state fill:#dcfce7,stroke:#16a34a
+    class Pick,App,Tx observe
+    class Driver,Core,Pre,Forward hook
+    class GRO,Route,Decision,Local state

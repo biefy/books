@@ -1,63 +1,63 @@
-direction: down
+direction: right
 
 title: |md
-  ## Same hook, two interfaces: raw tracepoint vs tp_btf
+  ## One tracepoint event, three BPF interfaces
 | {near: top-center; shape: text}
 
-kernel: "Kernel scheduler" {
+kernel: "Kernel TRACE_EVENT" {
   style.fill: "#fef3c7"
-  call: "schedule()" {shape: rectangle}
-  trace: "trace_sched_switch(preempt, prev, next)" {shape: rectangle; style.fill: "#fee2e2"}
-  call -> trace: "calls TRACE_EVENT macro"
+  body: |md
+    `trace_sched_switch(preempt, prev, next)`
+
+    **Does:** marks the scheduler's switch point.
+    **Why next:** attached consumers choose how much
+    structure they want.
+    **State:** original C arguments are still in hand.
+  |
 }
 
-raw: "BPF: SEC(\"tracepoint/sched/sched_switch\")" {
+regular: "SEC(\"tracepoint/sched/sched_switch\")" {
   style.fill: "#fee2e2"
-  raw_what: |md
-    Kernel **copies** fields into
-    `struct trace_event_raw_sched_switch`:
-    ```c
-    char prev_comm[16];
-    pid_t prev_pid;
-    int prev_prio;
-    long prev_state;
-    char next_comm[16];
-    pid_t next_pid;
-    int next_prio;
-    ```
-    You read **copied bytes** from `ctx`.
+  body: |md
+    **Does:** kernel copies selected fields into
+    `struct trace_event_raw_sched_switch`.
 
-    ❌ Cannot reach `prev->parent`
-    ❌ Cannot reach `prev->mm->start_brk`
-    ✅ Stable across kernel versions
-    ✅ Layout in /sys/kernel/tracing/...
+    **State:** stable copied bytes:
+    `prev_comm`, `prev_pid`, `next_comm`, ...
+
+    **Tradeoff:** stable format, but no live
+    `task_struct *` access.
   |
 }
 
-btf: "BPF: SEC(\"tp_btf/sched_switch\")" {
+raw: "SEC(\"raw_tracepoint/sched_switch\")" {
+  style.fill: "#fde68a"
+  body: |md
+    **Does:** exposes raw tracepoint args in
+    `struct bpf_raw_tracepoint_args`.
+
+    **State:** `ctx->args[0]`, `ctx->args[1]`, ...
+    must be decoded by position.
+
+    **Tradeoff:** no copied event struct, but less
+    type help than `tp_btf`.
+  |
+}
+
+btf: "SEC(\"tp_btf/sched_switch\")" {
   style.fill: "#dcfce7"
-  btf_what: |md
-    Kernel hands you **live typed pointers**:
-    ```c
-    BPF_PROG(p,
-      bool preempt,
-      struct task_struct *prev,  ← LIVE
-      struct task_struct *next)  ← LIVE
-    ```
-    Direct deref of any field works:
-    ```c
-    bpf_printk("%s -> %s",
-               prev->comm, next->comm);
-    bpf_printk("ppid=%d",
-               prev->real_parent->tgid);
-    ```
+  body: |md
+    **Does:** passes BTF-typed tracepoint args:
+    `bool preempt`, `task_struct *prev`, `*next`.
 
-    ✅ Reach any field anywhere
-    ✅ ~50% lower overhead (no copy)
-    ✅ Same attach point — same stability
-    ❌ Requires BTF in kernel (basically always)
+    **State:** live typed pointers valid during
+    the callback.
+
+    **Tradeoff:** needs kernel BTF and CO-RE care
+    for struct fields.
   |
 }
 
-kernel.trace -> raw: "via raw tracepoint\n(legacy)" {style.stroke: "#dc2626"}
-kernel.trace -> btf: "via tp_btf\n(modern)" {style.stroke: "#16a34a"}
+kernel -> regular: "copy event fields if regular listeners exist"
+kernel -> raw: "pass raw slots"
+kernel -> btf: "pass typed args"

@@ -1,18 +1,15 @@
 flowchart LR
-    Pkt["TCP SYN out from<br/>process in cgroup A"]
-    Sock["sock created in cgroup A"]
-    SO["sock_ops BPF program runs<br/>(BPF_SOCK_OPS_TCP_CONNECT_CB)"]
-    Tune["program sets:<br/>bpf_setsockopt(skops, ..., TCP_NODELAY)<br/>or per-cgroup BBR/CUBIC"]
-    Send["packet sent with tuned params"]
+    Proc["process in cgroup A<br/><b>does:</b> creates/connects TCP socket<br/><b>why next:</b> cgroup membership selects attached sock_ops programs<br/><b>state:</b> socket associated with cgroup"]
+    Callback["sock_ops callback<br/><b>does:</b> runs at events such as TCP_CONNECT_CB or ACTIVE_ESTABLISHED_CB<br/><b>why next:</b> callback timing determines which socket options are still useful<br/><b>state:</b> bpf_sock_ops exposes skops fields and op code"]
+    Policy["BPF policy lookup<br/><b>does:</b> reads cgroup/socket tuple or maps to choose tuning<br/><b>why next:</b> only matching sockets should be changed<br/><b>state:</b> desired TCP options or no-op"]
+    SetOpt["bpf_setsockopt<br/><b>does:</b> changes allowed TCP/socket options before data path uses them<br/><b>why next:</b> TCP send path observes updated settings<br/><b>state:</b> nodelay/congestion-control/buffer option changed"]
+    Send["TCP sends data<br/><b>does:</b> uses tuned socket state for later packets<br/><b>state:</b> policy applied per cgroup/socket"]
 
-    Pkt --> Sock
-    Sock --> SO
-    SO --> Tune
-    Tune --> Send
+    Proc --> Callback --> Policy --> SetOpt --> Send
 
     classDef in fill:#dbeafe,stroke:#2563eb
     classDef hot fill:#fef3c7,stroke:#d97706
     classDef ok fill:#dcfce7,stroke:#16a34a
-    class Pkt,Sock in
-    class SO,Tune hot
+    class Proc in
+    class Callback,Policy,SetOpt hot
     class Send ok

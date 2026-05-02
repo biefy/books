@@ -100,8 +100,12 @@ Each L7 protocol with auxiliary connections has a helper module:
 Helpers are no longer auto-loaded by default (security: ALG-style helpers were a CVE source). You explicitly enable them per-rule in nftables:
 
 ```bash
-sudo nft add ct helper inet filter ftp { type "ftp" protocol tcp \; }
-sudo nft add rule inet filter prerouting tcp dport 21 ct helper set "ftp"
+sudo nft add table inet ct_lab
+sudo nft 'add chain inet ct_lab prerouting { type filter hook prerouting priority 0 ; }'
+sudo nft add ct helper inet ct_lab ftp { type "ftp" protocol tcp \; }
+sudo nft add rule inet ct_lab prerouting tcp dport 21 ct helper set "ftp"
+# cleanup
+sudo nft delete table inet ct_lab
 ```
 
 ## NAT is built on conntrack
@@ -158,21 +162,25 @@ You'll see one `nf_conntrack_in` per packet (ct lookup happens early at PRE_ROUT
 ### Force entries to expire
 
 ```bash
-# Lower TCP ESTABLISHED timeout (default 432000s / 5 days)
+# Lower TCP ESTABLISHED timeout temporarily (default 432000s / 5 days)
+old_timeout=$(cat /proc/sys/net/netfilter/nf_conntrack_tcp_timeout_established)
+trap 'sudo sysctl -w net.netfilter.nf_conntrack_tcp_timeout_established=$old_timeout; kill $srv $cli 2>/dev/null || true' EXIT
 sudo sysctl -w net.netfilter.nf_conntrack_tcp_timeout_established=60
 
 # Open a connection, leave idle
-nc -l 9999 &
-nc localhost 9999 &
+nc -l 9999 & srv=$!
+nc localhost 9999 & cli=$!
 sudo conntrack -L | grep 9999     # see the entry
 
 # After 60s of idle:
 sudo conntrack -L | grep 9999     # gone
 ```
 
+Always restore the timeout. It is global state, and lowering it can break legitimate long-lived idle connections on the host.
+
 ## What to read in the kernel
 
-- **`net/netfilter/nf_conntrack_core.c:2003`** — `nf_conntrack_in`. The main entry point, registered as a Netfilter hook at PRE_ROUTING and LOCAL_OUT priority `NF_IP_PRI_CONNTRACK = -200`. Read top to bottom (~80 lines for the function plus its helpers). Trace: tuple → lookup → either tag-existing or alloc-new → return ACCEPT (the conntrack hook never drops; that's for filter rules).
+- **`net/netfilter/nf_conntrack_core.c:2003`** — `nf_conntrack_in`. The main entry point, registered as a Netfilter hook at PRE_ROUTING and LOCAL_OUT priority `NF_IP_PRI_CONNTRACK = -200`. Read top to bottom (~80 lines for the function plus its helpers). Trace: tuple → lookup → either tag-existing or alloc-new → usually return ACCEPT. Conntrack can still drop invalid or stressed packets; filter rules are just the common place where policy drops happen.
 
 - **`include/net/netfilter/nf_conntrack.h:74`** — `struct nf_conn`. The per-connection record. ~80 fields. Important: `tuplehash[2]` (forward and reverse tuples), `status` (bitfield with bits like `IPS_CONFIRMED`, `IPS_NAT`), `timeout` (jiffies until expiry), and `ext` (extensible header for NAT info, helper data, etc.).
 

@@ -4,7 +4,7 @@
 
 ## Why this day exists
 
-Yesterday you wrote `BPF_PROG(on_exit, struct file *f, char *buf, size_t n, ssize_t ret)` and it just worked. Today we open the hood.
+Yesterday you wrote `BPF_PROG(on_exit, struct file *f, char *buf, size_t n, loff_t *pos, ssize_t ret)` and it just worked. Today we open the hood.
 
 This matters because:
 - When you start using non-trivial program types (kprobe, raw tracepoint, sk_msg, sock_ops), the macro and ctx access differ.
@@ -39,7 +39,7 @@ You can read the actual macro at `tools/lib/bpf/bpf_tracing.h`. It's about 30 li
 
 ## Argument access by program type — four flavors
 
-Different program types access arguments four different ways. This is the chart you'll come back to whenever you're confused about a "wrong type" verifier rejection.
+Different program types access arguments five different ways. This is the chart you'll come back to whenever you're confused about a "wrong type" verifier rejection.
 
 ![Argument access by program type](diagrams/day07_arg_access.png)
 
@@ -47,8 +47,8 @@ Different program types access arguments four different ways. This is the chart 
 
 ```c
 SEC("fentry/vfs_read")
-int BPF_PROG(p, struct file *f, char *buf, size_t n) {
-    loff_t pos = f->f_pos;   // direct deref allowed
+int BPF_PROG(p, struct file *f, char *buf, size_t n, loff_t *pos) {
+    loff_t cur = f->f_pos;   // direct deref allowed
 }
 ```
 
@@ -60,7 +60,7 @@ Pros: typed, fast, direct deref. Cons: requires BTF (essentially always present 
 
 ```c
 SEC("kprobe/vfs_read")
-int BPF_KPROBE(p, struct file *f, char *buf, size_t n) {
+int BPF_KPROBE(p, struct file *f, char *buf, size_t n, loff_t *pos) {
     /* f is pt_regs->di on x86_64 */
 }
 ```
@@ -76,7 +76,7 @@ bpf_probe_read_kernel(&pos, sizeof(pos), &f->f_pos);
 
 This is why kprobes feel clunkier than fentry. Same data, more friction.
 
-### 3. Raw tracepoint — copied event buffer
+### 3. `tracepoint/...` — copied event context
 
 ```c
 SEC("tracepoint/syscalls/sys_enter_read")
@@ -85,9 +85,22 @@ int p(struct trace_event_raw_sys_enter *ctx) {
 }
 ```
 
-Tracepoints have a stable kernel-defined event format. The kernel copies the relevant fields into a per-tracepoint struct that `ctx` points at. You don't get live pointers; you get copied values. Useful when you want stability across kernel versions (tracepoint formats are stable; struct layouts are not). The `BPF_PROG` macro doesn't apply — these aren't trampolined.
+The regular tracepoint program sees a stable kernel-defined event struct. The kernel copies the relevant fields into that per-tracepoint struct, and `ctx` points at the copied bytes. You don't get live pointers. Useful when you want the stable event format in `/sys/kernel/tracing/events/.../format`.
 
-### 4. `tp_btf` — typed kernel pointers from a tracepoint
+### 4. `raw_tracepoint/...` — raw tracepoint argument array
+
+```c
+SEC("raw_tracepoint/sched_switch")
+int p(struct bpf_raw_tracepoint_args *ctx) {
+    bool preempt = (bool)ctx->args[0];
+    struct task_struct *prev = (void *)ctx->args[1];
+    struct task_struct *next = (void *)ctx->args[2];
+}
+```
+
+Raw tracepoints skip the copied event struct and expose the tracepoint arguments as raw `u64` slots. You unpack by position. The verifier does not give you the same typed-argument ergonomics as `tp_btf`, so new code usually prefers `tp_btf` when BTF is available.
+
+### 5. `tp_btf` — typed kernel pointers from a tracepoint
 
 ```c
 SEC("tp_btf/sched_switch")
@@ -96,7 +109,7 @@ int BPF_PROG(p, bool preempt, struct task_struct *prev, struct task_struct *next
 }
 ```
 
-This is the modern hybrid. Same attach point as raw tracepoint (so it's the same stable hook), but the kernel hands you typed pointers (BTF-tagged) rather than copied bytes. Direct deref works. **Use `tp_btf` instead of raw tracepoint for new code** — we'll see this in detail tomorrow.
+This is the modern typed interface to the same tracepoint event. The kernel hands you typed pointers (BTF-tagged) rather than copied bytes or raw positional slots. Direct deref works. **Use `tp_btf` instead of raw tracepoint for new code** when BTF is available — we'll see this in detail tomorrow.
 
 > ### Sharpen your pencil
 >
@@ -157,14 +170,14 @@ char LICENSE[] SEC("license") = "GPL";
 /* Same logic, three different program types */
 
 SEC("fentry/vfs_read")
-int BPF_PROG(via_fentry, struct file *f, char *buf, size_t n)
+int BPF_PROG(via_fentry, struct file *f, char *buf, size_t n, loff_t *pos)
 {
     bpf_printk("fentry: f=%p n=%zu", f, n);
     return 0;
 }
 
 SEC("kprobe/vfs_read")
-int BPF_KPROBE(via_kprobe, struct file *f, char *buf, size_t n)
+int BPF_KPROBE(via_kprobe, struct file *f, char *buf, size_t n, loff_t *pos)
 {
     bpf_printk("kprobe: f=%p n=%zu", f, n);
     return 0;
@@ -263,7 +276,7 @@ int BPF_PROG(p, struct file *f) { ... }
 
 Loads, but the argument access is wrong. `BPF_PROG` reads `ctx[0]` — but kprobe's ctx is `pt_regs *`, not the trampoline ctx array. You'll get the value of `pt_regs->ip` (or whatever field is at offset 0 of pt_regs) cast as `struct file *`. Garbage. Use `BPF_KPROBE` for kprobes.
 
-### Break 3 — Direct deref in a raw tracepoint
+### Break 3 — Direct deref in a regular tracepoint
 
 ```c
 SEC("tracepoint/sched/sched_switch")
@@ -284,7 +297,7 @@ int p(struct trace_event_raw_sched_switch *ctx) {
 }
 ```
 
-Raw tracepoints give you what the kernel chose to copy. For more, switch to `tp_btf` (Day 8) where you get live pointers.
+Regular `tracepoint/...` programs give you what the kernel chose to copy. For more, switch to `tp_btf` (Day 8) where you get live typed pointers; use `raw_tracepoint/...` only when you explicitly want raw positional tracepoint args.
 
 ---
 
@@ -304,7 +317,8 @@ Raw tracepoints give you what the kernel chose to copy. For more, switch to `tp_
 - `BPF_KPROBE`/`BPF_KRETPROBE` are similar but unpack from `pt_regs *` instead.
 - **fentry/fexit** give you BTF-typed pointers — direct deref OK.
 - **kprobe** gives you scalars from registers — must use `bpf_probe_read_kernel`.
-- **Raw tracepoint** gives you copied event bytes — read fields, no deref.
+- **Regular tracepoint** gives you copied event bytes — read fields, no live kernel pointers.
+- **Raw tracepoint** gives you positional raw args in `ctx->args[N]` — lower-level than `tp_btf`.
 - **tp_btf** gives you BTF-typed pointers like fentry, with tracepoint stability — modern preference.
 - **Helpers** are a frozen UAPI list in `include/uapi/linux/bpf.h`.
 - **Kfuncs** are non-UAPI in-tree functions exposed via BTF; they can evolve. New BPF features are added as kfuncs, not helpers.

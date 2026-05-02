@@ -1,23 +1,28 @@
-flowchart LR
-    Sys["socket(AF_INET, SOCK_STREAM, 0)"]
-    Alloc["sock_alloc + inet_create + tcp_init_sock"]
-    Bind["bind(): inet_bind → get_port"]
-    Hash["sk inserted in inet_listen_hashinfo<br/>(if listening)"]
-    Listen["listen(): start listening"]
-    Accept["accept(): wait, return new sk"]
+flowchart TD
+    Socket["socket(AF_INET, SOCK_STREAM)<br/><b>does:</b> allocates struct socket + struct sock<br/><b>why next:</b> app chooses passive bind/listen or active connect<br/><b>state:</b> TCP sock initialized, unbound"]
 
-    Connect["connect(): tcp_v4_connect"]
-    Conn["sk inserted in inet_ehash<br/>(established hash)"]
+    subgraph Passive["Passive open: server"]
+        Bind["bind()<br/><b>does:</b> reserves local address/port with inet_bind/get_port<br/><b>why next:</b> listener needs a stable local endpoint<br/><b>state:</b> sk has local port"]
+        Listen["listen()<br/><b>does:</b> moves sock to TCP_LISTEN and inserts listen hash<br/><b>why next:</b> SYN lookup must find this listener<br/><b>state:</b> accept queue and request queue active"]
+        Syn["SYN arrives<br/><b>does:</b> creates request_sock after policy/backlog checks<br/><b>why next:</b> handshake must complete before full child socket<br/><b>state:</b> half-open request tracked"]
+        Accept["accept()<br/><b>does:</b> removes completed child from accept queue<br/><b>why next:</b> app needs a connected fd<br/><b>state:</b> new established sk returned"]
+    end
 
-    Send["sendmsg → tcp_sendmsg"]
-    Recv["recvmsg → tcp_recvmsg"]
-    Close["close → tcp_close"]
+    subgraph Active["Active open: client"]
+        Connect["connect()<br/><b>does:</b> selects source port, route, sends SYN<br/><b>why next:</b> SYN-ACK completes the 4-tuple<br/><b>state:</b> sk in SYN_SENT and ehash"]
+        Established["established hash<br/><b>does:</b> indexes connected sockets by 4-tuple<br/><b>why next:</b> RX fast path must find the owner socket<br/><b>state:</b> full-duplex TCP stream"]
+    end
 
-    Sys --> Alloc --> Bind --> Hash --> Listen --> Accept
-    Sys --> Connect --> Conn --> Send --> Recv --> Close
+    IO["sendmsg / recvmsg<br/><b>does:</b> moves bytes between user buffers and TCP queues<br/><b>why next:</b> close or more I/O depends on stream state<br/><b>state:</b> write queue, receive queue, cwnd/rwnd evolve"]
+    Close["close()<br/><b>does:</b> drives FIN/RST/TIME_WAIT and unhashes when safe<br/><b>state:</b> fd gone; protocol state may outlive fd"]
+
+    Socket --> Bind --> Listen --> Syn --> Accept --> IO
+    Socket --> Connect --> Established --> IO
+    IO --> Close
 
     classDef api fill:#dbeafe,stroke:#2563eb
-    classDef in fill:#fef3c7,stroke:#d97706
-    classDef ok fill:#dcfce7,stroke:#16a34a
-    class Sys,Bind,Listen,Accept,Connect,Send,Recv,Close api
-    class Alloc,Hash,Conn in
+    classDef table fill:#fef3c7,stroke:#d97706
+    classDef state fill:#dcfce7,stroke:#16a34a
+    class Socket,Bind,Listen,Accept,Connect,IO,Close api
+    class Syn,Established table
+    class Passive,Active state

@@ -1,23 +1,21 @@
-flowchart LR
-    F1["frame on br port 1<br/>src MAC = AA:..."]
-    Br["bridge net_bridge<br/>net/bridge/br_*.c"]
-    Fdb["FDB lookup:<br/>{port 1, MAC AA:...}"]
-    Learn["if not present:<br/>insert {AA:..., port 1}<br/>STP age TBD"]
+flowchart TD
+    In["frame arrives on bridge port<br/><b>does:</b> carries src MAC, dst MAC, VLAN, ingress port<br/><b>why next:</b> bridge must learn source before forwarding destination<br/><b>state:</b> skb associated with br_port"]
+    Learn["FDB learn source<br/><b>does:</b> records src MAC/VLAN -> ingress port and refreshes age<br/><b>why next:</b> future reverse traffic can be unicast<br/><b>state:</b> forwarding database updated"]
+    STP{"port forwarding?<br/><b>does:</b> checks STP/bridge state and policy<br/><b>why next:</b> blocked ports must not forward loops<br/><b>state:</b> frame allowed or dropped"}
+    Lookup["FDB lookup destination<br/><b>does:</b> searches dst MAC/VLAN in bridge table<br/><b>why next:</b> known unicast has one output port; unknown must flood<br/><b>state:</b> destination port or miss"]
+    Forward["known-unicast forward<br/><b>does:</b> clones/queues frame to learned output port<br/><b>why next:</b> egress port qdisc/driver transmits<br/><b>state:</b> single egress skb"]
+    Flood["unknown/broadcast/multicast flood<br/><b>does:</b> sends copies to eligible ports except ingress<br/><b>why next:</b> destination may be behind any port<br/><b>state:</b> multiple cloned skbs"]
+    Drop["drop<br/><b>does:</b> consumes frame due to blocked state or policy<br/><b>state:</b> no egress"]
 
-    F2["frame to dst MAC BB:..."]
-    Find["FDB lookup<br/>{BB:...}"]
-    Found{Found?}
-    Forward["forward to that port"]
-    Flood["flood to all ports<br/>except input"]
-
-    F1 --> Br --> Fdb
-    Fdb --> Learn
-
-    F2 --> Br --> Find --> Found
-    Found -->|yes| Forward
-    Found -->|no| Flood
+    In --> Learn --> STP
+    STP -->|yes| Lookup
+    STP -->|no| Drop
+    Lookup -->|hit| Forward
+    Lookup -->|miss / broadcast| Flood
 
     classDef br fill:#fef3c7,stroke:#d97706
     classDef ok fill:#dcfce7,stroke:#16a34a
-    class Br,Fdb,Find,Learn br
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    class In,Learn,Lookup,STP br
     class Forward,Flood ok
+    class Drop bad

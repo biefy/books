@@ -4,76 +4,85 @@ title: |md
   ## Argument access by program type
 | {near: top-center; shape: text}
 
-fentry: "fentry/fexit\n(BTF + trampoline)" {
+fentry: "fentry/fexit" {
   style.fill: "#dcfce7"
-  fent_code: |md
+  body: |md
     ```c
     SEC("fentry/vfs_read")
     int BPF_PROG(p, struct file *f,
-                    char *buf, size_t n) {
-        /* typed access */
-        loff_t pos = f->f_pos;
-    }
+                 char *buf, size_t n,
+                 loff_t *pos) { ... }
     ```
-    - **Typed args** straight from BTF
-    - Direct field deref OK
-    - One-shot trampoline call
-    - ~10 ns overhead
+    **Does:** trampoline supplies BTF-typed
+    function args.
+
+    **State:** `f` is trusted `PTR_TO_BTF_ID`,
+    so direct field reads are allowed.
   |
 }
 
-kprobe: "kprobe\n(int3 trap, pt_regs)" {
+kprobe: "kprobe/kretprobe" {
   style.fill: "#fef3c7"
-  kp_code: |md
+  body: |md
     ```c
     SEC("kprobe/vfs_read")
-    int BPF_KPROBE(p, struct file *f,
-                      char *buf, size_t n) {
-        /* BPF_KPROBE expands ctx as pt_regs */
-        loff_t pos;
-        bpf_probe_read_kernel(&pos,
-            sizeof(pos), &f->f_pos);
-    }
+    int BPF_KPROBE(p, struct file *f, ...) { ... }
     ```
-    - `ctx` is `struct pt_regs *`
-    - `BPF_KPROBE` macro reads regs[N]
-    - Direct deref blocked (untrusted ptr)
-    - ~50 ns overhead (trap)
+    **Does:** trap saves CPU registers in
+    `struct pt_regs`.
+
+    **State:** extracted pointers are scalars;
+    use `bpf_probe_read_kernel` for fields.
   |
 }
 
-tp: "tracepoint (raw)\n(copied event buffer)" {
+tracepoint: "tracepoint/..." {
   style.fill: "#fee2e2"
-  tp_code: |md
+  body: |md
     ```c
     SEC("tracepoint/syscalls/sys_enter_read")
-    int p(struct trace_event_raw_sys_enter *ctx) {
-        /* read from ctx->args[N] */
-        unsigned long fd = ctx->args[0];
-    }
+    int p(struct trace_event_raw_sys_enter *ctx)
     ```
-    - `ctx` is per-tracepoint struct
-    - Bytes are **copied** (not live)
-    - Layout in `/sys/kernel/tracing/events/.../format`
-    - Stable interface; doesn't break across kernels
+    **Does:** reads a copied event struct.
+
+    **State:** stable fields from
+    `/sys/kernel/tracing/events/.../format`,
+    not live kernel objects.
   |
 }
 
-tp_btf: "tp_btf\n(typed kernel pointers)" {
+rawtp: "raw_tracepoint/..." {
+  style.fill: "#fde68a"
+  body: |md
+    ```c
+    SEC("raw_tracepoint/sched_switch")
+    int p(struct bpf_raw_tracepoint_args *ctx)
+    ```
+    **Does:** exposes raw tracepoint args as
+    positional `u64` slots.
+
+    **State:** lower-level than tracepoint;
+    caller must unpack by index.
+  |
+}
+
+tpbtf: "tp_btf/..." {
   style.fill: "#dbeafe"
-  tpb_code: |md
+  body: |md
     ```c
     SEC("tp_btf/sched_switch")
     int BPF_PROG(p, bool preempt,
-                    struct task_struct *prev,
-                    struct task_struct *next) {
-        /* prev/next are LIVE kernel ptrs */
-        bpf_printk("%s -> %s",
-                   prev->comm, next->comm);
-    }
+                 struct task_struct *prev,
+                 struct task_struct *next)
     ```
-    - **Typed**, live kernel pointers
-    - Direct deref OK
-    - Bridge between tracepoint stability + BTF power
+    **Does:** uses tracepoint BTF prototype.
+
+    **State:** live typed pointers for the
+    duration of the callback.
   |
 }
+
+fentry -> kprobe: "same target can be observed through older trap path"
+kprobe -> tracepoint: "explicit events avoid fragile function names"
+tracepoint -> rawtp: "skip copied struct when raw args are desired"
+rawtp -> tpbtf: "BTF restores typed arguments for new code"

@@ -1,29 +1,20 @@
 flowchart TD
-    Start["BPF program calls<br/>some_fn(arg1, arg2)"]
+    Call["BPF program calls a function<br/><b>does:</b> source names helper or __ksym kfunc<br/><b>why next:</b> loader/verifier must resolve callable target<br/><b>state:</b> call site in BPF bytecode"]
+    Kind{"which mechanism?"}
+    HelperID["helper path<br/><b>does:</b> compiler encodes BPF_FUNC_* enum id<br/><b>why next:</b> verifier has per-program-type helper proto table<br/><b>state:</b> stable UAPI helper number"]
+    HelperVerify["helper verification<br/><b>does:</b> checks arg/return types against bpf_func_proto<br/><b>why next:</b> runtime can dispatch through helper table<br/><b>state:</b> allowed helper call"]
+    HelperRun["helper runtime<br/><b>does:</b> calls fixed kernel helper implementation<br/><b>state:</b> UAPI semantics remain stable across kernels"]
+    Ksym["kfunc path<br/><b>does:</b> libbpf records symbol name with __ksym relocation<br/><b>why next:</b> target kernel BTF must contain matching function<br/><b>state:</b> unresolved-by-name call"]
+    KVerify["kfunc verification<br/><b>does:</b> checks BTF signature, flags, acquire/release rules<br/><b>why next:</b> direct kernel call is safe only with type proof<br/><b>state:</b> typed kfunc call or load failure"]
+    KRun["kfunc runtime<br/><b>does:</b> calls in-kernel function directly<br/><b>state:</b> not UAPI; availability can vary by kernel"]
 
-    Check{"some_fn is a..."}
+    Call --> Kind
+    Kind -->|frozen UAPI helper| HelperID --> HelperVerify --> HelperRun
+    Kind -->|BTF-exposed kfunc| Ksym --> KVerify --> KRun
 
-    Helper["Helper<br/>(static UAPI list)"]
-    Kfunc["kfunc<br/>(BTF-described kernel fn)"]
-
-    HelperPath["BPF_FUNC_xxx enum value"]
-    HelperSrc["kernel/bpf/helpers.c<br/>or net/core/filter.c<br/>has bpf_xxx_proto"]
-    HelperVerify["Verifier checks<br/>arg types vs proto"]
-    HelperRun["Runtime: dispatch<br/>via func_proto pointer"]
-
-    KfuncPath["Linker references kfunc<br/>by name (__ksym)"]
-    KfuncBTF["Loader matches name<br/>against kernel BTF"]
-    KfuncVerify["Verifier checks<br/>arg types vs BTF"]
-    KfuncRun["Runtime: direct call<br/>to kernel function"]
-
-    Start --> Check
-    Check -->|frozen UAPI| Helper
-    Check -->|in-tree, BTF-exposed| Kfunc
-
-    Helper --> HelperPath --> HelperSrc --> HelperVerify --> HelperRun
-    Kfunc --> KfuncPath --> KfuncBTF --> KfuncVerify --> KfuncRun
-
+    classDef root fill:#dbeafe,stroke:#2563eb
     classDef helper fill:#fef3c7,stroke:#d97706
     classDef kfunc fill:#dcfce7,stroke:#16a34a
-    class Helper,HelperPath,HelperSrc,HelperVerify,HelperRun helper
-    class Kfunc,KfuncPath,KfuncBTF,KfuncVerify,KfuncRun kfunc
+    class Call,Kind root
+    class HelperID,HelperVerify,HelperRun helper
+    class Ksym,KVerify,KRun kfunc

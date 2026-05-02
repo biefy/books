@@ -4,47 +4,49 @@ title: |md
   ## nftables vs iptables
 | {near: top-center; shape: text}
 
-ipt: "iptables (legacy)" {
+ipt: "iptables / x_tables" {
   style.fill: "#fee2e2"
   i_body: |md
-    Generation 1.
-    - Chains per protocol (iptables, ip6tables,
-      arptables, ebtables) — separate tools
-    - Linear matching, no native sets
-    - Modules in net/netfilter/ipt_*.c
-    - Deprecated; xtables compat layer for nft
+    **Does:** walks fixed-shape rule entries
+    in chain order.
 
-    Backend: x_tables (kernel side)
+    **Why next rule:** current rule did not
+    produce a terminal verdict.
+
+    **State model:** protocol-specific tables
+    (`iptables`, `ip6tables`, `arptables`, `ebtables`)
+    plus match/target modules.
   |
 }
 
-nft: "nftables (modern)" {
+nft: "nftables / nf_tables" {
   style.fill: "#dcfce7"
   n_body: |md
-    Generation 2 (since 3.13).
-    - One tool, one syntax (nft)
-    - Inet, ipv4, ipv6, arp, bridge tables
-    - Native maps and sets (hash, ranges)
-    - Bytecode VM, faster matching
-    - JIT'd
+    **Does:** evaluates a sequence of expressions
+    in `nft_do_chain()`.
 
-    Backend: nf_tables (net/netfilter/nf_tables*.c)
+    **Why faster for large policies:** sets/maps
+    replace long linear chains for membership and
+    key-to-verdict decisions.
 
-    Used by: firewalld, RHEL/Fedora,
-    Debian, modern container runtimes.
+    **State model:** one syntax across inet, ip,
+    ip6, arp, bridge, and netdev families.
   |
 }
 
-cmd: "Translation example" {
+cmd: "Same policy, different execution" {
   style.fill: "#fef3c7"
   c_body: |md
     iptables:
-      iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+      `-p tcp --dport 22 -j ACCEPT`
 
-    nftables equivalent:
-      nft add rule inet filter input tcp dport 22 accept
+    nftables:
+      `tcp dport 22 accept`
+
+    **Both:** return a Netfilter verdict at the
+    same hook; don't mix engines casually.
   |
 }
 
-ipt -> cmd: "translate"
-nft -> cmd: "modern"
+ipt -> cmd: "linear entry matched"
+nft -> cmd: "expression verdict reached"

@@ -1,22 +1,22 @@
 sequenceDiagram
     participant US as Userspace loader
-    participant BPF as BPF skeleton
-    participant K as Kernel
+    participant LIB as libbpf skeleton
+    participant BPF as BPF verifier/maps
+    participant LNK as bpf_link<br/>(.struct_ops.link)
     participant TCP as TCP CC subsystem
-    participant SOCK as Application socket
+    participant SK as Application socket
 
-    US->>BPF: load .bpf.o
-    BPF->>K: BPF_PROG_LOAD for each callback
-    BPF->>K: BPF_MAP_CREATE (struct_ops type)
-    K->>TCP: tcp_register_congestion_control(my_bpf_ops)
-    Note over TCP: 'my_bpf_ops' now in CC list
-
-    SOCK->>K: setsockopt(TCP_CONGESTION, "my_bpf_ops")
-    K->>TCP: switch CC for this socket
-    TCP->>BPF: invoke bbr_init_bpf(sk)
-    Note over BPF: BPF program runs as the CC algorithm
-    SOCK->>SOCK: TCP traffic uses BPF-defined behavior
-
-    US->>BPF: skeleton__destroy
-    BPF->>K: unload struct_ops map
-    K->>TCP: tcp_unregister_congestion_control(my_bpf_ops)
+    US->>LIB: open .bpf.o with callbacks + vtable
+    LIB->>BPF: BPF_PROG_LOAD each struct_ops callback
+    Note over BPF: signatures checked against kernel BTF vtable
+    LIB->>BPF: create/update struct_ops map
+    Note over BPF: map stores callback pointers
+    LIB->>LNK: attach struct_ops link
+    LNK->>TCP: register tcp_congestion_ops name
+    Note over TCP: algorithm appears in available_congestion_control
+    SK->>TCP: setsockopt(TCP_CONGESTION, name)
+    TCP->>BPF: invoke selected callbacks on TCP events
+    Note over BPF: BPF code is now part of the CC algorithm
+    US->>LNK: close/destroy link
+    LNK->>TCP: unregister algorithm
+    Note over TCP: sockets can no longer select this BPF CC

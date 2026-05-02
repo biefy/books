@@ -1,24 +1,35 @@
-/* Click-to-zoom on diagrams.
- * Wraps any <img> in book content with a click handler that opens
- * a fullscreen overlay showing the image at natural size.
- */
 (function () {
+  function classify(img) {
+    var ratio = img.naturalWidth / Math.max(img.naturalHeight, 1);
+    img.classList.toggle("diagram-wide", ratio >= 2.2);
+    img.classList.toggle("diagram-tall", ratio <= 0.55 && img.naturalHeight > 700);
+
+    if (img.classList.contains("diagram-wide") && !img.parentElement.classList.contains("diagram-scroll")) {
+      var wrapper = document.createElement("div");
+      wrapper.className = "diagram-scroll";
+      img.parentNode.insertBefore(wrapper, img);
+      wrapper.appendChild(img);
+    }
+  }
+
   function init() {
     var content = document.querySelector("#content");
     if (!content) return;
 
-    // Add zoom cursor to all content images
     var imgs = content.querySelectorAll("img");
     imgs.forEach(function (img) {
-      img.style.cursor = "zoom-in";
       img.title = "Click to zoom";
+      if (img.complete && img.naturalWidth) {
+        classify(img);
+      } else {
+        img.addEventListener("load", function () { classify(img); }, { once: true });
+      }
       img.addEventListener("click", function (e) {
         e.preventDefault();
-        openLightbox(img.src, img.alt || "");
+        openLightbox(img.currentSrc || img.src, img.alt || "");
       });
     });
 
-    // Build the lightbox overlay (lazy)
     var overlay;
     function getOverlay() {
       if (overlay) return overlay;
@@ -53,7 +64,6 @@
       document.body.style.overflow = "";
     }
 
-    // Close on Escape
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape") closeLightbox();
     });

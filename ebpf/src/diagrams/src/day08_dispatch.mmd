@@ -1,29 +1,21 @@
 flowchart TD
-    K1["Kernel C code:<br/>schedule() {<br/>  ...<br/>  trace_sched_switch(preempt, prev, next);<br/>  ...<br/>}"]
-    Macro["TRACE_EVENT macro<br/>(in include/trace/events/sched.h)"]
-    Two["TWO entry points generated:"]
+    Call["kernel code calls trace_sched_switch(preempt, prev, next)<br/><b>does:</b> reaches explicit TRACE_EVENT site<br/><b>state:</b> original typed args are available"]
+    Gate["tracepoint dispatch<br/><b>does:</b> checks which listener families are attached<br/><b>why next:</b> avoid work for unused interfaces<br/><b>state:</b> enabled static keys select paths"]
+    Copy["regular tracepoint path<br/><b>does:</b> copies configured fields into trace_event_raw_sched_switch<br/><b>why next:</b> BPF program expects stable event struct<br/><b>state:</b> ctx is copied bytes"]
+    Raw["raw_tracepoint path<br/><b>does:</b> places original args into raw u64 slots<br/><b>why next:</b> BPF program unpacks by index<br/><b>state:</b> ctx->args[N] positional values"]
+    BTF["tp_btf path<br/><b>does:</b> passes BTF-described args to trampoline-style wrapper<br/><b>why next:</b> BPF_PROG expects typed parameters<br/><b>state:</b> typed args valid for callback duration"]
+    Return["return to scheduler<br/><b>does:</b> resumes kernel code after all attached programs finish<br/><b>state:</b> tracing side effects complete"]
 
-    PathRaw["Raw tracepoint entry"]
-    PathBTF["tp_btf entry"]
-
-    RawCopy["Copy fields into<br/>trace_event_raw_sched_switch struct"]
-    RawCall["Call all attached<br/>raw tracepoint BPF progs"]
-
-    BTFCall["Call all attached<br/>tp_btf BPF progs<br/>with original (preempt, prev, next)"]
-
-    Cont["Return to schedule()"]
-
-    K1 --> Macro
-    Macro --> Two
-    Two --> PathRaw
-    Two --> PathBTF
-
-    PathRaw --> RawCopy --> RawCall --> Cont
-    PathBTF --> BTFCall --> Cont
+    Call --> Gate
+    Gate -->|tracepoint/... listener| Copy --> Return
+    Gate -->|raw_tracepoint/... listener| Raw --> Return
+    Gate -->|tp_btf/... listener| BTF --> Return
 
     classDef kern fill:#fef3c7,stroke:#d97706
-    classDef raw fill:#fee2e2,stroke:#dc2626
+    classDef regular fill:#fee2e2,stroke:#dc2626
+    classDef raw fill:#fde68a,stroke:#d97706
     classDef btf fill:#dcfce7,stroke:#16a34a
-    class K1,Macro,Two,Cont kern
-    class PathRaw,RawCopy,RawCall raw
-    class PathBTF,BTFCall btf
+    class Call,Gate,Return kern
+    class Copy regular
+    class Raw raw
+    class BTF btf

@@ -108,7 +108,7 @@ static __always_inline void inc_drops(void)
 }
 
 SEC("fentry/vfs_read")
-int BPF_PROG(on_in)
+int BPF_PROG(on_in, struct file *f, char *buf, size_t n, loff_t *pos)
 {
     __u64 tid = bpf_get_current_pid_tgid() & 0xffffffff;
     __u64 ts = bpf_ktime_get_ns();
@@ -117,7 +117,7 @@ int BPF_PROG(on_in)
 }
 
 SEC("fexit/vfs_read")
-int BPF_PROG(on_out)
+int BPF_PROG(on_out, struct file *f, char *buf, size_t n, loff_t *pos, ssize_t ret)
 {
     __u64 id = bpf_get_current_pid_tgid();
     __u64 tid = id & 0xffffffff;
@@ -219,7 +219,7 @@ Functionally similar; uses copy semantics instead of reserve/submit. About 10% s
 
 ```c
 SEC("fentry/vfs_read")
-int BPF_PROG(on_in_dyn, struct file *f, char *buf, size_t n)
+int BPF_PROG(on_in_dyn, struct file *f, char *buf, size_t n, loff_t *pos)
 {
     __u32 to_emit = n > 64 ? 64 : n;
     struct bpf_dynptr ptr;

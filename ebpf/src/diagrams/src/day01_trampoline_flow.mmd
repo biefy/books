@@ -1,26 +1,18 @@
 flowchart TD
-    CALLER["any kernel code calls<br/>do_unlinkat(dfd, name)"]
-    PATCHED["do_unlinkat:<br/>jmp trampoline_xyz   ← was 5 NOPs"]
-    TRAMP["trampoline_xyz<br/>(generated assembly)"]
-    SAVE["save dfd, name<br/>onto BPF ctx array"]
-    BPF["your BPF program<br/>BPF_PROG(on_unlink, dfd, name)"]
-    RING["bpf_ringbuf_reserve()<br/>+ submit"]
-    RESTORE["restore registers"]
-    BODY["do_unlinkat body<br/>(skips first 5 bytes)"]
+    CALLER["caller enters do_unlinkat(dfd, name)<br/><b>state:</b> normal kernel call/args in registers"]
+    PATCH["fentry patch site<br/><b>does:</b> architecture ftrace/BPF machinery replaces NOPs with an entry call path<br/><b>why next:</b> trampoline must run before the function body<br/><b>state:</b> original args are still available"]
+    TRAMP["BPF trampoline<br/><b>does:</b> saves argument registers into the BPF calling convention<br/><b>why next:</b> verifier-approved BPF program expects typed args<br/><b>state:</b> ctx/typed args ready"]
+    BPF["your fentry BPF program<br/><b>does:</b> observes dfd/name before unlink logic runs<br/><b>why next:</b> returns 0 to continue kernel execution<br/><b>state:</b> optional event data prepared"]
+    RING["ringbuf submit<br/><b>does:</b> copies observation to userspace-visible buffer<br/><b>why next:</b> tracing side effect is complete"]
+    RESTORE["trampoline epilogue<br/><b>does:</b> restores registers and returns to patched function entry<br/><b>state:</b> kernel can run as if tracing were transparent"]
+    BODY["do_unlinkat body<br/><b>does:</b> path lookup, permission checks, unlink<br/><b>state:</b> real syscall behavior continues"]
     RET["return to caller"]
 
-    CALLER --> PATCHED
-    PATCHED -->|"jmp"| TRAMP
-    TRAMP --> SAVE
-    SAVE --> BPF
-    BPF --> RING
-    RING --> RESTORE
-    RESTORE --> BODY
-    BODY --> RET
+    CALLER --> PATCH --> TRAMP --> BPF --> RING --> RESTORE --> BODY --> RET
 
     classDef hot fill:#ffe5b4,stroke:#d97706,stroke-width:2px
     classDef bpf fill:#dbeafe,stroke:#2563eb,stroke-width:2px
     classDef kern fill:#e5e7eb,stroke:#374151,stroke-width:1px
-    class PATCHED,TRAMP hot
+    class PATCH,TRAMP hot
     class BPF,RING bpf
-    class CALLER,SAVE,RESTORE,BODY,RET kern
+    class CALLER,RESTORE,BODY,RET kern

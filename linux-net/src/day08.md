@@ -74,7 +74,7 @@ Linux supports multiple routing tables. The defaults:
 - **local** (255) — IPs on local interfaces; kernel-maintained.
 - **main** (254) — user-added routes go here by default.
 - **default** (253) — lowest priority; rarely used.
-- **custom** (1..252) — created with `ip route add ... table N`. Selected by `fib_rules`.
+- **custom** — created with `ip route add ... table N`. Small examples often use IDs below 253, but the kernel carries table IDs as `u32`; larger IDs travel through netlink attributes such as `RTA_TABLE`.
 
 `fib_rules` decide *which* table to consult based on packet attributes: source IP, fwmark, OIF, IIF. Day 9 covers them.
 
@@ -143,17 +143,20 @@ This is the outbound counterpart to `ip_route_input`.
 
 ## What to break
 
-### Set a wrong default route
+### Break a default route safely, inside a namespace
+
+Do not replace your host's real default route. Put the failure in a disposable namespace:
 
 ```bash
-sudo ip route replace default via 10.99.99.99
-ping 8.8.8.8   # times out
+sudo ip netns add fibbreak
+sudo ip -n fibbreak link set lo up
+sudo ip -n fibbreak route add default via 10.99.99.99 dev lo
+sudo ip netns exec fibbreak ping -c 1 8.8.8.8   # fails inside the namespace only
+
+sudo ip netns del fibbreak
 ```
 
-The next-hop ARP fails (no host at .99). Restore:
-```bash
-sudo ip route replace default via <your-real-gateway>
-```
+The next-hop is unreachable, so the lookup succeeds but transmission cannot resolve a usable path. Your host routing table never changes.
 
 ### Inspect rt cache stats (legacy)
 
@@ -181,7 +184,7 @@ Mostly zeros nowadays — the cache is gone, but the proc file remains for compa
 
 - **FIB** is the kernel's routing table. Lookups happen via `fib_table_lookup` against an LC-trie.
 - The lookup key is `struct flowi4`; the result is `struct fib_result`.
-- Three default tables: **local (255)**, **main (254)**, **default (253)**. Custom tables 1–252.
+- Three well-known tables: **local (255)**, **main (254)**, **default (253)**. Custom table IDs are `u32`; low IDs are just convenient examples.
 - **`fib_rules`** decide which table to consult; default rules just fall through local→main→default.
 - No more flow-level rt_cache as of ~3.6 — lookups are cheap enough per-packet.
 - The skb's `dst->input` function dispatches local-delivery vs forwarding.

@@ -1,23 +1,23 @@
 flowchart LR
-    A["Userspace CLI:<br/>./blockcli add 10.1.0.0/16"]
-    B["bpf_map__update_elem<br/>key = {prefixlen=16, addr=0x0A010000}"]
-    C["LPM trie inserts node<br/>at correct depth"]
+    CLI["userspace add prefix<br/><b>does:</b> converts CIDR into LPM key {prefixlen, addr}<br/><b>why next:</b> map update persists policy for live XDP program<br/><b>state:</b> canonical key bytes"]
+    Update["bpf_map_update_elem<br/><b>does:</b> inserts/updates LPM trie node<br/><b>why next:</b> future packet lookups see new policy immediately<br/><b>state:</b> trie contains prefix and value"]
+    Packet["packet at XDP<br/><b>does:</b> extracts src/dst address into lookup key<br/><b>why next:</b> policy decision is map-driven<br/><b>state:</b> full-length key for longest-prefix search"]
+    Lookup["LPM trie lookup<br/><b>does:</b> walks from broad prefixes to most-specific match<br/><b>why next:</b> returned value determines verdict<br/><b>state:</b> best matching prefix or miss"]
+    Verdict{"policy value?"}
+    Drop["XDP_DROP<br/><b>does:</b> consumes packet before skb allocation<br/><b>state:</b> denied prefix blocked"]
+    Pass["XDP_PASS<br/><b>does:</b> hands packet to normal stack<br/><b>state:</b> no deny match or allow value"]
 
-    D["Live XDP program at NIC"]
-    E["Packet from 10.1.2.55 arrives"]
-    F["bpf_map_lookup_elem(&deny, &key)"]
-    G["LPM walks root→10.0/8→10.1/16<br/>finds match"]
-    H["Returns value (eg, deny=1)"]
-    I["XDP_DROP"]
-
-    A --> B --> C
-    D -.controls.- C
-    E --> D --> F --> G --> H --> I
+    CLI --> Update
+    Update -. shared map state .-> Lookup
+    Packet --> Lookup --> Verdict
+    Verdict -->|deny| Drop
+    Verdict -->|miss/allow| Pass
 
     classDef us fill:#dbeafe,stroke:#2563eb
     classDef bpf fill:#fef3c7,stroke:#d97706
     classDef ok fill:#dcfce7,stroke:#16a34a
     classDef bad fill:#fee2e2,stroke:#dc2626
-    class A,B us
-    class C,D,F,G,H bpf
-    class I bad
+    class CLI,Update us
+    class Packet,Lookup,Verdict bpf
+    class Pass ok
+    class Drop bad

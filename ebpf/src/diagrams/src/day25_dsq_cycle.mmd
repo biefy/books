@@ -1,18 +1,18 @@
-flowchart LR
-    subgraph Cycle["Per-CPU scheduling cycle"]
-        Wake["task wakes up<br/>(I/O complete, signal, etc.)"]
-        Enq["sched_ext_ops.enqueue(task, flags)<br/>BPF decides where to put it"]
-        DSQ["task in a Dispatch Queue (DSQ)"]
-        CPUIdle["CPU goes idle"]
-        Disp["sched_ext_ops.dispatch(cpu, prev)<br/>BPF picks next task"]
-        Run["CPU runs the task"]
-    end
+flowchart TD
+    Wake["task becomes runnable<br/><b>does:</b> wakeup/fork/preemption makes task eligible<br/><b>why next:</b> sched_ext must choose a queue and slice<br/><b>state:</b> task has runnable state and previous CPU"]
+    Enq["ops.enqueue(task, flags)<br/><b>does:</b> BPF chooses DSQ, slice, FIFO vs vtime ordering<br/><b>why next:</b> task must wait somewhere until a CPU asks<br/><b>state:</b> scx_bpf_dsq_insert* records queue ownership"]
+    DSQ["Dispatch Queue (DSQ)<br/><b>does:</b> kernel-managed runnable-task queue<br/><b>why next:</b> CPU-local dispatch pulls from DSQ when it needs work<br/><b>state:</b> task ordered by policy"]
+    Idle["CPU needs a task<br/><b>does:</b> current task blocked, yielded, or exhausted slice<br/><b>why next:</b> ops.dispatch can move work local<br/><b>state:</b> CPU local DSQ needs refill"]
+    Dispatch["ops.dispatch(cpu, prev)<br/><b>does:</b> BPF calls scx_bpf_dsq_move_to_local or inserts local work<br/><b>why next:</b> core scheduler can only run tasks from local DSQ<br/><b>state:</b> task moved to CPU-local runnable slot"]
+    Run["CPU runs task<br/><b>does:</b> consumes slice until block/preempt/exit<br/><b>why next:</b> task may wake/enqueue again or leave scheduler<br/><b>state:</b> runtime accounted; watchdog sees progress"]
 
     Wake --> Enq --> DSQ
-    CPUIdle --> Disp --> DSQ
-    DSQ --> Run --> Wake
+    Idle --> Dispatch --> Run
+    DSQ --> Dispatch
+    Run -->|blocks then wakes| Wake
+    Run -->|slice ends| Wake
 
     classDef bpf fill:#fef3c7,stroke:#d97706
-    classDef ok fill:#dcfce7,stroke:#16a34a
-    class Enq,Disp bpf
-    class Run,DSQ,Wake,CPUIdle ok
+    classDef state fill:#dcfce7,stroke:#16a34a
+    class Enq,Dispatch bpf
+    class Wake,DSQ,Idle,Run state

@@ -1,23 +1,23 @@
 flowchart TD
-    Frame["frame at NIC"]
-    XDP["XDP program<br/>(driver-level)"]
-    Action{Action?}
-    Drop["XDP_DROP — done"]
-    Tx["XDP_TX — back out same iface"]
-    Redirect["XDP_REDIRECT — to other iface or AF_XDP"]
-    Pass["XDP_PASS — alloc skb"]
-    Stack["normal stack: GRO, ip_rcv, netfilter, ..."]
+    Frame["driver RX buffer<br/><b>does:</b> holds packet bytes before skb allocation<br/><b>why next:</b> XDP program gets first policy chance<br/><b>state:</b> xdp_buff points at DMA-backed data"]
+    XDP["XDP program<br/><b>does:</b> parses packet with data/data_end bounds checks<br/><b>why next:</b> return code selects owner of the buffer<br/><b>state:</b> packet may be modified in-place"]
+    Action{"XDP action"}
+    Drop["XDP_DROP<br/><b>does:</b> frees/recycles RX buffer without skb<br/><b>state:</b> normal stack never sees packet"]
+    Tx["XDP_TX<br/><b>does:</b> sends same buffer back out the ingress device<br/><b>state:</b> driver owns buffer for transmit"]
+    Redirect["XDP_REDIRECT<br/><b>does:</b> queues buffer to devmap/cpumap/xskmap target<br/><b>state:</b> ownership transfers to redirect backend"]
+    Pass["XDP_PASS<br/><b>does:</b> tells driver to build skb from the buffer<br/><b>why next:</b> GRO/IP/netfilter/socket layers require skb<br/><b>state:</b> packet enters normal RX path"]
+    Stack["normal stack<br/><b>does:</b> GRO, tc ingress, Netfilter, route, transport<br/><b>state:</b> skb carries metadata through kernel stack"]
 
     Frame --> XDP --> Action
     Action --> Drop
     Action --> Tx
     Action --> Redirect
-    Action --> Pass
-    Pass --> Stack
+    Action --> Pass --> Stack
 
     classDef xdp fill:#fef3c7,stroke:#d97706
     classDef stack fill:#dcfce7,stroke:#16a34a
     classDef bad fill:#fee2e2,stroke:#dc2626
-    class XDP,Action xdp
-    class Stack,Pass stack
+    class Frame,XDP,Action xdp
+    class Pass,Stack stack
     class Drop bad
+    class Tx,Redirect stack

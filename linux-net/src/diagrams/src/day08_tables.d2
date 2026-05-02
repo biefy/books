@@ -4,56 +4,61 @@ title: |md
   ## Multiple FIB tables
 | {near: top-center; shape: text}
 
-main: "main (id 254)" {
-  style.fill: "#dbeafe"
-  m_body: |md
-    Default destination for `ip route add`.
-    Most user-added routes land here.
+rules: "fib_rules: which table first?" {
+  style.fill: "#fef3c7"
+  ru_body: |md
+    **Does:** walks rules in priority order.
+    **Why next:** the first matching rule chooses
+    one FIB table for this lookup.
+    **State:** lookup now has a table ID.
+
+    Defaults:
+      0: lookup local
+      32766: lookup main
+      32767: lookup default
   |
 }
 
 local: "local (id 255)" {
   style.fill: "#fef3c7"
   l_body: |md
-    Routes to local addresses (the IPs
-    on this host's interfaces).
-    `ip route show table local` shows them.
-    Maintained by the kernel automatically.
+    **Does:** matches this host's own addresses.
+    **Why first:** local delivery must win over
+    any normal forwarding route.
+    **Owner:** kernel-maintained.
+  |
+}
+
+main: "main (id 254)" {
+  style.fill: "#dbeafe"
+  m_body: |md
+    **Does:** holds ordinary user/admin routes.
+    **Why next:** this is where `ip route add`
+    lands unless another table is named.
   |
 }
 
 default: "default (id 253)" {
   style.fill: "#dcfce7"
   d_body: |md
-    Lowest priority; rarely used directly.
+    **Does:** final fallback table.
+    **Why last:** historical compatibility;
+    rarely populated on modern hosts.
   |
 }
 
-custom: "custom tables (1..252)" {
+custom: "custom tables (u32 IDs)" {
   style.fill: "#dbeafe"
   c_body: |md
-    Created via `ip route add ... table 100`.
-    Selected via fib_rules (Day 9).
-
-    Use case: source-routing,
-    per-VPN routing, multi-tenant.
+    **Does:** separate FIBs for policy routing.
+    **Why selected:** source IP, fwmark, iif/oif,
+    UID, ports, etc. matched a rule.
+    **Note:** examples use 100/200, but kernel
+    table IDs are not capped at 252.
   |
 }
 
-rules: "fib_rules: which table?" {
-  style.fill: "#fef3c7"
-  ru_body: |md
-    Default rules:
-      0: from all lookup local
-      32766: from all lookup main
-      32767: from all lookup default
-
-    Custom rules can route based on
-    src IP, fwmark, OIF, IIF, etc.
-  |
-}
-
-main -> rules
-local -> rules
-default -> rules
-custom -> rules
+rules -> local: "priority 0"
+rules -> main: "fallback"
+rules -> default: "last default rule"
+rules -> custom: "custom rule match"

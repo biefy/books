@@ -18,7 +18,7 @@ Both iptables and nftables hook into the same Netfilter framework (Day 20). They
 ### nftables (modern, since 3.13 / 2014)
 
 - **One tool**: `nft`. Single syntax for inet (IPv4+IPv6 unified), arp, bridge, netdev (per-iface).
-- **Bytecode VM**: rules compile to a small instruction set evaluated by `nft_do_chain` (`net/netfilter/nf_tables_core.c:250`). Each rule is a sequence of expressions; each expression is a small `nft_expr` op. The VM is JIT-compiled on x86_64 for hot paths.
+- **Expression VM**: rules compile to compact expression sequences evaluated by `nft_do_chain` (`net/netfilter/nf_tables_core.c:250`). Each rule is a sequence of `nft_expr` ops; common expressions have fast eval paths, but this is not a BPF-style JIT.
 - **Native sets and maps**: hash sets, range sets, IP-prefix tries, key→value maps as first-class types. Membership tests are O(1) instead of O(N) linear walks.
 - **Atomic updates**: changes are applied transactionally via netlink; no full-table rewrite for one rule add.
 - **Implementation**: `nft_do_chain` (`net/netfilter/nf_tables_core.c:250`). Reads the chain's expression list, evaluates each.
@@ -38,7 +38,8 @@ For 100 IPs the difference is noticeable; for 100k IPs (e.g., a denylist), iptab
 # Create an inet table (covers both IPv4 and IPv6)
 sudo nft add table inet filter
 
-# Add chains for the standard hook positions, with default policies
+# Add chains for the standard hook positions, with default policies.
+# Run this only in a VM/netns lab: policy drop on host input can lock you out.
 sudo nft 'add chain inet filter input   { type filter hook input   priority 0 ; policy drop ; }'
 sudo nft 'add chain inet filter forward { type filter hook forward priority 0 ; policy drop ; }'
 sudo nft 'add chain inet filter output  { type filter hook output  priority 0 ; policy accept ; }'
@@ -78,9 +79,9 @@ The `{...}` creates an anonymous hash set, used by this rule only.
 ### Named set (mutable from CLI)
 
 ```bash
-sudo nft add set inet filter blocked { type ipv4_addr \; }
+sudo nft add set inet filter blocked { type ipv4_addr \; flags interval \; }
 sudo nft add element inet filter blocked { 1.2.3.4 }
-sudo nft add element inet filter blocked { 5.6.7.0/24 }    # range elements (with 'flags interval')
+sudo nft add element inet filter blocked { 5.6.7.0/24 }
 
 sudo nft add rule inet filter input ip saddr @blocked drop
 ```
@@ -195,7 +196,7 @@ sudo nft delete table inet test
 sudo iptables -A INPUT -p tcp --dport 12346 -j DROP
 sudo nft list ruleset    # see the rule appear in an nft table named 'ip filter'
 
-sudo iptables -F        # clean up
+sudo iptables -D INPUT -p tcp --dport 12346 -j DROP   # clean up exactly this rule
 ```
 
 ## What to read in the kernel
@@ -225,7 +226,7 @@ sudo iptables -F        # clean up
 
 - **nftables = modern** (since 3.13); **iptables = legacy** (still works via `iptables-nft` shim).
 - Single tool `nft`; one syntax for v4, v6, ARP, bridge, netdev.
-- **Bytecode VM** (`nft_do_chain`) replaces the linear rule walk of `ipt_do_table`. JIT'd on x86_64.
+- **Expression VM** (`nft_do_chain`) replaces the fixed-shape linear rule walk of `ipt_do_table`; sets/maps avoid long chains for many workloads.
 - **Native sets and maps** make denylists / port maps O(1) instead of O(N).
 - **Atomic transactional updates** — adding one rule doesn't rewrite the whole table.
 - The same Netfilter hooks (Day 20); different rule engines.

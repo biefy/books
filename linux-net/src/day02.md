@@ -6,7 +6,7 @@
 
 ![RX path](diagrams/day02_rx_path.png)
 
-Every received packet on a typical Linux box traverses roughly the same path. Hardware DMAs the frame into kernel-allocated memory, the driver wraps it in an `sk_buff`, NAPI's softirq dispatches the work, GRO coalesces consecutive segments where it can, and the stack delivers to the appropriate L3 protocol handler.
+Every received packet on a typical Linux box traverses a sequence of handoffs. Hardware DMAs the frame into kernel-owned RX memory, the IRQ only schedules work, NAPI polls the driver under a budget, native XDP can decide before an skb exists, `XDP_PASS` becomes an `sk_buff`, GRO may coalesce related TCP segments, and the core stack dispatches the packet to the right L3 protocol handler.
 
 We'll walk this in stages, each anchored to a specific file/function in your `~/code/linux` checkout (line numbers from kernel 7.1).
 
@@ -31,14 +31,15 @@ gro_normal_list(&napi->gro);
 
 `napi_poll` is the driver's poll function (e.g., `e1000_clean_rx_irq`, `mlx5e_poll_rx_cq`). The budget caps how many packets one softirq run can process — default 300 from `net.core.netdev_budget`.
 
-## Stage 2: Driver → skb → XDP → GRO
+## Stage 2: Driver → native XDP → skb → GRO
 
 Inside the driver's poll, for each completed RX descriptor:
 
-1. **Wrap the DMA buffer in an skb.** Modern drivers use `build_skb` or `napi_build_skb` (zero-copy of payload — the driver already DMAed bytes into a page; the skb's `head/data/tail` point at it).
-2. **Call XDP** if attached. XDP returns one of `XDP_PASS`, `XDP_DROP`, `XDP_TX`, `XDP_REDIRECT`. Only `XDP_PASS` continues into the stack.
-3. **Set `skb->protocol`** via `eth_type_trans` (strips the Ethernet header from `data`, advances `mac_header`).
-4. **Pass to GRO**: `napi_gro_receive(napi, skb)` (or in modern drivers via `napi->gro` accumulator).
+1. **Build an `xdp_buff` view of the DMA buffer.** Native XDP runs while the packet is still just bytes in driver-owned RX memory — no `sk_buff` has been allocated yet.
+2. **Call XDP** if attached. `XDP_DROP`, `XDP_TX`, and `XDP_REDIRECT` consume the packet at the driver/XDP layer. Only `XDP_PASS` says, "turn this into a normal kernel packet."
+3. **Wrap the DMA buffer in an skb.** Modern drivers use `build_skb` or `napi_build_skb` after `XDP_PASS` (zero-copy of payload — the driver already DMAed bytes into a page; the skb's `head/data/tail` point at it). Generic XDP is the exception: it runs later on an already-created skb in `net/core/dev.c`.
+4. **Set `skb->protocol`** via `eth_type_trans` (strips the Ethernet header from `data`, advances `mac_header`).
+5. **Pass to GRO**: `napi_gro_receive(napi, skb)` (or in modern drivers via `napi->gro` accumulator).
 
 GRO (Generic Receive Offload) tries to merge consecutive segments of the same flow into one big skb before the stack sees it. A 64KB GRO superpacket means one trip up the stack instead of 40-something. Code: `net/core/gro.c`. Look at `napi_gro_receive` and the per-protocol callbacks (`tcp4_gro_receive`).
 
@@ -137,10 +138,13 @@ One line per CPU. Columns: total packets processed, dropped, time_squeeze (budge
 Adjust:
 
 ```bash
+old_budget=$(cat /proc/sys/net/core/netdev_budget)
 echo 600 | sudo tee /proc/sys/net/core/netdev_budget
+# restore when done
+echo "$old_budget" | sudo tee /proc/sys/net/core/netdev_budget
 ```
 
-Watch `softnet_stat` shift.
+Watch `softnet_stat` shift, then restore the original budget so the host is not left with changed RX scheduling behavior.
 
 ---
 
@@ -162,6 +166,7 @@ Watch `softnet_stat` shift.
 
 - **NAPI** turns IRQ floods into one IRQ per burst + softirq polling. Budget-capped to prevent CPU starvation.
 - The softirq loop is in **`net_rx_action`**; per-NAPI dispatch via `napi->poll`.
+- **Native XDP** runs before skb allocation; `XDP_PASS` is the handoff that lets the driver build an skb for the normal stack.
 - **`build_skb`** wraps a pre-existing DMA buffer into an skb (zero-copy receive).
 - **GRO** (`net/core/gro.c`) coalesces consecutive same-flow segments before the stack sees them.
 - The single most-touched RX function is **`__netif_receive_skb_core`** at `net/core/dev.c:5972`.

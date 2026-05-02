@@ -1,21 +1,18 @@
 flowchart LR
-    InnerSrc["inner packet:<br/>192.168.1.5 -> 192.168.1.20"]
-    VxlanXmit["vxlan netdev xmit"]
-    BuildOuter["build:<br/>+ Ethernet (VXLAN_OVERLAY MAC)<br/>+ outer IP (VTEP src/dst)<br/>+ UDP port 4789<br/>+ VXLAN hdr (VNI)"]
-    SendOuter["sent through underlay route"]
+    Inner["inner Ethernet frame<br/><b>does:</b> carries tenant src/dst MAC/IP<br/><b>why next:</b> VXLAN device must map overlay destination<br/><b>state:</b> skb belongs to overlay netdev"]
+    FDB["VXLAN FDB / VNI lookup<br/><b>does:</b> maps inner dst MAC + VNI to remote VTEP<br/><b>why next:</b> underlay needs an outer IP destination<br/><b>state:</b> selected VNI and VTEP IP"]
+    Encap["encapsulation<br/><b>does:</b> prepends outer Ethernet/IP/UDP + VXLAN header<br/><b>why next:</b> underlay routers only understand outer packet<br/><b>state:</b> skb now contains tunnel metadata and outer headers"]
+    Underlay["underlay route output<br/><b>does:</b> routes outer IP packet to remote VTEP<br/><b>why next:</b> NIC transmits ordinary UDP/IP frame<br/><b>state:</b> outer nexthop/dev selected"]
+    Wire["wire<br/><b>state:</b> UDP dst port 4789, VNI identifies tenant segment"]
+    UDP["remote UDP tunnel socket<br/><b>does:</b> receives port 4789 and dispatches to VXLAN handler<br/><b>why next:</b> VXLAN code validates header/VNI<br/><b>state:</b> encapsulated skb accepted by tunnel endpoint"]
+    Decap["decapsulation<br/><b>does:</b> removes outer headers and restores inner frame context<br/><b>why next:</b> bridge/IP stack should see original tenant frame<br/><b>state:</b> skb attached to VXLAN netdev RX path"]
+    Stack["normal RX path<br/><b>does:</b> bridge, IP, netfilter, or socket delivery handles inner frame<br/><b>state:</b> tenant packet behaves as local L2 traffic"]
 
-    Wire["wire: encapsulated frame"]
+    Inner --> FDB --> Encap --> Underlay --> Wire --> UDP --> Decap --> Stack
 
-    UdpRcv["udp_rcv at remote VTEP"]
-    Disp["udp_tunnel dispatch"]
-    Decap["strip VXLAN hdr,<br/>recover inner Ethernet frame"]
-    InnerRx["push to vxlan netdev's RX"]
-    Stack["normal RX path"]
-
-    InnerSrc --> VxlanXmit --> BuildOuter --> SendOuter --> Wire
-    Wire --> UdpRcv --> Disp --> Decap --> InnerRx --> Stack
-
-    classDef encap fill:#fef3c7,stroke:#d97706
-    classDef ok fill:#dcfce7,stroke:#16a34a
-    class BuildOuter,Decap encap
-    class Stack ok
+    classDef overlay fill:#dbeafe,stroke:#2563eb
+    classDef tunnel fill:#fef3c7,stroke:#d97706
+    classDef underlay fill:#dcfce7,stroke:#16a34a
+    class Inner,FDB,Stack overlay
+    class Encap,UDP,Decap tunnel
+    class Underlay,Wire underlay

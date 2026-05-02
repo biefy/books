@@ -1,19 +1,18 @@
 flowchart LR
-    Pkt["Packet flow:<br/>NIC → driver → UMEM"]
-    XdpRedir["XDP returns:<br/>bpf_redirect_map(&xsks_map, queue_id, 0)"]
-    Map["BPF_MAP_TYPE_XSKMAP<br/>{ queue_id → AF_XDP socket }"]
-    Sock["AF_XDP socket bound<br/>to (iface, queue)"]
-    User["Userspace:<br/>process packet zero-copy"]
+    Create["create AF_XDP socket<br/><b>does:</b> binds XSK to ifindex + RX queue + UMEM<br/><b>why next:</b> XDP redirect needs a live socket fd<br/><b>state:</b> socket owns RX/TX rings"]
+    Map["update XSKMAP<br/><b>does:</b> stores queue_id -> xsk fd<br/><b>why next:</b> BPF redirect_map looks up by ctx->rx_queue_index<br/><b>state:</b> queue has userspace owner"]
+    Packet["packet reaches XDP<br/><b>does:</b> program reads rx_queue_index and policy<br/><b>why next:</b> only registered queues can redirect safely<br/><b>state:</b> xdp_buff still pre-skb"]
+    Lookup["bpf_redirect_map<br/><b>does:</b> checks XSKMAP entry for queue<br/><b>why next:</b> hit transfers packet to AF_XDP; miss uses fallback<br/><b>state:</b> redirect target or XDP_PASS"]
+    Ring["XSK RX ring<br/><b>does:</b> receives descriptor for UMEM frame<br/><b>why next:</b> userspace polls descriptors, not syscalls per packet<br/><b>state:</b> user owns packet buffer"]
+    Cleanup["delete map entry<br/><b>does:</b> removes queue -> fd before socket teardown<br/><b>state:</b> later packets pass/drop instead of targeting stale XSK"]
 
-    Pkt --> XdpRedir
-    XdpRedir --> Map
-    Map --> Sock
-    Sock --> User
+    Create --> Map --> Packet --> Lookup
+    Lookup -->|map hit| Ring --> Cleanup
+    Lookup -->|no entry| Pass["XDP_PASS / fallback<br/><b>state:</b> packet continues to normal stack"]
 
-    Note["Per-queue model:<br/>multiple sockets,<br/>multiple userspace threads"]
-    Map -.- Note
-
+    classDef setup fill:#dbeafe,stroke:#2563eb
     classDef hot fill:#fef3c7,stroke:#d97706
     classDef ok fill:#dcfce7,stroke:#16a34a
-    class XdpRedir,Map,Sock hot
-    class Pkt,User ok
+    class Create,Map,Cleanup setup
+    class Packet,Lookup hot
+    class Ring,Pass ok
