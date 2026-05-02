@@ -1,0 +1,37 @@
+flowchart TD
+    App["Application: send(fd, buf, len, 0)"]
+    Sys["sys_sendto / sys_write"]
+    Sock["sock_sendmsg → inet_sendmsg"]
+
+    TCP["tcp_sendmsg<br/>net/ipv4/tcp.c:1450"]
+    Locked["tcp_sendmsg_locked<br/>copy from user, queue on sk->sk_write_queue"]
+    XmitTrigger["tcp_push → tcp_write_xmit<br/>net/ipv4/tcp_output.c"]
+    Transmit["tcp_transmit_skb<br/>build TCP header"]
+
+    IpOut["ip_queue_xmit<br/>net/ipv4/ip_output.c:546"]
+    IpLocalOut["ip_local_out → ip_output"]
+    NfPostRouting["NF_HOOK(NF_INET_POST_ROUTING)"]
+    DstOut["dst_output → ip_finish_output → ip_finish_output2"]
+
+    Neighbor["neighbour resolution<br/>(ARP if needed)"]
+    DevXmit["dev_queue_xmit<br/>net/core/dev.c"]
+    Tcx["tcx egress / tc-bpf egress"]
+
+    Qdisc["qdisc enqueue<br/>then __qdisc_run<br/>net/sched/sch_generic.c"]
+    Drv["netdev_start_xmit →<br/>ndo_start_xmit (driver)"]
+    HW["NIC DMA, then on the wire"]
+
+    App --> Sys --> Sock --> TCP --> Locked --> XmitTrigger --> Transmit
+    Transmit --> IpOut --> IpLocalOut --> NfPostRouting --> DstOut
+    DstOut --> Neighbor --> DevXmit --> Tcx --> Qdisc --> Drv --> HW
+
+    classDef us fill:#dbeafe,stroke:#2563eb
+    classDef tcp fill:#fef3c7,stroke:#d97706
+    classDef ip fill:#dcfce7,stroke:#16a34a
+    classDef dev fill:#e0e7ff,stroke:#6366f1
+    classDef hw fill:#fee2e2,stroke:#dc2626
+    class App,Sys,Sock us
+    class TCP,Locked,XmitTrigger,Transmit tcp
+    class IpOut,IpLocalOut,NfPostRouting,DstOut,Neighbor ip
+    class DevXmit,Tcx,Qdisc,Drv dev
+    class HW hw

@@ -1,0 +1,19 @@
+flowchart TD
+    Start(["bpf_map_lookup_elem(&counts, &pid)"])
+    Decide{"return value\n== NULL?"}
+    Update["bpf_map_update_elem(&counts, &pid, &one, BPF_ANY)\n(insert with starting value)"]
+    Atomic["__sync_fetch_and_add(cnt, 1)\n(atomic increment in-place)"]
+    Out(["return 0"])
+
+    Start --> Decide
+    Decide -->|"NULL\n(first time seeing this PID)"| Update
+    Decide -->|"non-NULL\n(already counted before)"| Atomic
+    Update --> Out
+    Atomic --> Out
+
+    classDef hot fill:#fef3c7,stroke:#d97706,stroke-width:2px
+    classDef ok fill:#dcfce7,stroke:#16a34a,stroke-width:2px
+    classDef bad fill:#fee2e2,stroke:#dc2626,stroke-width:2px
+    class Decide hot
+    class Atomic,Update ok
+    class Start,Out ok

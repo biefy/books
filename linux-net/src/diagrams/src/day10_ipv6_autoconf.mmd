@@ -1,0 +1,21 @@
+flowchart LR
+    Iface["NIC enabled IPv6"]
+    LL["assign link-local fe80::/64<br/>auto from MAC (or stable_secret)"]
+    RA["listen for Router Advertisement<br/>(ICMPv6 type 134)"]
+    SLAAC{"SLAAC<br/>(M=0,A=1)?"}
+    Auto["assign global from RA prefix<br/>+ EUI-64 or random"]
+    DHCP["DHCPv6<br/>(M=1)"]
+
+    NDP["NDP for neighbours<br/>(replaces ARP for IPv6)"]
+    DAD["Duplicate Address Detection<br/>(send NS for own addr)"]
+
+    Iface --> LL --> DAD --> RA --> SLAAC
+    SLAAC -->|yes| Auto
+    SLAAC -->|no| DHCP
+    Auto --> NDP
+    DHCP --> NDP
+
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    classDef hot fill:#fef3c7,stroke:#d97706
+    class Auto,DHCP ok
+    class SLAAC hot

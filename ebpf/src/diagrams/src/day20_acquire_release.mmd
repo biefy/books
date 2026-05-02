@@ -1,0 +1,15 @@
+stateDiagram-v2
+    direction LR
+    [*] --> Untracked
+    Untracked --> Acquired: bpf_task_acquire(t)<br/>(verifier: ref id 1)
+    state Acquired
+    Acquired --> Released: bpf_task_release(t)
+    Released --> [*]: ref id 1 closed
+
+    Acquired --> RejectExit: program exit<br/>without release
+    state RejectExit
+    RejectExit --> [*]: VERIFIER REJECTS<br/>'unreleased reference id=1'
+
+    Acquired --> RejectDouble: bpf_task_release(t) twice
+    state RejectDouble
+    RejectDouble --> [*]: VERIFIER REJECTS<br/>'release on non-acquired'

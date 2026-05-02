@@ -1,0 +1,22 @@
+sequenceDiagram
+    participant US as Userspace loader
+    participant BPF as BPF skeleton
+    participant K as Kernel
+    participant TCP as TCP CC subsystem
+    participant SOCK as Application socket
+
+    US->>BPF: load .bpf.o
+    BPF->>K: BPF_PROG_LOAD for each callback
+    BPF->>K: BPF_MAP_CREATE (struct_ops type)
+    K->>TCP: tcp_register_congestion_control(my_bpf_ops)
+    Note over TCP: 'my_bpf_ops' now in CC list
+
+    SOCK->>K: setsockopt(TCP_CONGESTION, "my_bpf_ops")
+    K->>TCP: switch CC for this socket
+    TCP->>BPF: invoke bbr_init_bpf(sk)
+    Note over BPF: BPF program runs as the CC algorithm
+    SOCK->>SOCK: TCP traffic uses BPF-defined behavior
+
+    US->>BPF: skeleton__destroy
+    BPF->>K: unload struct_ops map
+    K->>TCP: tcp_unregister_congestion_control(my_bpf_ops)

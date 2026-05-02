@@ -1,0 +1,63 @@
+direction: down
+
+title: |md
+  ## Ringbuf at scale: producers, consumers, drops
+| {near: top-center; shape: text}
+
+producers: "Producers (BPF programs on N CPUs)" {
+  style.fill: "#dbeafe"
+  p_body: |md
+    Each call to bpf_ringbuf_reserve():
+    - cmpxchg producer_pos forward
+    - if (producer_pos - consumer_pos > size)
+        return NULL  ← **drop!**
+    - else: return slot pointer
+
+    **You must check for NULL.**
+    NULL = ringbuf is full = userspace is too slow.
+  |
+}
+
+ring: "Ring memory" {
+  style.fill: "#fef3c7"
+  ring_body: |md
+    Two pointers:
+    - producer_pos (atomic, advanced by reserve)
+    - consumer_pos (advanced by userspace)
+
+    Records each have:
+    - 8-byte header (size + busy bit)
+    - payload (your bytes)
+
+    **Drops happen** when prod - cons > size.
+    No queueing, no back-pressure on producers.
+  |
+}
+
+consumer: "Consumer (userspace)" {
+  style.fill: "#dcfce7"
+  c_body: |md
+    ring_buffer__poll(rb, timeout_ms):
+    - read producer_pos
+    - while (consumer_pos < producer_pos):
+        - skip busy records (in-flight)
+        - call your handler() per record
+        - advance consumer_pos
+    - returns # records consumed
+
+    **Slow consumer = drops.** Either:
+    - increase ring size
+    - reduce per-record work in handler
+    - filter more aggressively in BPF
+  |
+}
+
+producers -> ring: "reserve / submit" {style.stroke: "#16a34a"}
+ring -> consumer: "poll" {style.stroke: "#16a34a"}
+consumer -> ring: "advance consumer_pos" {style.stroke: "#16a34a"; style.stroke-dash: 4}
+
+drop: "BPF_RB_FORCE_WAKEUP\nflag on submit:\nwakes consumer immediately\n(useful for low-latency events)" {
+  style.fill: "#fef3c7"
+}
+
+producers -> drop {style.stroke-dash: 4}

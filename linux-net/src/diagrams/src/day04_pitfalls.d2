@@ -1,0 +1,63 @@
+direction: right
+
+title: |md
+  ## When offloads bite you
+| {near: top-center; shape: text}
+
+bpf: "BPF programs (XDP, tc-bpf)" {
+  style.fill: "#fee2e2"
+  b_body: |md
+    GRO ON: program sees one big skb,
+            not the original wire segments.
+    Effects:
+    - Latency tracing per-packet → wrong
+    - Packet count metrics → low
+    - Per-segment flags lost
+
+    Many BPF programs disable GRO on
+    the NIC they trace.
+  |
+}
+
+tcp: "TCP timing measurements" {
+  style.fill: "#fef3c7"
+  t_body: |md
+    GRO holds segments briefly to
+    coalesce. Add 10-100 µs latency
+    on bursts. Mostly invisible at
+    application layer.
+
+    For latency-critical workloads
+    (HFT, RDMA), GRO is OFF.
+  |
+}
+
+cap: "Packet capture / IDS" {
+  style.fill: "#dbeafe"
+  c_body: |md
+    tcpdump on RX sees pre-stack —
+    so it observes the GRO superpackets
+    too! Use `ethtool -K eth0 gro off`
+    if you need wire-fidelity captures.
+
+    Or capture before driver-receive
+    via XDP-pass-through.
+  |
+}
+
+verdict: "ethtool -K is the toggle" {
+  style.fill: "#dcfce7"
+  v_body: |md
+    Default settings on modern Linux:
+    - GRO on
+    - GSO on
+    - TSO on (if HW supports)
+
+    Disable as needed:
+    sudo ethtool -K eth0 gro off
+  |
+}
+
+bpf -> verdict
+tcp -> verdict
+cap -> verdict

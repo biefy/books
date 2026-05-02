@@ -1,0 +1,61 @@
+direction: right
+
+title: |md
+  ## bpf_dynptr: dynamic-size writes to ringbuf
+| {near: top-center; shape: text}
+
+problem: "Problem with reserve():" {
+  style.fill: "#fee2e2"
+  p_body: |md
+    bpf_ringbuf_reserve(rb, sz, 0)
+    requires `sz` to be **constant** at
+    BPF compile time.
+
+    What if you don't know the size yet?
+    (e.g., variable-length string,
+     packet payload of unknown length)
+
+    Old solutions:
+    - Reserve max size, waste tail bytes
+    - Use bpf_ringbuf_output (always copies)
+    - Keep size capped at small max
+  |
+}
+
+solution: "Solution: bpf_ringbuf_reserve_dynptr" {
+  style.fill: "#dcfce7"
+  s_body: |md
+    ```c
+    struct bpf_dynptr ptr;
+    bpf_ringbuf_reserve_dynptr(&rb, sz, 0, &ptr);
+
+    /* dynamically write to the dynptr: */
+    bpf_dynptr_write(&ptr, 0, &header, sizeof(header));
+    bpf_dynptr_write(&ptr, sizeof(header), payload, payload_len);
+
+    bpf_ringbuf_submit_dynptr(&ptr, 0);
+    ```
+
+    ✅ Variable size at runtime
+    ✅ Verifier tracks bounds via dynptr type
+    ✅ Same throughput as direct reserve
+  |
+}
+
+verifier: "Verifier tracking" {
+  style.fill: "#fef3c7"
+  v_body: |md
+    The Verifier tracks `bpf_dynptr` as
+    a special pointer type with bounds.
+
+    - `bpf_dynptr_write(p, off, src, len)`
+      checks `off + len ≤ p.size`
+    - same for `bpf_dynptr_read`
+
+    Caller can't OOB-write even if
+    `off`/`len` come from packet data.
+  |
+}
+
+problem -> solution
+solution -> verifier

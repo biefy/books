@@ -1,0 +1,28 @@
+flowchart LR
+    Capture["BPF: bpf_get_stackid()<br/>returns stackid X"]
+    Hist["histogram map<br/>{ stackid → count }<br/>stackid X → ++"]
+
+    Read["userspace: read all<br/>(stackid, count) pairs"]
+    Lookup["for each stackid, fetch<br/>frame array from stacks map"]
+    KSyms["Kernel frames:<br/>resolve via /proc/kallsyms"]
+    USyms["User frames:<br/>resolve via /proc/PID/maps<br/>+ ELF symbols (libelf, blazesym)"]
+    Format["Folded format:<br/>'thread;fn1;fn2;fn3 N'"]
+    Flame["flamegraph.pl<br/>or speedscope.app"]
+    Image["interactive flamegraph"]
+
+    Capture --> Hist
+    Hist -.-> Read
+    Read --> Lookup
+    Lookup --> KSyms
+    Lookup --> USyms
+    KSyms --> Format
+    USyms --> Format
+    Format --> Flame
+    Flame --> Image
+
+    classDef bpf fill:#dbeafe,stroke:#2563eb
+    classDef us fill:#dcfce7,stroke:#16a34a
+    classDef out fill:#fef3c7,stroke:#d97706
+    class Capture,Hist bpf
+    class Read,Lookup,KSyms,USyms,Format us
+    class Flame,Image out

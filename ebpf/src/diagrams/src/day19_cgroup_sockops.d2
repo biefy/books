@@ -1,0 +1,56 @@
+direction: right
+
+title: |md
+  ## cgroup BPF and sockops: per-cgroup network policy
+| {near: top-center; shape: text}
+
+cg_skb: "cgroup_skb/{ingress,egress}" {
+  style.fill: "#dbeafe"
+  cg_body: |md
+    Runs **per packet** for sockets
+    in this cgroup.
+    Returns:
+    - 1 = allow
+    - 0 = drop
+
+    Per-cgroup network policy.
+    Used by systemd, Cilium for
+    network namespaces.
+  |
+}
+
+sockops: "sock_ops" {
+  style.fill: "#fef3c7"
+  so_body: |md
+    Runs at TCP **state events**:
+    - TCP_BPF_TIMEOUT_INIT
+    - TCP_BPF_RWND_INIT
+    - TCP_BPF_HDR_OPT_LEN_CB
+    - TCP_BPF_PARSE_HDR_OPT_CB
+    - TCP_BPF_RTT_CB
+
+    Tune connection params per cgroup
+    (RTO, recv window, header options).
+    Less common, very powerful.
+  |
+}
+
+sk_msg: "sk_msg" {
+  style.fill: "#dcfce7"
+  sm_body: |md
+    Runs on **send** path of
+    sockets in a sockmap.
+    Can:
+    - drop, redirect to another sock,
+      modify payload pre-sendmsg.
+
+    Used for L7 LB and service mesh
+    (sidecar offload).
+  |
+}
+
+cg_skb -> hook: "cgroup_inet_egress hook" {style.stroke-dash: 4}
+sockops -> hook: "tcp_call_bpf hook" {style.stroke-dash: 4}
+sk_msg -> hook: "tcp_bpf_sendmsg hook" {style.stroke-dash: 4}
+
+hook: "Each is a different\nnetwork-stack hook." {shape: text}

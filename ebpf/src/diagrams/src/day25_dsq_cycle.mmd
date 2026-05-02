@@ -1,0 +1,18 @@
+flowchart LR
+    subgraph Cycle["Per-CPU scheduling cycle"]
+        Wake["task wakes up<br/>(I/O complete, signal, etc.)"]
+        Enq["sched_ext_ops.enqueue(task, flags)<br/>BPF decides where to put it"]
+        DSQ["task in a Dispatch Queue (DSQ)"]
+        CPUIdle["CPU goes idle"]
+        Disp["sched_ext_ops.dispatch(cpu, prev)<br/>BPF picks next task"]
+        Run["CPU runs the task"]
+    end
+
+    Wake --> Enq --> DSQ
+    CPUIdle --> Disp --> DSQ
+    DSQ --> Run --> Wake
+
+    classDef bpf fill:#fef3c7,stroke:#d97706
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    class Enq,Disp bpf
+    class Run,DSQ,Wake,CPUIdle ok

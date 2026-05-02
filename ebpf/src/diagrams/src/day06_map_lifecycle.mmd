@@ -1,0 +1,37 @@
+flowchart LR
+    subgraph Entry["fentry/vfs_read (call 1)"]
+        e1["tid = 8888<br/>ts = 100"]
+        e1 --> Map1["map: { 8888 → 100 }"]
+    end
+
+    subgraph BodyA["function body running..."]
+        b1["...µs of work..."]
+    end
+
+    subgraph EntryB["fentry/vfs_read (call 2 from another thread)"]
+        e2["tid = 9999<br/>ts = 105"]
+        Map1 --> Map2["map: { 8888 → 100,<br/>       9999 → 105 }"]
+    end
+
+    subgraph ExitA["fexit/vfs_read (call 1 returns)"]
+        x1["tid = 8888<br/>now = 120"]
+        Map2 --> Map3["lookup 8888 → 100<br/>delete 8888<br/>dur = 120 - 100 = 20"]
+        Map3 --> Map4["map: { 9999 → 105 }"]
+    end
+
+    subgraph ExitB["fexit/vfs_read (call 2 returns)"]
+        x2["tid = 9999<br/>now = 125"]
+        Map4 --> Map5["lookup 9999 → 105<br/>delete 9999<br/>dur = 125 - 105 = 20"]
+        Map5 --> Map6["map: { } empty"]
+    end
+
+    Entry --> BodyA --> EntryB --> ExitA --> ExitB
+
+    classDef entry fill:#dbeafe,stroke:#2563eb
+    classDef body fill:#fef3c7,stroke:#d97706
+    classDef exit fill:#dcfce7,stroke:#16a34a
+    classDef map fill:#f3f4f6,stroke:#6b7280
+    class e1,e2 entry
+    class b1 body
+    class x1,x2 exit
+    class Map1,Map2,Map3,Map4,Map5,Map6 map

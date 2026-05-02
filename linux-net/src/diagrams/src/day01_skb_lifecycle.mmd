@@ -1,0 +1,18 @@
+flowchart LR
+    Alloc["alloc_skb(size, gfp)<br/>net/core/skbuff.c"]
+    Clone["skb_clone(skb)<br/>shares data, copies head"]
+    Use["RX/TX path uses skb"]
+    Free["__kfree_skb / kfree_skb_reason"]
+    Cache["skbuff_fclone_cache<br/>or skbuff_head_cache"]
+
+    Alloc --> Use
+    Use --> Clone --> Use
+    Use --> Free --> Cache
+    Cache -.- Alloc
+
+    classDef alloc fill:#dbeafe,stroke:#2563eb
+    classDef use fill:#fef3c7,stroke:#d97706
+    classDef free fill:#fee2e2,stroke:#dc2626
+    class Alloc,Clone alloc
+    class Use use
+    class Free,Cache free

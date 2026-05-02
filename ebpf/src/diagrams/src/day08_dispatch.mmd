@@ -1,0 +1,29 @@
+flowchart TD
+    K1["Kernel C code:<br/>schedule() {<br/>  ...<br/>  trace_sched_switch(preempt, prev, next);<br/>  ...<br/>}"]
+    Macro["TRACE_EVENT macro<br/>(in include/trace/events/sched.h)"]
+    Two["TWO entry points generated:"]
+
+    PathRaw["Raw tracepoint entry"]
+    PathBTF["tp_btf entry"]
+
+    RawCopy["Copy fields into<br/>trace_event_raw_sched_switch struct"]
+    RawCall["Call all attached<br/>raw tracepoint BPF progs"]
+
+    BTFCall["Call all attached<br/>tp_btf BPF progs<br/>with original (preempt, prev, next)"]
+
+    Cont["Return to schedule()"]
+
+    K1 --> Macro
+    Macro --> Two
+    Two --> PathRaw
+    Two --> PathBTF
+
+    PathRaw --> RawCopy --> RawCall --> Cont
+    PathBTF --> BTFCall --> Cont
+
+    classDef kern fill:#fef3c7,stroke:#d97706
+    classDef raw fill:#fee2e2,stroke:#dc2626
+    classDef btf fill:#dcfce7,stroke:#16a34a
+    class K1,Macro,Two,Cont kern
+    class PathRaw,RawCopy,RawCall raw
+    class PathBTF,BTFCall btf

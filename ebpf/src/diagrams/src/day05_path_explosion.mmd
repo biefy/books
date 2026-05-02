@@ -1,0 +1,32 @@
+flowchart TD
+    Loop["for (i = 0; i &lt; n; i++)"]
+    Choice{"verifier knows<br/>upper bound of n?"}
+
+    Yes["unroll the loop:<br/>analyze each iteration<br/>as separate path"]
+    No["unbounded → reject"]
+
+    Path1["iter 0: explore body<br/>with i=0 register state"]
+    Path2["iter 1: explore body<br/>with i=1 register state"]
+    PathN["iter N-1: explore<br/>body with i=N-1 state"]
+    Cost["complexity: O(n × body_complexity)<br/>each iter forks paths inside"]
+
+    Loop --> Choice
+    Choice -->|yes, n bounded| Yes
+    Choice -->|no| No
+    Yes --> Path1
+    Yes --> Path2
+    Yes --> PathN
+    Path1 --> Cost
+    Path2 --> Cost
+    PathN --> Cost
+    Cost --> Limit{"hit 1M instr<br/>complexity budget?"}
+    Limit -->|yes| Reject(["REJECT:<br/>BPF program too large"])
+    Limit -->|no| OK(["accept"])
+    No --> Reject2(["REJECT:<br/>back-edge to insn N"])
+
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    classDef hot fill:#fef3c7,stroke:#d97706
+    class Reject,Reject2 bad
+    class OK ok
+    class Choice,Limit hot

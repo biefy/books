@@ -1,0 +1,55 @@
+direction: down
+
+title: |md
+  ## struct sock — the socket descriptor
+| {near: top-center; shape: text}
+
+sock: "struct sock (include/net/sock.h)" {
+  style.fill: "#dbeafe"
+  s_body: |md
+    Base type for all sockets.
+
+    Common fields:
+    - sk_family (AF_INET, AF_INET6, AF_UNIX, ...)
+    - sk_type (SOCK_STREAM, SOCK_DGRAM, ...)
+    - sk_protocol (IPPROTO_TCP, ...)
+    - sk_state (TCP_ESTABLISHED, ...)
+    - sk_buffer queues (sk_receive_queue, sk_write_queue)
+    - sk_rcvbuf, sk_sndbuf (per-socket limits)
+    - sk_filter (BPF socket filter)
+    - sk_lock (per-socket lock)
+    - sk_prot (operations table per protocol)
+  |
+}
+
+protos: "Specialized" {
+  style.fill: "#fef3c7"
+  p_body: |md
+    Each protocol embeds struct sock as first field:
+    - struct inet_sock (IPv4 / IPv6 with IPv4-mapped)
+    - struct inet_connection_sock (request_sock,
+      icsk_ack, icsk_rto)
+    - struct tcp_sock (TCP-specific: snd_cwnd,
+      snd_wnd, srtt_us, rcv_nxt, write_seq, ...)
+    - struct udp_sock (smaller, simpler)
+
+    Cast: struct tcp_sock *tp = tcp_sk(sk);
+  |
+}
+
+ops: "sk_prot operations" {
+  style.fill: "#dcfce7"
+  o_body: |md
+    Function pointer table per protocol:
+    - sendmsg, recvmsg
+    - bind, listen, accept
+    - connect, disconnect
+    - close, shutdown
+    - get_port, hash, unhash
+
+    Polymorphism for socket APIs.
+  |
+}
+
+sock -> protos: "embeds"
+sock -> ops: "sk->sk_prot"

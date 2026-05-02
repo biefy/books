@@ -1,0 +1,50 @@
+direction: right
+
+title: |md
+  ## nftables vs iptables
+| {near: top-center; shape: text}
+
+ipt: "iptables (legacy)" {
+  style.fill: "#fee2e2"
+  i_body: |md
+    Generation 1.
+    - Chains per protocol (iptables, ip6tables,
+      arptables, ebtables) — separate tools
+    - Linear matching, no native sets
+    - Modules in net/netfilter/ipt_*.c
+    - Deprecated; xtables compat layer for nft
+
+    Backend: x_tables (kernel side)
+  |
+}
+
+nft: "nftables (modern)" {
+  style.fill: "#dcfce7"
+  n_body: |md
+    Generation 2 (since 3.13).
+    - One tool, one syntax (nft)
+    - Inet, ipv4, ipv6, arp, bridge tables
+    - Native maps and sets (hash, ranges)
+    - Bytecode VM, faster matching
+    - JIT'd
+
+    Backend: nf_tables (net/netfilter/nf_tables*.c)
+
+    Used by: firewalld, RHEL/Fedora,
+    Debian, modern container runtimes.
+  |
+}
+
+cmd: "Translation example" {
+  style.fill: "#fef3c7"
+  c_body: |md
+    iptables:
+      iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+
+    nftables equivalent:
+      nft add rule inet filter input tcp dport 22 accept
+  |
+}
+
+ipt -> cmd: "translate"
+nft -> cmd: "modern"

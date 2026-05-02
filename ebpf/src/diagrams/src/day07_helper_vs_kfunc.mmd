@@ -1,0 +1,29 @@
+flowchart TD
+    Start["BPF program calls<br/>some_fn(arg1, arg2)"]
+
+    Check{"some_fn is a..."}
+
+    Helper["Helper<br/>(static UAPI list)"]
+    Kfunc["kfunc<br/>(BTF-described kernel fn)"]
+
+    HelperPath["BPF_FUNC_xxx enum value"]
+    HelperSrc["kernel/bpf/helpers.c<br/>or net/core/filter.c<br/>has bpf_xxx_proto"]
+    HelperVerify["Verifier checks<br/>arg types vs proto"]
+    HelperRun["Runtime: dispatch<br/>via func_proto pointer"]
+
+    KfuncPath["Linker references kfunc<br/>by name (__ksym)"]
+    KfuncBTF["Loader matches name<br/>against kernel BTF"]
+    KfuncVerify["Verifier checks<br/>arg types vs BTF"]
+    KfuncRun["Runtime: direct call<br/>to kernel function"]
+
+    Start --> Check
+    Check -->|frozen UAPI| Helper
+    Check -->|in-tree, BTF-exposed| Kfunc
+
+    Helper --> HelperPath --> HelperSrc --> HelperVerify --> HelperRun
+    Kfunc --> KfuncPath --> KfuncBTF --> KfuncVerify --> KfuncRun
+
+    classDef helper fill:#fef3c7,stroke:#d97706
+    classDef kfunc fill:#dcfce7,stroke:#16a34a
+    class Helper,HelperPath,HelperSrc,HelperVerify,HelperRun helper
+    class Kfunc,KfuncPath,KfuncBTF,KfuncVerify,KfuncRun kfunc

@@ -1,0 +1,56 @@
+direction: down
+
+title: |md
+  ## TID vs TGID — pick the right key for in-flight tracking
+| {near: top-center; shape: text}
+
+proc: "Process firefox (TGID = 13421)" {
+  style.fill: "#fef3c7"
+  t1: "Thread 1\nTID 13421\n(also TGID leader)" {style.fill: "#dbeafe"}
+  t2: "Thread 2\nTID 13422" {style.fill: "#dbeafe"}
+  t3: "Thread 3\nTID 13423" {style.fill: "#dbeafe"}
+  t4: "Thread 4\nTID 13424" {style.fill: "#dbeafe"}
+}
+
+scenario: |md
+  ### Scenario: all 4 threads call vfs_read concurrently
+| {shape: text}
+
+wrong: "WRONG: key by TGID" {
+  style.fill: "#fee2e2"
+  body_w: |md
+    Map: { 13421 → ts1 }
+
+    Thread 1 enters → store ts1 with key 13421
+    Thread 2 enters → **overwrite** ts2 with key 13421
+    Thread 3 enters → **overwrite** ts3 with key 13421
+    Thread 4 enters → **overwrite** ts4 with key 13421
+    Thread 1 exits → reads ts4 (the most recent overwrite)
+
+    → Latency = exit_time(t1) - entry_time(t4)
+    → Garbage values, sometimes huge, sometimes negative
+  |
+}
+
+right: "RIGHT: key by TID" {
+  style.fill: "#dcfce7"
+  body_r: |md
+    Map: { 13421→ts1, 13422→ts2, 13423→ts3, 13424→ts4 }
+
+    Each thread has its own slot
+    Each exit retrieves *its* entry timestamp
+    No collisions
+
+    → Latency = exit(tN) - entry(tN) for each thread
+    → Correct per-call duration
+  |
+}
+
+proc -> wrong: "all 4 hit same map slot"
+proc -> right: "each thread, own slot"
+
+note: |md
+  **Rule:** for synchronous per-thread tracking, key by **TID**.
+  TID = lower 32 bits of `bpf_get_current_pid_tgid()`.
+  TGID = upper 32 bits = what userspace calls "PID".
+| {near: bottom-center; shape: text}

@@ -1,0 +1,20 @@
+flowchart LR
+    Pkt["packet enters ip_rcv_finish"]
+    Cache{"dst already cached on skb?"}
+    Lookup["ip_route_input_noref<br/>net/ipv4/route.c:2546"]
+    Rules["fib_rules — pick which table<br/>(default: 'main')"]
+    Tab["fib_table_lookup<br/>net/ipv4/fib_trie.c:1420"]
+    Res["fib_result<br/>(nhc, type, etc.)"]
+    Build["build rtable<br/>(struct rtable *rt)"]
+    Set["skb_dst_set(skb, rt)"]
+    Input["dst->input(skb)<br/>= ip_local_deliver or ip_forward"]
+
+    Pkt --> Cache
+    Cache -->|yes| Input
+    Cache -->|no| Lookup
+    Lookup --> Rules --> Tab --> Res --> Build --> Set --> Input
+
+    classDef hot fill:#fef3c7,stroke:#d97706
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    class Cache,Tab hot
+    class Set,Input ok

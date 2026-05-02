@@ -1,0 +1,23 @@
+flowchart LR
+    A["Userspace CLI:<br/>./blockcli add 10.1.0.0/16"]
+    B["bpf_map__update_elem<br/>key = {prefixlen=16, addr=0x0A010000}"]
+    C["LPM trie inserts node<br/>at correct depth"]
+
+    D["Live XDP program at NIC"]
+    E["Packet from 10.1.2.55 arrives"]
+    F["bpf_map_lookup_elem(&deny, &key)"]
+    G["LPM walks root→10.0/8→10.1/16<br/>finds match"]
+    H["Returns value (eg, deny=1)"]
+    I["XDP_DROP"]
+
+    A --> B --> C
+    D -.controls.- C
+    E --> D --> F --> G --> H --> I
+
+    classDef us fill:#dbeafe,stroke:#2563eb
+    classDef bpf fill:#fef3c7,stroke:#d97706
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    class A,B us
+    class C,D,F,G,H bpf
+    class I bad

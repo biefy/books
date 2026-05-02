@@ -1,0 +1,50 @@
+direction: right
+
+title: |md
+  ## kTLS — TLS in the kernel
+| {near: top-center; shape: text}
+
+setup: "Setup phase (userspace)" {
+  style.fill: "#dbeafe"
+  s_body: |md
+    1. App opens TCP connection
+    2. App does TLS handshake in userspace
+       (OpenSSL, GnuTLS, BoringSSL, ...)
+    3. App calls setsockopt(TLS_TX/TLS_RX,
+       crypto_info) — passes negotiated keys
+       to kernel
+    4. Kernel takes over encrypt/decrypt
+  |
+}
+
+datapath: "Data path (kernel)" {
+  style.fill: "#dcfce7"
+  d_body: |md
+    Send: app writes plaintext;
+      kernel encrypts in-place; sends.
+
+    Recv: kernel decrypts; app reads
+      plaintext.
+
+    Benefits:
+    - sendfile() over TLS (zero-copy from
+      file → encrypted → wire)
+    - splice() / vmsplice() compatible
+    - No userspace crypto roundtrip
+  |
+}
+
+hw: "Hardware offload" {
+  style.fill: "#fef3c7"
+  h_body: |md
+    Some NICs (Mellanox, Chelsio) can offload
+    AES-GCM encryption itself. With kTLS:
+    - kernel passes keys to NIC
+    - NIC encrypts/decrypts inline
+    - CPU touches only plaintext
+
+    NIC support: NETIF_F_HW_TLS_TX / RX
+  |
+}
+
+setup -> datapath -> hw

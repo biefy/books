@@ -1,0 +1,65 @@
+direction: right
+
+title: |md
+  ## DSQ patterns: shared vs per-CPU dispatch
+| {near: top-center; shape: text}
+
+global: "Global DSQ\n(SCX_DSQ_GLOBAL)" {
+  style.fill: "#fef3c7"
+  g_body: |md
+    Single queue, all CPUs pull from it.
+
+    Pros:
+    - Simple
+    - Automatic load balancing
+      (idle CPUs grab next task)
+
+    Cons:
+    - Cache locality lost
+    - Lock contention at high rate
+    - No latency guarantees
+
+    Used by: scx_simple (default)
+  |
+}
+
+percpu: "Per-CPU DSQ\n(scx_bpf_create_dsq)" {
+  style.fill: "#dcfce7"
+  p_body: |md
+    Each CPU has its own queue.
+
+    Pros:
+    - Cache locality
+    - No lock contention
+    - Per-CPU policy possible
+
+    Cons:
+    - Manual load balancing in BPF
+    - Idle CPUs starve if no work locally
+
+    Used by: scx_central, scx_flatcg
+  |
+}
+
+central: "Central DSQ\n(scx_central pattern)" {
+  style.fill: "#dbeafe"
+  ce_body: |md
+    One CPU acts as 'central'
+    dispatcher; others enqueue
+    but never dispatch directly.
+
+    Pros:
+    - Centralized policy decisions
+    - Flexible (anti-thrashing,
+      latency-priority queues, ...)
+
+    Cons:
+    - Central CPU is bottleneck
+    - Cross-CPU IPI cost
+
+    Used by: scx_central
+  |
+}
+
+global -> central: "scaling up" {style.stroke-dash: 4}
+percpu -> central: "with central control" {style.stroke-dash: 4}

@@ -1,0 +1,19 @@
+flowchart LR
+    Pkt["Packet flow:<br/>NIC → driver → UMEM"]
+    XdpRedir["XDP returns:<br/>bpf_redirect_map(&xsks_map, queue_id, 0)"]
+    Map["BPF_MAP_TYPE_XSKMAP<br/>{ queue_id → AF_XDP socket }"]
+    Sock["AF_XDP socket bound<br/>to (iface, queue)"]
+    User["Userspace:<br/>process packet zero-copy"]
+
+    Pkt --> XdpRedir
+    XdpRedir --> Map
+    Map --> Sock
+    Sock --> User
+
+    Note["Per-queue model:<br/>multiple sockets,<br/>multiple userspace threads"]
+    Map -.- Note
+
+    classDef hot fill:#fef3c7,stroke:#d97706
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    class XdpRedir,Map,Sock hot
+    class Pkt,User ok

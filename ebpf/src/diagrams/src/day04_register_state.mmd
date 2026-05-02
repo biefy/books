@@ -1,0 +1,22 @@
+stateDiagram-v2
+    direction LR
+    [*] --> ScalarUnknown: program start
+    ScalarUnknown --> CallReturned: call bpf_map_lookup_elem
+    state CallReturned <<choice>>
+    CallReturned --> PTR_OR_NULL: r0 = result
+
+    state "PTR_TO_MAP_VALUE_OR_NULL\n(deref FORBIDDEN)" as PTR_OR_NULL
+    state "PTR_TO_MAP_VALUE\n(deref OK)" as PTR
+    state "scalar = 0\n(unreachable for non-NULL)" as ScalarZero
+
+    PTR_OR_NULL --> NullCheck: if (!r0)
+    state NullCheck <<choice>>
+    NullCheck --> PTR: false branch\n(r0 != NULL)
+    NullCheck --> ScalarZero: true branch\n(r0 == NULL)
+
+    PTR --> [*]: deref accepted
+    ScalarZero --> [*]: must not deref\n(verifier rejects if you try)
+
+    PTR_OR_NULL --> Reject: deref without check
+    state "REJECT\n'R0 invalid mem access\nmap_value_or_null'" as Reject
+    Reject --> [*]

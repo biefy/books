@@ -1,0 +1,16 @@
+digraph G {
+    rankdir=LR;
+    node [shape=box, style="rounded,filled", fontname="Monaco", fontsize=10];
+
+    skb [label="skb (descriptor)\n\nhead\ndata  ->\ntail  ->\nend   ->", fillcolor="#dbeafe"];
+
+    buf [label="Linear buffer\n\n[ headroom | data area | tailroom ]\nhead ... data ... tail ... end", fillcolor="#fef3c7"];
+
+    shinfo [label="skb_shared_info (at end)\n\nnr_frags\nfrags[].(page, off, sz)\nfrag_list (chain)", fillcolor="#dcfce7"];
+
+    skb -> buf [label="head, data, tail, end\npoint into buffer"];
+    buf -> shinfo [label="end -> shinfo"];
+
+    note [shape=note, label="Invariants:\nhead <= data <= tail <= end\nlen = (tail - data) + sum(frags)\ndata_len = sum(frags)\nlinear-only when data_len == 0", fillcolor="#fef3c7"];
+    skb -> note [style=dashed];
+}

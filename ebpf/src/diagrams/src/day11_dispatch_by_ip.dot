@@ -1,0 +1,23 @@
+digraph G {
+    rankdir=LR;
+    node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
+
+    legend [label="bpf_get_func_ip(ctx)\nreturns the IP of the function\nthat fired this multi-probe", fillcolor="#fef3c7", shape=note];
+
+    prog [label="One BPF program\n  SEC(\"kprobe.multi/...\")\n  int BPF_PROG(p) {\n    __u64 ip = bpf_get_func_ip(ctx);\n    /* dispatch by ip */\n  }", fillcolor="#dbeafe", fontname="Monaco"];
+
+    f1 [label="vfs_read attached", fillcolor="#dcfce7"];
+    f2 [label="vfs_write attached", fillcolor="#dcfce7"];
+    f3 [label="vfs_open attached", fillcolor="#dcfce7"];
+    f4 [label="...197 more", fillcolor="#dcfce7"];
+
+    f1 -> prog [label="ip = vfs_read+0"];
+    f2 -> prog [label="ip = vfs_write+0"];
+    f3 -> prog [label="ip = vfs_open+0"];
+    f4 -> prog [label="ip = ..."];
+
+    prog -> dispatch [label="lookup ip in\ndispatch table"];
+    dispatch [label="Per-function logic\n(usually a hash map\nip → behavior)", fillcolor="#fef3c7"];
+
+    legend -> prog [style=dashed, color=gray];
+}

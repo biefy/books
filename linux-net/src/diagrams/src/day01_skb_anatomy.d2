@@ -1,0 +1,53 @@
+direction: down
+
+title: |md
+  ## struct sk_buff — the universal packet
+| {near: top-center; shape: text}
+
+skb: "struct sk_buff (the descriptor)" {
+  style.fill: "#dbeafe"
+  s_body: |md
+    Lives in the slab cache `skbuff_head_cache`.
+
+    Key fields (verified against include/linux/skbuff.h:885):
+    - next, prev               — queue linkage (also rb_node, list, llist_node)
+    - dev                      — net_device
+    - sk                       — owning socket (often NULL on RX)
+    - tstamp                   — timestamp / skb_mstamp_ns (EDT)
+    - cb[48]                   — control block, per-protocol
+    - _skb_refdst              — refcounted dst_entry pointer
+    - _nfct                    — netfilter conntrack
+    - len, data_len            — total len, paged-fragment len
+    - mac_len, hdr_len         — header lengths
+    - queue_mapping            — TX queue
+    - head, data, tail, end    — pointers into linear buffer
+    - mac_header, network_header, transport_header — offsets from head
+  |
+}
+
+linear: "Linear data area (one allocation)" {
+  style.fill: "#fef3c7"
+  l_body: |md
+    [head][reserved][data area][tail][end]
+
+    headroom = data - head
+    tailroom = end - tail
+    used     = tail - data
+  |
+}
+
+frags: "Page fragments (skb_shared_info)" {
+  style.fill: "#dcfce7"
+  f_body: |md
+    For large packets (e.g., GRO superpackets):
+    - shinfo points to skb_shared_info (after end)
+    - shinfo->frags[] holds (page, offset, size) tuples
+    - shinfo->frag_list is a chain of skbs (TSO segments)
+
+    Total payload = (tail - data) + sum(frags) = len
+    data_len      = sum(frags)
+  |
+}
+
+skb -> linear: "head/data/tail/end"
+skb -> frags: "shinfo at end"

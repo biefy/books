@@ -1,0 +1,24 @@
+flowchart TD
+    Code["Application C source:<br/>DTRACE_PROBE2 macro<br/>declares 'malloc_entry' probe"]
+    Compiled["Compiled binary:<br/>nop instruction at probe site<br/>+ ELF .note.stapsdt section<br/>describing each probe"]
+
+    Code --> Compiled
+
+    Find["libbpf at attach reads .note.stapsdt:<br/>finds 'malloc_entry' provider+probe<br/>locates the nop offset"]
+    InstallU["installs uprobe at the nop offset<br/>(same mechanism as regular uprobe)"]
+
+    Compiled --> Find
+    Find --> InstallU
+
+    Trap["nop becomes int3 at attach;<br/>every probe site fires"]
+    BPF["BPF program runs<br/>with arg values from registers"]
+
+    InstallU --> Trap
+    Trap --> BPF
+
+    classDef app fill:#dbeafe,stroke:#2563eb
+    classDef att fill:#fef3c7,stroke:#d97706
+    classDef rt fill:#dcfce7,stroke:#16a34a
+    class Code,Compiled app
+    class Find,InstallU att
+    class Trap,BPF rt

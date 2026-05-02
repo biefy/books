@@ -1,0 +1,21 @@
+sequenceDiagram
+    participant USER as User process<br/>(target binary)
+    participant K as Kernel uprobes
+    participant BPF as BPF program
+    participant LD as libbpf at attach
+
+    Note over USER,LD: One-time attach
+    LD->>K: open /usr/bin/bash<br/>find symbol readline at offset 0x4f200
+    LD->>K: register uprobe at inode+offset
+    K->>K: insert breakpoint (int3) at first instruction<br/>via /proc/self/mem-style write
+    Note over K: All processes loading<br/>/usr/bin/bash get the breakpoint<br/>(via copy-on-write on first execute)
+
+    Note over USER,BPF: Runtime — every readline() call
+    USER->>USER: bash calls readline(prompt)
+    USER->>USER: int3 trap fires!
+    USER->>K: kernel handles trap
+    K->>BPF: invoke uprobe BPF program with pt_regs
+    BPF->>BPF: read prompt from RDI<br/>via bpf_probe_read_user_str
+    BPF-->>K: return
+    K->>K: emulate the original instruction
+    K-->>USER: resume readline()

@@ -1,0 +1,29 @@
+sequenceDiagram
+    autonumber
+    participant DEV as You
+    participant CC as clang -target bpf
+    participant LB as libbpf
+    participant SC as bpf() syscall
+    participant VER as Verifier
+    participant JIT as JIT
+    participant ATT as Attach point<br/>(do_unlinkat)
+
+    DEV->>CC: hello.bpf.c
+    CC-->>DEV: hello.bpf.o<br/>(BPF bytecode + BTF)
+    DEV->>LB: open object
+    LB->>LB: CO-RE relocate<br/>using kernel BTF
+    LB->>SC: BPF_PROG_LOAD
+    SC->>VER: analyze every instruction
+    alt program is safe
+        VER-->>SC: accept
+        SC->>JIT: compile to native
+        JIT-->>SC: native code
+        SC-->>LB: prog_fd
+        LB->>SC: BPF_LINK_CREATE
+        SC->>ATT: install trampoline
+        Note over ATT: now every call to<br/>do_unlinkat invokes<br/>your program
+    else program is unsafe
+        VER-->>SC: reject + log
+        SC-->>LB: -EACCES
+        LB-->>DEV: verifier log
+    end

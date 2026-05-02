@@ -1,0 +1,59 @@
+direction: right
+
+title: |md
+  ## VLAN tagging (802.1Q)
+| {near: top-center; shape: text}
+
+untagged: "Untagged frame" {
+  style.fill: "#dbeafe"
+  u_body: |md
+    Layout:
+    [dst MAC] [src MAC] [type=0x0800 IP] [payload]
+
+    14 bytes Ethernet header.
+  |
+}
+
+tagged: "VLAN-tagged frame (802.1Q)" {
+  style.fill: "#fef3c7"
+  t_body: |md
+    Layout:
+    [dst MAC] [src MAC] [type=0x8100] [TCI:16] [innertype] [payload]
+
+    TCI = priority(3) + DEI(1) + vlan_id(12).
+    18 bytes header.
+
+    type=0x8100 says: 'VLAN tag, real type follows'.
+  |
+}
+
+hwaccel: "HW VLAN acceleration" {
+  style.fill: "#dcfce7"
+  h_body: |md
+    Modern NICs strip the tag and store
+    in skb->vlan_tci + skb->vlan_proto.
+    Stack sees an untagged frame +
+    metadata. Saves a 4-byte header parse.
+
+    skb_vlan_tag_present(skb) tells you
+    if HW-stripped VLAN is on this skb.
+  |
+}
+
+vlan_dev: "VLAN devices" {
+  style.fill: "#fef3c7"
+  v_body: |md
+    ip link add link eth0 name eth0.100 type vlan id 100
+
+    Creates a virtual netdev that:
+    - On RX: filters frames with vlan_id=100,
+      strips the tag, hands to upper stack
+    - On TX: prepends the tag, sends through eth0
+
+    Code: net/8021q/vlan_dev.c
+  |
+}
+
+untagged -> tagged: "vlan_id=100"
+tagged -> hwaccel: "NIC strips" {style.stroke-dash: 4}
+tagged -> vlan_dev: "software path" {style.stroke-dash: 4}

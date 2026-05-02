@@ -1,0 +1,26 @@
+flowchart TD
+    CALLER["any kernel code calls<br/>do_unlinkat(dfd, name)"]
+    PATCHED["do_unlinkat:<br/>jmp trampoline_xyz   ← was 5 NOPs"]
+    TRAMP["trampoline_xyz<br/>(generated assembly)"]
+    SAVE["save dfd, name<br/>onto BPF ctx array"]
+    BPF["your BPF program<br/>BPF_PROG(on_unlink, dfd, name)"]
+    RING["bpf_ringbuf_reserve()<br/>+ submit"]
+    RESTORE["restore registers"]
+    BODY["do_unlinkat body<br/>(skips first 5 bytes)"]
+    RET["return to caller"]
+
+    CALLER --> PATCHED
+    PATCHED -->|"jmp"| TRAMP
+    TRAMP --> SAVE
+    SAVE --> BPF
+    BPF --> RING
+    RING --> RESTORE
+    RESTORE --> BODY
+    BODY --> RET
+
+    classDef hot fill:#ffe5b4,stroke:#d97706,stroke-width:2px
+    classDef bpf fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+    classDef kern fill:#e5e7eb,stroke:#374151,stroke-width:1px
+    class PATCHED,TRAMP hot
+    class BPF,RING bpf
+    class CALLER,SAVE,RESTORE,BODY,RET kern

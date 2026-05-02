@@ -1,0 +1,30 @@
+flowchart LR
+    Pkt["packet arrives<br/>at NIC"]
+    XDP["your XDP program<br/>returns one of:"]
+
+    Pass["XDP_PASS<br/>continue to stack<br/>(skb gets allocated)"]
+    Drop["XDP_DROP<br/>free packet, done<br/>(no skb)"]
+    Tx["XDP_TX<br/>send back out<br/>same interface"]
+    Redirect["XDP_REDIRECT<br/>send out a different<br/>iface or AF_XDP socket"]
+    Aborted["XDP_ABORTED<br/>error path<br/>same as DROP + tracepoint"]
+
+    Pkt --> XDP
+    XDP --> Pass
+    XDP --> Drop
+    XDP --> Tx
+    XDP --> Redirect
+    XDP --> Aborted
+
+    Pass --> NetStack[("Linux net stack")]
+    Drop --> Bin[("/dev/null")]
+    Tx --> Wire[("back on wire")]
+    Redirect --> Map["bpf_redirect_map<br/>(devmap, cpumap, xskmap)"]
+    Map --> OtherIface[("other interface\nor AF_XDP socket")]
+    Aborted --> Bin
+
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    classDef hot fill:#fef3c7,stroke:#d97706
+    class Pass,Tx,Redirect ok
+    class Drop,Aborted bad
+    class XDP,Map hot

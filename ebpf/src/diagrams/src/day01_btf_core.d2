@@ -1,0 +1,31 @@
+direction: right
+
+title: |md
+  ## BTF + CO-RE: compile once, run on any kernel
+| {near: top-center; shape: text}
+
+build: "Build host (kernel A)" {
+  style.fill: "#fef3c7"
+  vmlinux_a: "/sys/kernel/btf/vmlinux\n(BTF for kernel A)" {shape: cylinder}
+  bpftool_a: "bpftool btf dump\nformat c"
+  vmlinux_h: "vmlinux.h\n(every kernel type)" {shape: document}
+  src: "hello.bpf.c\n#include vmlinux.h"
+  clang_a: "clang -target bpf -g"
+  obj: "hello.bpf.o\n(BPF bytecode + BTF\n+ CO-RE relo records)" {shape: package}
+
+  vmlinux_a -> bpftool_a -> vmlinux_h -> src
+  src -> clang_a -> obj
+}
+
+target: "Target kernel B (different layout!)" {
+  style.fill: "#dbeafe"
+  vmlinux_b: "/sys/kernel/btf/vmlinux\n(BTF for kernel B)" {shape: cylinder}
+  libbpf: "libbpf at load time"
+  relo: "for each CO-RE relo:\nfind field by name in B's BTF\npatch instruction with new offset"
+  loaded: "BPF program with\nB-correct field offsets" {shape: oval; style.fill: "#dcfce7"}
+
+  vmlinux_b -> libbpf
+  libbpf -> relo -> loaded
+}
+
+build.obj -> target.libbpf: "ship .o to box B\n(no recompile)"

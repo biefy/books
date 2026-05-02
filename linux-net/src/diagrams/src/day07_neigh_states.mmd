@@ -1,0 +1,22 @@
+stateDiagram-v2
+    direction LR
+    [*] --> NONE: created
+
+    NONE --> INCOMPLETE: send ARP request
+    INCOMPLETE --> REACHABLE: ARP reply received
+    INCOMPLETE --> FAILED: timeout (3 tries)
+
+    REACHABLE --> STALE: not used recently<br/>(reachable_time elapsed)
+    STALE --> DELAY: skb queued, probe<br/>via DELAY first
+    DELAY --> REACHABLE: confirmation
+    DELAY --> PROBE: still no confirmation
+    PROBE --> REACHABLE: ARP reply
+    PROBE --> FAILED: timeout
+
+    FAILED --> NONE: gc / app retry
+    REACHABLE --> [*]: gc'd if old enough
+
+    note right of REACHABLE
+        States from
+        include/net/neighbour.h
+    end note

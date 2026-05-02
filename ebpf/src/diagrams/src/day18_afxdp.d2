@@ -1,0 +1,62 @@
+direction: down
+
+title: |md
+  ## AF_XDP: zero-copy packets to userspace
+| {near: top-center; shape: text}
+
+driver: "NIC driver RX" {
+  style.fill: "#dbeafe"
+  d_body: |md
+    DMA writes packet
+    into UMEM (user memory
+    pre-registered with kernel).
+    No copy — same buffer
+    is visible to user.
+  |
+}
+
+xdp_prog: "XDP program" {
+  style.fill: "#fef3c7"
+  x_body: |md
+    Decides: this packet
+    goes to userspace
+    (not the kernel stack).
+
+    Returns:
+    bpf_redirect_map(&xsks, q, 0)
+    + XDP_REDIRECT
+  |
+}
+
+ring: "AF_XDP rings" {
+  style.fill: "#dcfce7"
+  r_body: |md
+    4 rings shared between
+    kernel and user:
+    - FILL  (user→kernel: free buffers)
+    - RX    (kernel→user: packets)
+    - TX    (user→kernel: send these)
+    - COMP  (kernel→user: TX done)
+
+    No syscalls in fast path —
+    user/kernel poll the rings.
+  |
+}
+
+user: "Userspace" {
+  style.fill: "#fef3c7"
+  u_body: |md
+    Reads RX ring → gets buffer descriptor
+    Processes packet **in place**
+    Returns descriptor to FILL ring
+
+    Throughput: **30+ Mpps per core**
+    on commodity hardware.
+  |
+}
+
+driver -> xdp_prog: "frame in UMEM"
+xdp_prog -> ring: "redirect to xsk"
+ring -> user: "RX ring"
+user -> ring: "FILL ring (recycle)"
+user -> ring: "TX ring (send)"

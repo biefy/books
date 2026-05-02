@@ -1,0 +1,58 @@
+direction: down
+
+title: |md
+  ## mprog: ordered, multi-program attach
+| {near: top-center; shape: text}
+
+problem: "Classic tc problem" {
+  style.fill: "#fee2e2"
+  p_body: |md
+    Multiple BPF programs attached to one hook?
+    With classic tc, you used **filter priorities**:
+    - tc filter add ... pref 100 ...
+    - tc filter add ... pref 200 ...
+
+    Reordering = delete + re-add.
+    No atomic insert "before X" or "after Y".
+    No clean way to coordinate between owners.
+  |
+}
+
+mprog: "mprog (multi-program) abstraction" {
+  style.fill: "#dcfce7"
+  m_body: |md
+    Kernel infra introduced with tcx, also used by netkit.
+    Provides:
+    - bpf_link-based ownership
+    - flag-based ordering at attach time
+    - inspection: list of currently-attached progs
+
+    Flags:
+    - BPF_F_BEFORE  ← prepend before existing
+    - BPF_F_AFTER   ← append after existing
+    - BPF_F_REPLACE ← replace specific link
+    - BPF_F_LINK    ← attach via link FD
+  |
+}
+
+example: "Example: chain three programs" {
+  style.fill: "#fef3c7"
+  e_body: |md
+    Order: counter → fw → tracer
+
+    P1 (counter)        attach BEFORE
+    P2 (fw)             attach AFTER existing
+    P3 (tracer)         attach BEFORE existing → puts P3 first
+
+    Final order at runtime:
+    P3 → P1 → P2
+
+    Each program returns:
+    - TC_ACT_OK         continue chain
+    - TC_ACT_SHOT       drop, stop chain
+    - TC_ACT_REDIRECT   redirect, stop chain
+  |
+}
+
+problem -> mprog
+mprog -> example

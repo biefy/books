@@ -1,0 +1,16 @@
+digraph G {
+    rankdir=TB;
+    node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
+
+    pkt [label="Raw packet in driver buffer\n(headers + payload, contiguous bytes)", fillcolor="#dbeafe"];
+
+    md [label="struct xdp_md (your ctx) {\n  __u32 data;            // pointer to first byte\n  __u32 data_end;        // pointer one-past-last\n  __u32 data_meta;       // optional metadata area\n  __u32 ingress_ifindex; // which iface\n  __u32 rx_queue_index;  // RX queue\n  __u32 egress_ifindex;  // for redirect\n}", fillcolor="#fef3c7", fontname="Monaco"];
+
+    code [label="// canonical bounds-check pattern\nvoid *data = (void*)(long)ctx->data;\nvoid *end  = (void*)(long)ctx->data_end;\n\nstruct ethhdr *eth = data;\nif (eth + 1 > end)\n    return XDP_PASS;   // not enough bytes\n\nstruct iphdr *ip = (void*)(eth + 1);\nif (ip + 1 > end)\n    return XDP_PASS;\n\n// now safe to access eth->h_proto, ip->protocol", fillcolor="#dcfce7", fontname="Monaco"];
+
+    rule [label="Verifier rule:\nEvery byte you access\nmust be proven < data_end\nat the access site.", fillcolor="#fee2e2", shape=note];
+
+    pkt -> md [label="ctx points\nto packet"];
+    md -> code [label="userspace\nbounds-check"];
+    code -> rule [style=dashed];
+}

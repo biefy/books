@@ -1,0 +1,32 @@
+flowchart LR
+    subgraph TX["TX path with TSO/GSO"]
+        App["app sends 64 KB"]
+        TCP["tcp_sendmsg<br/>builds ONE large skb<br/>marked SKB_GSO_TCPV4"]
+        IP["IP layer treats as one"]
+        Dev["dev_queue_xmit"]
+        Check{"NIC supports TSO?"}
+        TSO["TSO: hand 64 KB skb to NIC<br/>NIC segments in HW"]
+        GSO["GSO: __skb_gso_segment splits<br/>in software, hands chain to driver"]
+        Wire["wire: 40+ MTU-sized segments"]
+
+        App --> TCP --> IP --> Dev --> Check
+        Check -->|yes| TSO --> Wire
+        Check -->|no| GSO --> Wire
+    end
+
+    subgraph RX["RX path with GRO"]
+        NIC2["NIC RX many segments"]
+        NAPI["NAPI poll"]
+        GRO["napi_gro_receive<br/>tries to coalesce"]
+        Hold["accumulate in napi->gro list"]
+        Flush["flush on:<br/>- different flow,<br/>- timeout,<br/>- napi exit"]
+        Big["1 superpacket up to 64 KB"]
+        Stack["netif_receive_skb"]
+
+        NIC2 --> NAPI --> GRO --> Hold --> Flush --> Big --> Stack
+    end
+
+    classDef bpf fill:#fef3c7,stroke:#d97706
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    class Check bpf
+    class TSO,GSO,GRO ok

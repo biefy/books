@@ -1,0 +1,25 @@
+flowchart LR
+    Frame["Tagged frame arrives at eth0"]
+    Strip{"HW VLAN strip?"}
+    HwStripped["skb->vlan_tci set<br/>skb->vlan_proto = 0x8100<br/>frame appears untagged"]
+    SwTagged["frame remains tagged<br/>type field = 0x8100"]
+
+    Lookup["__vlan_hwaccel_get_tag<br/>identifies vlan_id"]
+    Find["lookup vlan netdev<br/>by (eth0, vlan_id)"]
+    Found{"Found vlan device?"}
+    Forward["redirect skb to that<br/>vlan netdev's rx queue"]
+    Drop["drop (no listener)"]
+
+    Frame --> Strip
+    Strip -->|yes| HwStripped --> Lookup
+    Strip -->|no| SwTagged --> Lookup
+    Lookup --> Find --> Found
+    Found -->|yes| Forward
+    Found -->|no| Drop
+
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    classDef hot fill:#fef3c7,stroke:#d97706
+    class Forward ok
+    class Drop bad
+    class Strip,Found hot

@@ -1,0 +1,23 @@
+flowchart TD
+    Pkt["packet enters"]
+    Lookup["fib_lookup(net, &flowi4, &res)"]
+    R0["rule 0: from all<br/>lookup local"]
+    R1["rule 32766: from all<br/>lookup main"]
+    R2["rule 32767: from all<br/>lookup default"]
+
+    Custom["custom rule:<br/>'from 10.99.0.0/24 lookup 100'<br/>added by user"]
+
+    Match{Match?}
+    Tab["lookup that table"]
+    Result["fib_result"]
+    NextRule["try next rule"]
+
+    Pkt --> Lookup --> Custom --> Match
+    Match -->|yes| Tab --> Result
+    Match -->|no| R0 --> Match
+    R0 -.- R1 -.- R2
+
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    classDef hot fill:#fef3c7,stroke:#d97706
+    class Result ok
+    class Match,Custom hot

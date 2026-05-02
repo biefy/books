@@ -1,0 +1,14 @@
+digraph G {
+    rankdir=LR;
+    node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
+
+    elf [label="/usr/bin/bash\n(ELF binary)\n\n- TEXT (executable code)\n- .symtab (may be stripped)\n- .dynsym (dynamic)\n- .plt + .got (lazy stubs)", fillcolor="#dbeafe"];
+
+    discovery [label="How to find the offset:\n\n$ nm /usr/bin/bash | grep ' T readline'\n0000000000064f00 T readline\n\n$ objdump -d /usr/bin/bash | grep 'readline>'\n0000000000064f00 <readline@@READLINE_8.0>\n\n$ nm -D libc.so.6 | grep ' T malloc'\n0000000000099a00 T malloc", fillcolor="#fef3c7", fontname="Monaco"];
+
+    secs [label="SEC() formats:\n\nSEC(\"uprobe//usr/bin/bash:readline\")\nSEC(\"uprobe//usr/bin/bash:0x64f00\")\nSEC(\"uretprobe//libc.so.6:malloc\")\nSEC(\"usdt//bin:provider:probe\")\n\nSymbol resolution happens at\nattach time, not load.", fillcolor="#dcfce7", fontname="Monaco"];
+
+    elf -> discovery [label="resolve symbol\nto offset"];
+    elf -> secs [label="reference\nin BPF code"];
+    discovery -> secs [label="paste offset\nor symbol name", style=dashed];
+}

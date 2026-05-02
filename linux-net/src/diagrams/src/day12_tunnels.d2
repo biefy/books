@@ -1,0 +1,66 @@
+direction: down
+
+title: |md
+  ## Tunnel zoo
+| {near: top-center; shape: text}
+
+ipip: "IPIP (RFC 1853)" {
+  style.fill: "#dbeafe"
+  ipip_body: |md
+    - IP-in-IP encapsulation
+    - Outer IP header + inner IP packet
+    - Simplest tunnel; ~20-byte overhead
+    - net/ipv4/ipip.c
+  |
+}
+
+gre: "GRE" {
+  style.fill: "#fef3c7"
+  gre_body: |md
+    - Generic Routing Encapsulation
+    - Outer IP + GRE hdr + inner packet
+    - GRE hdr can carry: tag, key, sequence
+    - Useful for any-over-any tunneling
+    - net/ipv4/ip_gre.c
+  |
+}
+
+vxlan: "VXLAN" {
+  style.fill: "#dcfce7"
+  vxlan_body: |md
+    - Outer UDP + VXLAN hdr + Ethernet + inner
+    - VNI (24-bit) identifies overlay network
+    - Default UDP port 4789
+    - Used heavily in container networking
+    - drivers/net/vxlan/ + net/ipv4/udp_tunnel*
+  |
+}
+
+wireguard: "WireGuard" {
+  style.fill: "#dbeafe"
+  wg_body: |md
+    - Modern, fast VPN
+    - UDP-based, fixed-format messages
+    - Crypto-routed (peer pubkey)
+    - drivers/net/wireguard/
+    - In-tree since 5.6 (2020)
+  |
+}
+
+shared: "All tunnels are netdevs" {
+  style.fill: "#fef3c7"
+  sh_body: |md
+    Each shows up as a virtual interface
+    (vxlan0, gre0, wg0). You configure
+    routes through them like any other.
+
+    The tunnel netdev's xmit handler
+    encapsulates; RX is via UDP socket
+    or protocol handler that decaps.
+  |
+}
+
+ipip -> shared
+gre -> shared
+vxlan -> shared
+wireguard -> shared

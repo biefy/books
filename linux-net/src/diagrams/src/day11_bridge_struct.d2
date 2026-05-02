@@ -1,0 +1,41 @@
+direction: right
+
+title: |md
+  ## Bridge structure
+| {near: top-center; shape: text}
+
+br: "struct net_bridge\n(net/bridge/br_private.h)" {
+  style.fill: "#dbeafe"
+  b_body: |md
+    Per-bridge state:
+    - port_list (linked list of ports)
+    - hash table: FDB by (vid, MAC)
+    - VLAN filtering on/off
+    - IGMP snooping state
+    - MST/STP state
+  |
+}
+
+port: "struct net_bridge_port" {
+  style.fill: "#fef3c7"
+  p_body: |md
+    One per slave interface:
+    - dev (the underlying netdev)
+    - port_no, priority, flags
+    - state (DISABLED, LEARNING,
+      LISTENING, FORWARDING, BLOCKING)
+  |
+}
+
+setup: "Set up a bridge" {
+  style.fill: "#dcfce7"
+  s_body: |md
+    ip link add br0 type bridge
+    ip link set eth0 master br0
+    ip link set eth1 master br0
+    ip link set br0 up
+  |
+}
+
+br -> port: "1..N ports"
+br -> setup

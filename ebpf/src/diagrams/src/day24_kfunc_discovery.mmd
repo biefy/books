@@ -1,0 +1,27 @@
+flowchart TD
+    Start["Pick a kfunc to use"]
+    Find1["bpftool btf dump file /sys/kernel/btf/vmlinux | grep FUNC"]
+    Find2["look for: __ksym attribute, register_btf_kfunc_id_set in source"]
+    Find3["docs: Documentation/bpf/kfuncs.rst lists categories"]
+
+    Decide{Found?}
+    Use["Declare and use:<br/>extern int the_fn(args) __ksym;"]
+    Run["Compile, load, run"]
+    VerifyAccept{Verifier accepts?}
+    Match["Args/types match BTF — done"]
+    Mismatch["Adjust signature to match BTF"]
+
+    Start --> Find1
+    Start --> Find2
+    Start --> Find3
+    Find1 --> Decide
+    Find2 --> Decide
+    Find3 --> Decide
+    Decide -->|yes| Use --> Run --> VerifyAccept
+    VerifyAccept -->|yes| Match
+    VerifyAccept -->|no| Mismatch --> Run
+
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    classDef hot fill:#fef3c7,stroke:#d97706
+    class Match ok
+    class Decide,VerifyAccept,Mismatch hot

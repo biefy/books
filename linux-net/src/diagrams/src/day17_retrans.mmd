@@ -1,0 +1,24 @@
+flowchart LR
+    Send["packet sent;<br/>added to sk_write_queue"]
+    Track["packets_out++<br/>tcp_clock_stamp"]
+
+    Wait["wait for ACK"]
+    Ack{"ACK received?"}
+    Done["normal: clear retrans, advance snd_una"]
+
+    Tick["RTO timer fires<br/>(or fast retransmit triggered)"]
+    Detect{"3 dup ACKs OR<br/>RACK reorder?"}
+    Recover["enter Recovery<br/>halve cwnd, set ssthresh"]
+    Retx["retransmit lost segments"]
+    Newack["new ACK clears Recovery"]
+
+    Send --> Track --> Wait --> Ack
+    Ack -->|yes| Done
+    Ack -->|no, timeout| Tick --> Retx
+    Ack -->|dup acks| Detect
+    Detect -->|yes| Recover --> Retx --> Newack
+
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    class Tick,Recover,Retx bad
+    class Done,Newack ok

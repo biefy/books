@@ -1,0 +1,22 @@
+digraph G {
+    rankdir=TB;
+    node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
+
+    root [label="root", fillcolor="#f3f4f6"];
+
+    n10 [label="10.0.0.0/8", fillcolor="#dbeafe"];
+    n192 [label="192.168.0.0/16", fillcolor="#dbeafe"];
+    n10_1 [label="10.1.0.0/16\n(MORE specific\nthan 10.0.0.0/8)", fillcolor="#fef3c7"];
+    n10_1_2 [label="10.1.2.0/24\n(MOST specific)", fillcolor="#dcfce7"];
+    n192_168 [label="192.168.1.0/24", fillcolor="#dcfce7"];
+
+    root -> n10;
+    root -> n192;
+    n10 -> n10_1;
+    n10_1 -> n10_1_2;
+    n192 -> n192_168;
+
+    note [label="LPM = Longest Prefix Match.\nLookup for 10.1.2.55 walks\nroot → 10/8 → 10.1/16 → 10.1.2/24\nand returns the deepest\nmatching value.", shape=note, fillcolor="#fef3c7"];
+
+    n10_1_2 -> note [style=dashed];
+}

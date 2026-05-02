@@ -1,0 +1,19 @@
+flowchart TD
+    Cur["bpf_get_current_task_btf()<br/>returns trusted *task_struct"]
+    Acq["bpf_task_acquire(cur)<br/>refcount: 1<br/>verifier: ref id 1"]
+    Slot["map slot kptr_xchg<br/>atomic swap"]
+    Map["{ key=k, value=&val{t→TASK} }"]
+
+    Later["...later, in another invocation..."]
+    Lookup["bpf_map_lookup_elem(&m, &k)"]
+    Take["bpf_kptr_xchg(&v->t, NULL)<br/>returns the task<br/>verifier: ref id 2"]
+    Use["use task fields"]
+    Rel["bpf_task_release(t)<br/>refcount: 0<br/>verifier: ref id 2 closed"]
+
+    Cur --> Acq --> Slot --> Map
+    Map --> Later --> Lookup --> Take --> Use --> Rel
+
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    classDef hot fill:#fef3c7,stroke:#d97706
+    class Acq,Slot,Take,Rel hot
+    class Map,Use ok

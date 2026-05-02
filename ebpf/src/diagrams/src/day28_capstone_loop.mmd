@@ -1,0 +1,28 @@
+flowchart TD
+    Idea["Capstone project picked"]
+    Outline["Sketch architecture:<br/>- BPF programs<br/>- Maps + sizes<br/>- Userspace consumer<br/>- Verifier risk areas"]
+
+    Build["Build minimal version"]
+    Verify{"Verifier rejects?"}
+    Read["Read verifier log<br/>identify type/lifetime issue"]
+    Fix["Adjust code"]
+
+    Test["Run on test load"]
+    Measure["Measure: throughput,<br/>overhead, correctness"]
+    OK{"Acceptable?"}
+
+    Polish["Polish:<br/>drop counters, README,<br/>build instructions"]
+    Done(["Capstone complete"])
+
+    Idea --> Outline --> Build --> Verify
+    Verify -->|yes| Read --> Fix --> Build
+    Verify -->|no, accepts| Test --> Measure --> OK
+    OK -->|no| Read
+    OK -->|yes| Polish --> Done
+
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    classDef hot fill:#fef3c7,stroke:#d97706
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    class Done ok
+    class Verify,OK hot
+    class Read,Fix bad

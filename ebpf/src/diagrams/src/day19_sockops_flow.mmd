@@ -1,0 +1,18 @@
+flowchart LR
+    Pkt["TCP SYN out from<br/>process in cgroup A"]
+    Sock["sock created in cgroup A"]
+    SO["sock_ops BPF program runs<br/>(BPF_SOCK_OPS_TCP_CONNECT_CB)"]
+    Tune["program sets:<br/>bpf_setsockopt(skops, ..., TCP_NODELAY)<br/>or per-cgroup BBR/CUBIC"]
+    Send["packet sent with tuned params"]
+
+    Pkt --> Sock
+    Sock --> SO
+    SO --> Tune
+    Tune --> Send
+
+    classDef in fill:#dbeafe,stroke:#2563eb
+    classDef hot fill:#fef3c7,stroke:#d97706
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    class Pkt,Sock in
+    class SO,Tune hot
+    class Send ok

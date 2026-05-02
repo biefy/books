@@ -1,0 +1,63 @@
+/* Click-to-zoom lightbox for content images. */
+
+#lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  z-index: 9999;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+#lightbox-overlay.open {
+  display: flex;
+}
+#lightbox-overlay .lightbox-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 95vw;
+  max-height: 95vh;
+}
+#lightbox-overlay .lightbox-img {
+  max-width: 95vw;
+  max-height: 88vh;
+  object-fit: contain;
+  background: white;
+  border-radius: 6px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  cursor: zoom-out;
+}
+#lightbox-overlay .lightbox-caption {
+  color: #ddd;
+  margin-top: 0.8rem;
+  font-size: 0.9rem;
+  text-align: center;
+  max-width: 80vw;
+}
+#lightbox-overlay .lightbox-close {
+  position: absolute;
+  top: 0.8rem;
+  right: 1.2rem;
+  font-size: 2.2rem;
+  background: transparent;
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+}
+#lightbox-overlay .lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Inline images get a zoom hint */
+#content img {
+  cursor: zoom-in;
+  transition: opacity 0.15s;
+}
+#content img:hover {
+  opacity: 0.92;
+}

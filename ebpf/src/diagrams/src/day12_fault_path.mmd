@@ -1,0 +1,25 @@
+flowchart LR
+    Call["BPF program calls<br/>bpf_copy_from_user(buf, sz, user_ptr)"]
+    Check["page table lookup<br/>for user_ptr"]
+    Mapped{Page in memory?}
+    Copy["copy bytes to buf<br/>return 0"]
+    Fault["page fault!<br/>need to page in"]
+    Sched{Sleepable<br/>context?}
+    Wait["context yields<br/>kernel pages in<br/>BPF resumes"]
+    Crash["context can't yield<br/>helper returns -EFAULT"]
+
+    Call --> Check
+    Check --> Mapped
+    Mapped -->|yes| Copy
+    Mapped -->|no| Fault
+    Fault --> Sched
+    Sched -->|yes, .s/ program| Wait
+    Sched -->|no, normal| Crash
+    Wait --> Copy
+
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    classDef hot fill:#fef3c7,stroke:#d97706
+    class Copy,Wait ok
+    class Crash bad
+    class Mapped,Sched hot

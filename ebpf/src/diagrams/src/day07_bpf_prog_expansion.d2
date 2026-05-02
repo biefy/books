@@ -1,0 +1,68 @@
+direction: down
+
+title: |md
+  ## How BPF_PROG unpacks trampoline arguments
+| {near: top-center; shape: text}
+
+src: "Source code you write" {
+  style.fill: "#dbeafe"
+  src_code: |md
+    ```c
+    SEC("fexit/vfs_read")
+    int BPF_PROG(on_exit,
+                 struct file *f,
+                 char *buf,
+                 size_t n,
+                 ssize_t ret)
+    {
+        /* use f, buf, n, ret directly */
+    }
+    ```
+  |
+}
+
+expanded: "What the preprocessor produces" {
+  style.fill: "#fef3c7"
+  exp_code: |md
+    ```c
+    int on_exit(unsigned long long *ctx);
+
+    /* trampoline calls on_exit with ctx[] */
+    static __always_inline typeof(on_exit())
+    ____on_exit(unsigned long long *ctx,
+                struct file *f,
+                char *buf,
+                size_t n,
+                ssize_t ret);
+
+    int on_exit(unsigned long long *ctx) {
+        /* unpack ctx into typed args via casts */
+        return ____on_exit(ctx,
+            (void *)ctx[0],   /* f */
+            (void *)ctx[1],   /* buf */
+            (void *)ctx[2],   /* n */
+            (void *)ctx[3]);  /* ret  ← only present for fexit */
+    }
+    ```
+  |
+}
+
+ctx_layout: "Trampoline ctx array (u64[]) at runtime" {
+  style.fill: "#dcfce7"
+  ctx_data: |md
+    ```
+    Index   Content (for fexit/vfs_read)
+    -----   --------------------------------
+    ctx[0]  struct file *  (1st arg)
+    ctx[1]  char *         (2nd arg, buf)
+    ctx[2]  size_t         (3rd arg, n)
+    ctx[3]  ssize_t        (return value — fexit only)
+    ```
+
+    For fentry/vfs_read, ctx[3] would not exist
+    (the trampoline doesn't write the return slot for fentry).
+  |
+}
+
+src -> expanded: "BPF_PROG macro\nexpands to..."
+expanded -> ctx_layout: "...calls inner with\nfields from ctx"

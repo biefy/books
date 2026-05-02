@@ -1,0 +1,34 @@
+direction: right
+
+title: |md
+  ## Inline loop vs bpf_loop — what the verifier sees
+| {near: top-center; shape: text}
+
+inline: "Inline `for (i=0; i<100; i++) { body; }`" {
+  style.fill: "#fee2e2"
+  desc: |md
+    Verifier perspective:
+    - **Unroll all 100 iterations** as a giant straight-line program
+    - For each branch in `body`, fork × 100
+    - Total paths explored = 100 × paths(body)
+    - Complexity grows fast; can hit 1M budget
+    - Works for small, simple bodies (~100 iter)
+    - Breaks for complex bodies or n > a few hundred
+  |
+}
+
+bpf_loop_call: "bpf_loop(100, callback, ctx, 0)" {
+  style.fill: "#dcfce7"
+  desc: |md
+    Verifier perspective:
+    - **Verify `callback` body once** (one path through one iteration)
+    - Treat `bpf_loop` as a black-box helper that
+      runs the verified callback up to 100 times
+    - Complexity = paths(callback) — independent of iter count
+    - Works for huge counts (1M iterations? no problem)
+    - Trade: callback can't share stack vars with caller
+      directly — must pass `ctx`
+  |
+}
+
+inline -> bpf_loop_call: "preferred when:\n- iter count > ~100\n- body has branches\n- body is non-trivial" {style.stroke-dash: 4}

@@ -1,0 +1,56 @@
+direction: right
+
+title: |md
+  ## Qdisc: traffic control on egress
+| {near: top-center; shape: text}
+
+enqueue: "skb arrives at dev_queue_xmit" {
+  style.fill: "#dbeafe"
+  e_body: |md
+    __dev_queue_xmit(skb, NULL):
+    1. Pick TX queue (RPS/aRFS/symmetric)
+    2. Lookup root qdisc on this txq
+    3. q->enqueue(skb, q, &to_free)
+       — into FIFO, RR, hierarchy, ...
+  |
+}
+
+run: "qdisc_run / __qdisc_run" {
+  style.fill: "#fef3c7"
+  r_body: |md
+    The 'pump' of the qdisc:
+    while (skb = q->dequeue(q)) {
+        sch_direct_xmit(skb, ...);
+        # eventually calls netdev_start_xmit
+    }
+
+    Runs in process context (sendmsg) or
+    softirq (NET_TX_SOFTIRQ for backlogged).
+  |
+}
+
+drv: "Driver ndo_start_xmit" {
+  style.fill: "#dcfce7"
+  d_body: |md
+    netdev_start_xmit(skb, dev, txq, more):
+    - Calls dev->netdev_ops->ndo_start_xmit(skb, dev)
+    - Driver builds DMA descriptor
+    - Submits to NIC TX ring
+    - Returns NETDEV_TX_OK / BUSY
+  |
+}
+
+types: "Common qdisc types\n(see /proc/net/psched, tc qdisc)" {
+  style.fill: "#fef3c7"
+  t_body: |md
+    - pfifo_fast (default in old kernels)
+    - fq_codel (default since 4.12)
+    - fq (BBR-friendly, pacing)
+    - htb, hfsc (hierarchical)
+    - mq (multi-queue wrapper)
+    - clsact (BPF hook scaffold)
+  |
+}
+
+enqueue -> run -> drv
+run -> types {style.stroke-dash: 4}

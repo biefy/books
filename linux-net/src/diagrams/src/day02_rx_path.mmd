@@ -1,0 +1,37 @@
+flowchart TD
+    HW["NIC hardware<br/>DMAs frame to RX ring"]
+    IRQ["Hardware IRQ"]
+    Sched["IRQ handler:<br/>napi_schedule()"]
+    Soft["softirq raised<br/>(NET_RX_SOFTIRQ)"]
+
+    Poll["__napi_poll(napi, budget)"]
+    Drv["driver poll()<br/>e.g., e1000_clean_rx_irq"]
+    Build["napi_alloc_skb / build_skb<br/>wrap DMA buffer in skb"]
+    XDP["XDP program runs here<br/>(if attached)"]
+    GRO["napi_gro_receive<br/>(coalesce if possible)"]
+
+    NIRX["netif_receive_skb<br/>net/core/dev.c:6454"]
+    Core["__netif_receive_skb_core<br/>net/core/dev.c:5972"]
+    Tap["packet_type taps<br/>(tcpdump etc.)"]
+    PT["pt_prev->func()<br/>= ip_rcv for IPv4"]
+
+    IPRcv["ip_rcv<br/>net/ipv4/ip_input.c:603"]
+    Hook["NF_HOOK(NF_INET_PRE_ROUTING)"]
+    Finish["ip_rcv_finish<br/>route lookup"]
+    Local["ip_local_deliver<br/>(if for us)"]
+    L4["udp_rcv / tcp_v4_rcv / ..."]
+
+    HW --> IRQ --> Sched --> Soft --> Poll
+    Poll --> Drv --> Build
+    Build --> XDP -->|XDP_PASS| GRO
+    GRO --> NIRX --> Core --> Tap --> PT --> IPRcv
+    IPRcv --> Hook --> Finish --> Local --> L4
+
+    classDef hw fill:#fee2e2,stroke:#dc2626
+    classDef napi fill:#fef3c7,stroke:#d97706
+    classDef gen fill:#dbeafe,stroke:#2563eb
+    classDef ip fill:#dcfce7,stroke:#16a34a
+    class HW,IRQ hw
+    class Sched,Soft,Poll,Drv,Build,XDP,GRO napi
+    class NIRX,Core,Tap,PT gen
+    class IPRcv,Hook,Finish,Local,L4 ip

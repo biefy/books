@@ -1,0 +1,21 @@
+flowchart LR
+    App["app: socket(AF_INET, SOCK_STREAM, IPPROTO_MPTCP)"]
+    Connect["connect(): MPTCP-aware<br/>SYN with MP_CAPABLE option"]
+    Established["primary subflow"]
+
+    Sub1["primary subflow<br/>(eth0, IP1 ↔ peer IP1)"]
+    Sub2["secondary subflow added<br/>via MP_JOIN<br/>(eth1, IP2 ↔ peer IP2)"]
+    Sub3["...optionally more subflows..."]
+
+    Sched["mptcp scheduler decides<br/>which subflow gets each segment"]
+
+    Connect --> Established --> Sub1
+    Sub1 --> Sub2 --> Sub3
+    Sub1 --> Sched
+    Sub2 --> Sched
+    Sub3 --> Sched
+
+    classDef sub fill:#dbeafe,stroke:#2563eb
+    classDef hot fill:#fef3c7,stroke:#d97706
+    class Sub1,Sub2,Sub3 sub
+    class Sched hot

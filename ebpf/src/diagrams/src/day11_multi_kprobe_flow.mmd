@@ -1,0 +1,24 @@
+flowchart LR
+    User["BPF userspace:<br/>'attach this prog to<br/>200 syscalls'"]
+    LinkCreate["BPF_LINK_CREATE<br/>(attach_type =<br/>BPF_TRACE_KPROBE_MULTI)"]
+    Kernel["Kernel:<br/>kprobe_multi_link_attach"]
+
+    Resolve["Resolve all 200 names<br/>to addresses via<br/>kallsyms (sorted lookup)"]
+    Install["For each address:<br/>install ftrace-based probe"]
+    Single["Single bpf_link<br/>owns all 200 attachments"]
+
+    Tracepoint["Any matched function fires →<br/>same BPF program runs<br/>(can read which one via<br/>bpf_get_func_ip)"]
+
+    User --> LinkCreate
+    LinkCreate --> Kernel
+    Kernel --> Resolve
+    Resolve --> Install
+    Install --> Single
+    Single --> Tracepoint
+
+    classDef us fill:#dbeafe,stroke:#2563eb
+    classDef sys fill:#fef3c7,stroke:#d97706
+    classDef rt fill:#dcfce7,stroke:#16a34a
+    class User,LinkCreate us
+    class Kernel,Resolve,Install,Single sys
+    class Tracepoint rt

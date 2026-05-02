@@ -1,0 +1,42 @@
+direction: down
+
+title: |md
+  ## NAPI: cooperative polled RX
+| {near: top-center; shape: text}
+
+before: "Pure-IRQ era (pre-NAPI)" {
+  style.fill: "#fee2e2"
+  b_body: |md
+    Every packet → one IRQ → driver runs RX in IRQ context.
+
+    **Problem at high rates:**
+    - 1 Mpps = 1M IRQs/s
+    - Receive livelock — CPU spends all time in IRQ
+    - Other work starves
+  |
+}
+
+napi: "NAPI hybrid (modern)" {
+  style.fill: "#dcfce7"
+  n_body: |md
+    First packet → IRQ → napi_schedule() raises softirq.
+    Driver disables further IRQs. Polls until budget exhausted.
+
+    **Wins:**
+    - One IRQ per burst, not per packet
+    - Bounded work (`napi->poll(napi, budget)`)
+    - Caller (softirq) yields when budget hit
+    - Re-enables IRQs only when no more work
+  |
+}
+
+budget: |md
+  **Budget mechanism:**
+  - Default: `net.core.netdev_budget = 300` (packets per softirq run)
+  - `netdev_budget_usecs = 2000` (max 2ms per softirq run)
+  - Hit either limit → return early, reschedule
+  - Polling continues on next softirq tick
+| {shape: callout; style.fill: "#fef3c7"}
+
+before -> napi: "evolved" {style.stroke-dash: 4}
+napi -> budget

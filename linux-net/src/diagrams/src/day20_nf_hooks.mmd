@@ -1,0 +1,20 @@
+flowchart LR
+    PreRouting["NF_INET_PRE_ROUTING<br/>(after IP header valid)"]
+    Routing{"local or<br/>forward?"}
+    LocalIn["NF_INET_LOCAL_IN<br/>(packets for us)"]
+    Forward["NF_INET_FORWARD<br/>(transit packets)"]
+    LocalOut["NF_INET_LOCAL_OUT<br/>(local generation)"]
+    PostRouting["NF_INET_POST_ROUTING<br/>(just before TX)"]
+
+    Stack["IP local delivery<br/>(socket lookup, etc.)"]
+    Out["Routed forward"]
+
+    PreRouting --> Routing
+    Routing -->|local| LocalIn --> Stack
+    Routing -->|transit| Forward --> PostRouting --> Out
+    LocalOut --> PostRouting
+
+    classDef nf fill:#fef3c7,stroke:#d97706
+    classDef path fill:#dcfce7,stroke:#16a34a
+    class PreRouting,LocalIn,Forward,LocalOut,PostRouting nf
+    class Stack,Out,Routing path

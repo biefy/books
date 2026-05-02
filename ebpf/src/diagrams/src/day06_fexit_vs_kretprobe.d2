@@ -1,0 +1,48 @@
+direction: right
+
+title: |md
+  ## fexit vs kretprobe — same goal, very different mechanics
+| {near: top-center; shape: text}
+
+kretprobe: "kretprobe (legacy)" {
+  style.fill: "#fee2e2"
+  body_kp: |md
+    1. At entry: kprobe fires, save real return address
+    2. **Overwrite return address on stack** with trampoline
+    3. Function runs, returns to trampoline
+    4. Trampoline calls your kretprobe handler
+    5. Handler reads `pt_regs->ax` for return value
+    6. Trampoline jumps to real return address
+
+    **Costs:**
+    - int3 trap on entry (~50 ns)
+    - Limited "instances pool" — bursts can miss returns
+    - No access to original arguments
+    - Stack-modifying tricks break C++ unwinding
+  |
+}
+
+fexit: "fexit (modern)" {
+  style.fill: "#dcfce7"
+  body_fx: |md
+    1. At entry: trampoline saves args
+    2. Calls fentry programs (if any)
+    3. Calls original function
+    4. **Trampoline appends ret value to ctx**
+    5. Calls fexit programs with full ctx (args + ret)
+    6. Returns to caller
+
+    **Costs:**
+    - jmp on entry (~10 ns)
+    - No pool, no missed returns
+    - Original arguments **and** return value typed
+    - Stack untouched — unwinding safe
+  |
+}
+
+verdict: "Use fexit when available\n(only fall back to kretprobe for non-BTF functions)" {
+  style.fill: "#fef3c7"
+}
+
+kretprobe -> verdict
+fexit -> verdict

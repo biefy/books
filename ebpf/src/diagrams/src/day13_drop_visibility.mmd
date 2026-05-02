@@ -1,0 +1,26 @@
+flowchart TD
+    Bpf["BPF program emits<br/>at high rate"]
+    Reserve["bpf_ringbuf_reserve(sz)"]
+    Check{Reserve<br/>returned NULL?}
+    Drop["increment 'drops' counter<br/>(BPF_MAP_TYPE_PERCPU_ARRAY)"]
+    Submit["bpf_ringbuf_submit"]
+    Done["return 0"]
+
+    User["Userspace consumer<br/>periodically reads drops counter"]
+    Diag["log: 'dropped N events<br/>since last sample'"]
+
+    Bpf --> Reserve
+    Reserve --> Check
+    Check -->|yes ringbuf full| Drop
+    Drop --> Done
+    Check -->|no| Submit
+    Submit --> Done
+
+    User -.->|read drops map| Diag
+
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    classDef us fill:#dbeafe,stroke:#2563eb
+    class Submit,Done ok
+    class Drop bad
+    class User,Diag us

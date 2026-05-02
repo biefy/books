@@ -1,0 +1,23 @@
+flowchart TD
+    Frame["frame at NIC"]
+    XDP["XDP program<br/>(driver-level)"]
+    Action{Action?}
+    Drop["XDP_DROP — done"]
+    Tx["XDP_TX — back out same iface"]
+    Redirect["XDP_REDIRECT — to other iface or AF_XDP"]
+    Pass["XDP_PASS — alloc skb"]
+    Stack["normal stack: GRO, ip_rcv, netfilter, ..."]
+
+    Frame --> XDP --> Action
+    Action --> Drop
+    Action --> Tx
+    Action --> Redirect
+    Action --> Pass
+    Pass --> Stack
+
+    classDef xdp fill:#fef3c7,stroke:#d97706
+    classDef stack fill:#dcfce7,stroke:#16a34a
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    class XDP,Action xdp
+    class Stack,Pass stack
+    class Drop bad

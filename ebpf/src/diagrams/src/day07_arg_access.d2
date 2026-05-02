@@ -1,0 +1,79 @@
+direction: right
+
+title: |md
+  ## Argument access by program type
+| {near: top-center; shape: text}
+
+fentry: "fentry/fexit\n(BTF + trampoline)" {
+  style.fill: "#dcfce7"
+  fent_code: |md
+    ```c
+    SEC("fentry/vfs_read")
+    int BPF_PROG(p, struct file *f,
+                    char *buf, size_t n) {
+        /* typed access */
+        loff_t pos = f->f_pos;
+    }
+    ```
+    - **Typed args** straight from BTF
+    - Direct field deref OK
+    - One-shot trampoline call
+    - ~10 ns overhead
+  |
+}
+
+kprobe: "kprobe\n(int3 trap, pt_regs)" {
+  style.fill: "#fef3c7"
+  kp_code: |md
+    ```c
+    SEC("kprobe/vfs_read")
+    int BPF_KPROBE(p, struct file *f,
+                      char *buf, size_t n) {
+        /* BPF_KPROBE expands ctx as pt_regs */
+        loff_t pos;
+        bpf_probe_read_kernel(&pos,
+            sizeof(pos), &f->f_pos);
+    }
+    ```
+    - `ctx` is `struct pt_regs *`
+    - `BPF_KPROBE` macro reads regs[N]
+    - Direct deref blocked (untrusted ptr)
+    - ~50 ns overhead (trap)
+  |
+}
+
+tp: "tracepoint (raw)\n(copied event buffer)" {
+  style.fill: "#fee2e2"
+  tp_code: |md
+    ```c
+    SEC("tracepoint/syscalls/sys_enter_read")
+    int p(struct trace_event_raw_sys_enter *ctx) {
+        /* read from ctx->args[N] */
+        unsigned long fd = ctx->args[0];
+    }
+    ```
+    - `ctx` is per-tracepoint struct
+    - Bytes are **copied** (not live)
+    - Layout in `/sys/kernel/tracing/events/.../format`
+    - Stable interface; doesn't break across kernels
+  |
+}
+
+tp_btf: "tp_btf\n(typed kernel pointers)" {
+  style.fill: "#dbeafe"
+  tpb_code: |md
+    ```c
+    SEC("tp_btf/sched_switch")
+    int BPF_PROG(p, bool preempt,
+                    struct task_struct *prev,
+                    struct task_struct *next) {
+        /* prev/next are LIVE kernel ptrs */
+        bpf_printk("%s -> %s",
+                   prev->comm, next->comm);
+    }
+    ```
+    - **Typed**, live kernel pointers
+    - Direct deref OK
+    - Bridge between tracepoint stability + BTF power
+  |
+}

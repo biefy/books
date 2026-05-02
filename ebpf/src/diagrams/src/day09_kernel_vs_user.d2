@@ -1,0 +1,58 @@
+direction: right
+
+title: |md
+  ## Kernel stack vs user stack walking
+| {near: top-center; shape: text}
+
+kstack: "Kernel stack\n`bpf_get_stackid(ctx, m, 0)`" {
+  style.fill: "#dbeafe"
+  ks_what: |md
+    Walks kernel ip frames using:
+    - **ORC unwinder** (default on x86_64 since 4.14)
+    - or frame pointers (`CONFIG_FRAME_POINTER`)
+
+    ✅ Always available in kernel context
+    ✅ Symbolized via /proc/kallsyms
+    ✅ Cheap (~1µs)
+
+    Frame format: array of kernel virtual addresses
+  |
+}
+
+ustack: "User stack\n`bpf_get_stackid(ctx, m, BPF_F_USER_STACK)`" {
+  style.fill: "#fef3c7"
+  us_what: |md
+    Walks **userspace** stack of current task:
+    - Requires `CONFIG_FRAME_POINTER` in user binary,
+      OR DWARF unwind info (slower, kernel can't use)
+
+    ⚠️ Userspace stacks often lack frame pointers
+        (gcc -fomit-frame-pointer is default on amd64)
+    ⚠️ JIT'd languages (JS, Java) need extra symbol info
+
+    ✅ Symbolize via /proc/PID/maps + ELF symbols
+    ✅ Reveals "which function in your app called read()"
+
+    Frame format: array of user virtual addresses
+  |
+}
+
+both: "Both at once\n`bpf_get_stack(ctx, buf, sz, 0)`\n+ `bpf_get_stack(ctx, buf, sz, USER)`" {
+  style.fill: "#dcfce7"
+  both_what: |md
+    Use **two separate calls** to capture
+    a **mixed** kernel+user stack
+    (kernel frames stack on top of the
+    syscall entry, user frames below).
+
+    Combine in userspace before symbolizing.
+  |
+}
+
+flag: "Flags:\n- 0 (kernel)\n- BPF_F_USER_STACK\n- BPF_F_FAST_STACK_CMP\n- BPF_F_REUSE_STACKID" {
+  style.fill: "#f3f4f6"
+}
+
+kstack -> flag {style.stroke-dash: 4}
+ustack -> flag {style.stroke-dash: 4}
+both -> flag {style.stroke-dash: 4}

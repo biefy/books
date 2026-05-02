@@ -1,0 +1,51 @@
+direction: right
+
+title: |md
+  ## Hash vs LPM: pick by lookup pattern
+| {near: top-center; shape: text}
+
+hash: "BPF_MAP_TYPE_HASH" {
+  style.fill: "#dbeafe"
+  h_body: |md
+    Use when keys are **exact match**:
+    - {tcp_flow_5tuple} → state
+    - {pid} → counter
+    - {socket_cookie} → metadata
+
+    Lookup: O(1) hash + bucket walk
+    Memory: O(N) entries
+
+    **Cannot** match prefixes.
+  |
+}
+
+lpm: "BPF_MAP_TYPE_LPM_TRIE" {
+  style.fill: "#dcfce7"
+  l_body: |md
+    Use when keys are **prefixes**:
+    - {prefixlen=24, 192.168.1.0} → action
+    - {prefixlen=64, IPv6 net} → action
+
+    Lookup: O(prefix_len) bit walk
+    Memory: O(N + total_bits) for tree nodes
+
+    **Returns longest matching prefix.**
+    Per IPv4: max 32 hops; usually < 5
+    Per IPv6: max 128 hops; usually < 16
+  |
+}
+
+key_struct: "Key struct for LPM:" {
+  style.fill: "#fef3c7"
+  ks_body: |md
+    ```c
+    struct ipv4_key {
+        __u32 prefixlen;     // ALWAYS first — kernel reads this
+        __u32 addr;          // big-endian network address
+    };
+    ```
+  |
+}
+
+hash -> key_struct: "exact-match keys" {style.stroke-dash: 4}
+lpm -> key_struct: "prefix + value keys" {style.stroke-dash: 4}

@@ -1,0 +1,57 @@
+direction: right
+
+title: |md
+  ## Sockopts: per-socket tuning knobs
+| {near: top-center; shape: text}
+
+generic: "Generic (SOL_SOCKET)" {
+  style.fill: "#dbeafe"
+  g_body: |md
+    - SO_RCVBUF, SO_SNDBUF — buffer sizes
+    - SO_REUSEADDR, SO_REUSEPORT
+    - SO_KEEPALIVE
+    - SO_LINGER
+    - SO_BINDTODEVICE
+    - SO_PRIORITY (for tc/qdisc)
+    - SO_MARK (set fwmark on tx)
+  |
+}
+
+ip: "IP (SOL_IP / SOL_IPV6)" {
+  style.fill: "#fef3c7"
+  ip_body: |md
+    - IP_TOS, IP_TTL
+    - IP_MULTICAST_*
+    - IP_FREEBIND
+    - IP_PKTINFO (recv aux info)
+    - IP_TRANSPARENT (TPROXY)
+  |
+}
+
+tcp: "TCP (SOL_TCP)" {
+  style.fill: "#dcfce7"
+  tcp_body: |md
+    - TCP_NODELAY (disable Nagle)
+    - TCP_CORK (batch sends)
+    - TCP_QUICKACK
+    - TCP_CONGESTION (algorithm name)
+    - TCP_FASTOPEN
+    - TCP_USER_TIMEOUT
+    - TCP_INFO (read tcp stats)
+    - TCP_TX_DELAY (BBR pacing tuning)
+  |
+}
+
+bpf: "BPF can set most via sock_ops" {
+  style.fill: "#fef3c7"
+  b_body: |md
+    bpf_setsockopt(skops, SOL_TCP,
+                   TCP_CONGESTION, "bbr", 3);
+    Lets per-cgroup or per-flow policies
+    override application defaults.
+  |
+}
+
+generic -> bpf
+ip -> bpf
+tcp -> bpf

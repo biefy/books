@@ -1,0 +1,46 @@
+direction: down
+
+title: |md
+  ## Single probe vs multi-probe attach
+| {near: top-center; shape: text}
+
+single: "Single attach (legacy)" {
+  style.fill: "#fee2e2"
+  s_body: |md
+    For each of N functions to trace:
+    1. perf_event_open() syscall
+    2. allocate kernel kprobe object
+    3. install int3 (or trampoline)
+    4. one BPF link per attach
+
+    **Costs:**
+    - N syscalls (slow startup for N=1000+)
+    - N tracepoint listeners
+    - N file descriptors
+    - O(N) attach latency
+  |
+}
+
+multi: "Multi-probe attach (modern, since 5.18)" {
+  style.fill: "#dcfce7"
+  m_body: |md
+    Single attach for N functions:
+    1. **One** BPF_LINK_CREATE syscall
+    2. Pass list of N functions/offsets
+    3. Kernel installs all N probes in one go
+    4. **One** BPF link covers all N
+
+    **Costs:**
+    - 1 syscall
+    - 1 BPF link
+    - O(N) install but no per-syscall overhead
+    - 10-100× faster startup for large N
+  |
+}
+
+api: "API:\nbpf_program__attach_kprobe_multi_opts(\n  prog, NULL, &opts);\n+ struct bpf_kprobe_multi_opts {\n   .syms = symbols_array,\n   .cnt = N,\n  };" {
+  style.fill: "#fef3c7"
+}
+
+single -> multi: "modern code\nshould use this" {style.stroke-dash: 4}
+multi -> api {style.stroke-dash: 4}

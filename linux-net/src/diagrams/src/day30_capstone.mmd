@@ -1,0 +1,28 @@
+flowchart TD
+    Pick["Pick a real packet"]
+    Wire["enters wire"]
+    Driver["NIC driver receives"]
+    XDP["XDP program if any"]
+    Build["napi_alloc_skb / build_skb"]
+    GRO["napi_gro_receive — coalesce?"]
+    Eth["eth_type_trans — strip L2"]
+    NetIf["__netif_receive_skb_core"]
+    Ptype["packet_type dispatch"]
+    Ip["ip_rcv → ip_rcv_core"]
+    Pre["NF_INET_PRE_ROUTING — conntrack, DNAT, filter"]
+    Route["ip_route_input — FIB lookup"]
+    Decision{"local or forward?"}
+    Local["ip_local_in → NF_INET_LOCAL_IN → ip_local_deliver_finish"]
+    Forward["NF_INET_FORWARD → ip_forward → ip_output → NF_INET_POST_ROUTING"]
+    L4["tcp_v4_rcv / udp_rcv → socket lookup"]
+    Sock["sk->sk_data_ready → wake reader"]
+    User["app reads"]
+
+    Pick --> Wire --> Driver --> XDP --> Build --> GRO --> Eth --> NetIf --> Ptype --> Ip --> Pre --> Route --> Decision
+    Decision -->|local| Local --> L4 --> Sock --> User
+    Decision -->|transit| Forward
+
+    classDef hot fill:#fef3c7,stroke:#d97706
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    class Decision,Pre,Route hot
+    class User,Sock,Local ok

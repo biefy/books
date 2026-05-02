@@ -1,0 +1,18 @@
+flowchart LR
+    Pkt["packet enters PREROUTING"]
+    Find["conntrack lookup<br/>__nf_conntrack_find_get"]
+    State{"existing entry?"}
+    NewEntry["create NEW entry<br/>state = NEW"]
+    Established["state = ESTABLISHED<br/>(or RELATED for ICMP children)"]
+    Confirm["if ACCEPT verdict:<br/>nf_conntrack_confirm<br/>(insert into ct hash)"]
+    Pass["proceed to other chains"]
+
+    Pkt --> Find --> State
+    State -->|no| NewEntry --> Pass
+    State -->|yes| Established --> Pass
+    Pass --> Confirm
+
+    classDef hot fill:#fef3c7,stroke:#d97706
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    class State,Confirm hot
+    class Pass,Established ok

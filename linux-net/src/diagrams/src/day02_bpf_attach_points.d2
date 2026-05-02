@@ -1,0 +1,51 @@
+direction: right
+
+title: |md
+  ## Where to attach BPF on the RX path
+| {near: top-center; shape: text}
+
+p1: "1. Driver / before skb alloc" {
+  style.fill: "#fee2e2"
+  p1_body: |md
+    Hooks: **XDP** (driver-mode, generic, offloaded)
+    Sees: raw DMA buffer
+    Cost: ~10ns + your logic
+    Action: PASS / DROP / TX / REDIRECT
+  |
+}
+
+p2: "2. After GRO, before stack" {
+  style.fill: "#fef3c7"
+  p2_body: |md
+    Hooks: **tc-bpf ingress**, **tcx ingress**
+    Sees: __sk_buff (full metadata)
+    Cost: ~50ns + your logic
+    Action: TC_ACT_OK / SHOT / REDIRECT
+  |
+}
+
+p3: "3. Inside ip_rcv / netfilter" {
+  style.fill: "#dcfce7"
+  p3_body: |md
+    Hooks: **netfilter** (PRE_ROUTING),
+           **fentry/fexit** on ip_rcv*
+    Sees: skb at IP layer
+    Cost: ~50-100ns
+    Action: filter, mangle, observe
+  |
+}
+
+p4: "4. Per-socket / cgroup" {
+  style.fill: "#dbeafe"
+  p4_body: |md
+    Hooks: **cgroup_skb/ingress**,
+           **sk_filter** (sk_buff filter)
+    Sees: skb after socket lookup
+    Cost: variable
+    Action: drop or allow
+  |
+}
+
+p1 -> p2: "if XDP_PASS" {style.stroke-dash: 4}
+p2 -> p3 {style.stroke-dash: 4}
+p3 -> p4 {style.stroke-dash: 4}

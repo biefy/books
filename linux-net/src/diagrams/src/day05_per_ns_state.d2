@@ -1,0 +1,70 @@
+direction: right
+
+title: |md
+  ## Per-netns subsystem state
+| {near: top-center; shape: text}
+
+routing: "Per-ns routing" {
+  style.fill: "#dbeafe"
+  r_body: |md
+    Each ns has independent FIB:
+    - net->ipv4.fib_main_tbl
+    - net->ipv4.fib_local_tbl
+    - net->ipv6.fib6_main_tbl
+
+    `ip route` only shows the
+    current namespace's table.
+  |
+}
+
+netfilter: "Per-ns netfilter" {
+  style.fill: "#fef3c7"
+  nf_body: |md
+    nf_hooks registered per-ns:
+    - net->nf.hooks_ipv4[]
+    - net->nf.hooks_ipv6[]
+    - net->nf.hooks_bridge[]
+
+    nftables tables/sets:
+    - net->nft.tables
+
+    Conntrack table:
+    - net->ct.htable
+    - net->ct.count
+  |
+}
+
+socks: "Per-ns sockets" {
+  style.fill: "#dcfce7"
+  s_body: |md
+    Listeners bind in their ns:
+    - inet_bind looks up port in
+      sk->sk_net's bind table
+    - Two ns can both bind to :80
+      without conflict
+
+    Lookup tables (per-ns):
+    - tcp_hashinfo.bhash[]
+    - tcp_hashinfo.ehash[]
+    - udp_table.hash[]
+  |
+}
+
+sysctl: "Per-ns sysctls" {
+  style.fill: "#fef3c7"
+  ss_body: |md
+    Many net.ipv4.* and net.core.*
+    sysctls are per-ns:
+    - tcp_congestion_control
+    - rp_filter
+    - somaxconn
+    - ip_forward
+    - conntrack_max
+
+    Some are global only (e.g., kernel.*).
+  |
+}
+
+routing -> sysctl
+netfilter -> sysctl
+socks -> sysctl

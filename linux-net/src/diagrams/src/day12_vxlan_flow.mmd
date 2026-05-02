@@ -1,0 +1,21 @@
+flowchart LR
+    InnerSrc["inner packet:<br/>192.168.1.5 -> 192.168.1.20"]
+    VxlanXmit["vxlan netdev xmit"]
+    BuildOuter["build:<br/>+ Ethernet (VXLAN_OVERLAY MAC)<br/>+ outer IP (VTEP src/dst)<br/>+ UDP port 4789<br/>+ VXLAN hdr (VNI)"]
+    SendOuter["sent through underlay route"]
+
+    Wire["wire: encapsulated frame"]
+
+    UdpRcv["udp_rcv at remote VTEP"]
+    Disp["udp_tunnel dispatch"]
+    Decap["strip VXLAN hdr,<br/>recover inner Ethernet frame"]
+    InnerRx["push to vxlan netdev's RX"]
+    Stack["normal RX path"]
+
+    InnerSrc --> VxlanXmit --> BuildOuter --> SendOuter --> Wire
+    Wire --> UdpRcv --> Disp --> Decap --> InnerRx --> Stack
+
+    classDef encap fill:#fef3c7,stroke:#d97706
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    class BuildOuter,Decap encap
+    class Stack ok

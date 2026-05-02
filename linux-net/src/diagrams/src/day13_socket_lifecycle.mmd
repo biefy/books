@@ -1,0 +1,23 @@
+flowchart LR
+    Sys["socket(AF_INET, SOCK_STREAM, 0)"]
+    Alloc["sock_alloc + inet_create + tcp_init_sock"]
+    Bind["bind(): inet_bind → get_port"]
+    Hash["sk inserted in inet_listen_hashinfo<br/>(if listening)"]
+    Listen["listen(): start listening"]
+    Accept["accept(): wait, return new sk"]
+
+    Connect["connect(): tcp_v4_connect"]
+    Conn["sk inserted in inet_ehash<br/>(established hash)"]
+
+    Send["sendmsg → tcp_sendmsg"]
+    Recv["recvmsg → tcp_recvmsg"]
+    Close["close → tcp_close"]
+
+    Sys --> Alloc --> Bind --> Hash --> Listen --> Accept
+    Sys --> Connect --> Conn --> Send --> Recv --> Close
+
+    classDef api fill:#dbeafe,stroke:#2563eb
+    classDef in fill:#fef3c7,stroke:#d97706
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    class Sys,Bind,Listen,Accept,Connect,Send,Recv,Close api
+    class Alloc,Hash,Conn in

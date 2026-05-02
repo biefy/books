@@ -1,0 +1,12 @@
+flowchart LR
+    task["task<br/>struct task_struct *"]
+    rp["real_parent<br/>struct task_struct *"]
+    tgid["tgid<br/>pid_t"]
+
+    task -->|"+1872<br/>(or whatever offset<br/>this kernel uses)"| rp
+    rp -->|"+2384<br/>(another offset)"| tgid
+
+    classDef field fill:#fef3c7,stroke:#d97706,stroke-width:2px
+    classDef ptr fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+    class task,rp ptr
+    class tgid field

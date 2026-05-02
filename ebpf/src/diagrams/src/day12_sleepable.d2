@@ -1,0 +1,59 @@
+direction: down
+
+title: |md
+  ## Sleepable BPF programs
+| {near: top-center; shape: text}
+
+normal: "Normal BPF program (NOT sleepable)" {
+  style.fill: "#fee2e2"
+  n_body: |md
+    Runs in atomic / non-faultable context:
+    - kprobe in IRQ handler
+    - tracepoint inside scheduler
+    - XDP in NAPI softirq
+
+    **Cannot:**
+    - call helpers that page-fault
+    - call helpers that block
+    - acquire normal mutexes
+
+    **Cannot use:**
+    - bpf_copy_from_user (might fault)
+    - bpf_ima_inode_hash (calls into crypto)
+    - bpf_d_path (might fault on dentry)
+  |
+}
+
+sleepable: "Sleepable BPF program (SEC suffix .s/)" {
+  style.fill: "#dcfce7"
+  s_body: |md
+    Runs in faultable context:
+    - fentry.s (sleepable trampoline)
+    - lsm.s (sleepable LSM hook)
+    - tracing iter
+    - sk_lookup, cgroup{,_skb}.s
+
+    **Can:**
+    - bpf_copy_from_user (page-fault if needed)
+    - bpf_d_path (may schedule)
+    - longer-running operations
+    - some allocators
+
+    **Plumbing:**
+    - protected by SRCU (not RCU)
+    - may yield, may run for ms
+  |
+}
+
+decl: "Declaration adds .s/ to the SEC name" {
+  style.fill: "#fef3c7"
+  decl_body: |md
+    ```c
+    SEC("fentry.s/__x64_sys_openat")
+    /*       ^^ .s/ suffix == sleepable */
+    ```
+  |
+}
+
+normal -> decl
+sleepable -> decl

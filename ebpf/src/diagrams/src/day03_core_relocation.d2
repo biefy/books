@@ -1,0 +1,92 @@
+direction: down
+
+title: |md
+  ## CO-RE relocation: kernel A vs kernel B
+| {near: top-center; shape: text}
+
+# Kernel A side
+ka: "Kernel A (build host)" {
+  style.fill: "#fef3c7"
+  layout_a: |md
+    `struct task_struct` layout (kernel A):
+    ```
+    offset  field
+    0       state
+    24      stack
+    32      flags
+    ...
+    1872    real_parent  ← here
+    1880    parent
+    ...
+    2384    tgid
+    2388    pid
+    ```
+  |
+}
+
+# Kernel B side (drifted layout)
+kb: "Kernel B (target host, different version)" {
+  style.fill: "#dbeafe"
+  layout_b: |md
+    `struct task_struct` layout (kernel B):
+    ```
+    offset  field
+    0       state
+    24      stack
+    32      flags
+    ...
+    1920    real_parent  ← moved (+48 bytes)
+    1928    parent
+    ...
+    2440    tgid          ← moved (+56 bytes)
+    2444    pid
+    ```
+  |
+}
+
+# the .bpf.o (single artifact)
+obj: "hello.bpf.o (built once on kernel A)" {
+  shape: package
+  style.fill: "#dcfce7"
+  src: |md
+    Source:
+    ```c
+    BPF_CORE_READ(task, real_parent, tgid);
+    ```
+  |
+  emitted: |md
+    Emitted instructions:
+    ```
+    r1 = task
+    r1 = *(u64 *)(r1 + 0xCO_RE)   ← real_parent
+    r1 = *(u32 *)(r1 + 0xCO_RE)   ← tgid
+    ```
+    + CO-RE relocation records:
+    ```
+    relo: kind=field_byte_offset
+          type="task_struct"
+          field="real_parent"
+    relo: kind=field_byte_offset
+          type="task_struct"
+          field="tgid"
+    ```
+  |
+}
+
+ka -> obj: "compile against\nkernel A's vmlinux.h"
+
+# At load time
+load_a: "Load on kernel A:\nlibbpf patches\n+1872 and +2384" {style.fill: "#dcfce7"}
+load_b: "Load on kernel B:\nlibbpf patches\n+1920 and +2440" {style.fill: "#dcfce7"}
+
+obj -> load_a
+obj -> load_b
+
+ka.layout_a -> load_a: "field offsets\nfrom A's BTF"
+kb.layout_b -> load_b: "field offsets\nfrom B's BTF"
+
+note: |md
+  **Same `.bpf.o`, two different patched offsets at load time.**
+
+  Without CO-RE, you'd have to recompile for every kernel. With CO-RE, you ship one `.o` and it adapts.
+| {near: bottom-center; shape: text}

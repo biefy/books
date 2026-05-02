@@ -1,0 +1,23 @@
+flowchart LR
+    F1["frame on br port 1<br/>src MAC = AA:..."]
+    Br["bridge net_bridge<br/>net/bridge/br_*.c"]
+    Fdb["FDB lookup:<br/>{port 1, MAC AA:...}"]
+    Learn["if not present:<br/>insert {AA:..., port 1}<br/>STP age TBD"]
+
+    F2["frame to dst MAC BB:..."]
+    Find["FDB lookup<br/>{BB:...}"]
+    Found{Found?}
+    Forward["forward to that port"]
+    Flood["flood to all ports<br/>except input"]
+
+    F1 --> Br --> Fdb
+    Fdb --> Learn
+
+    F2 --> Br --> Find --> Found
+    Found -->|yes| Forward
+    Found -->|no| Flood
+
+    classDef br fill:#fef3c7,stroke:#d97706
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    class Br,Fdb,Find,Learn br
+    class Forward,Flood ok

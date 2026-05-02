@@ -1,0 +1,20 @@
+sequenceDiagram
+    autonumber
+    participant CALLER as Caller (anywhere)
+    participant ENTRY as fentry program
+    participant FN as vfs_read body
+    participant EXIT as fexit program
+    participant MAP as starts map<br/>(hash, tid → ts)
+    participant RB as ringbuf
+
+    CALLER->>ENTRY: vfs_read(file, buf, n)
+    Note over ENTRY: trampoline calls<br/>fentry first
+    ENTRY->>MAP: insert tid, ktime_get_ns()
+    ENTRY-->>FN: continue to body
+    FN->>FN: read bytes...<br/>(may take µs to ms)
+    FN-->>EXIT: ret = bytes_read
+    Note over EXIT: trampoline calls fexit<br/>with args + return value
+    EXIT->>MAP: lookup tid, get ts
+    EXIT->>MAP: delete tid
+    EXIT->>RB: emit(dur, ret, comm)
+    EXIT-->>CALLER: return to caller
