@@ -6,7 +6,7 @@ language = "en"
 src = "src"
 
 [output.html]
-default-theme = "rust"
+default-theme = "light"
 preferred-dark-theme = "ayu"
 git-repository-url = "https://github.com/biefy/books"
 edit-url-template = "https://github.com/biefy/books/edit/main/ebpf/{path}"
