@@ -8,7 +8,7 @@
 
 Every received packet on a typical Linux box traverses roughly the same path. Hardware DMAs the frame into kernel-allocated memory, the driver wraps it in an `sk_buff`, NAPI's softirq dispatches the work, GRO coalesces consecutive segments where it can, and the stack delivers to the appropriate L3 protocol handler.
 
-We'll walk this in stages, each anchored to a specific file/function in your `~/code/linux` checkout (line numbers from kernel 7.x).
+We'll walk this in stages, each anchored to a specific file/function in your `~/code/linux` checkout (line numbers from kernel 7.1).
 
 ## Stage 1: NIC → IRQ → softirq
 

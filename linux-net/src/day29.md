@@ -1,6 +1,6 @@
 # Day 29 — Recent additions: PSP, drop_monitor, devlink, NETLINK
 
-> **Today's mission:** know what's new in the network stack as of kernel 7.x. Total time: ~60 minutes.
+> **Today's mission:** know what's new in the network stack as of kernel 7.1. Total time: ~60 minutes.
 
 ![recent additions](diagrams/day29_recent.png)
 
@@ -26,7 +26,7 @@ sudo dropwatch -l kas
 sudo perf trace --no-syscalls -e skb:kfree_skb 2>&1 | head
 ```
 
-Each drop now has a `reason` enum (~150 categories in 7.x). New code should always use `kfree_skb_reason()` instead of `kfree_skb()`.
+Each drop now has a `reason` enum (~150 categories in 7.1). New code should always use `kfree_skb_reason()` instead of `kfree_skb()`.
 
 ## devlink
 

@@ -1,6 +1,6 @@
 # Linux Network Subsystem in 30 Days
 
-A hands-on, experiment-driven path through the Linux kernel network stack. Read kernel source, instrument with ftrace/perf/bpftrace, change sysctls, observe behavior. Verified against kernel 7.x.
+A hands-on, experiment-driven path through the Linux kernel network stack. Read kernel source, instrument with ftrace/perf/bpftrace, change sysctls, observe behavior. Verified against kernel 7.1.
 
 ## What you'll know by Day 30
 
@@ -26,7 +26,7 @@ A hands-on, experiment-driven path through the Linux kernel network stack. Read 
 Each day is ~75–90 minutes. Format:
 
 1. **Concepts introduced today** — what the new structures and paths are.
-2. **Code reading** — specific files and functions in your kernel source checkout. Line numbers verified against kernel 7.x.
+2. **Code reading** — specific files and functions in your kernel source checkout. Line numbers verified against kernel 7.1.
 3. **Live experiments** — what to trace/modify/observe to see the structures running.
 4. **What to break** — sysctls or configurations that demonstrate the effect.
 5. **Bullet Points**.

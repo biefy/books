@@ -8,7 +8,7 @@
 
 A TCP option (RFC 8684) that lets a connection use multiple subflows over different paths. Mobile devices switch between WiFi and cellular without breaking connections. Multi-homed servers can spread one logical connection across two NICs.
 
-Linux has MPTCP support since 5.6 (2020), with substantial improvements in 6.x and 7.x.
+Linux has MPTCP support since 5.6 (2020), with substantial improvements in 6.x and 7.1.
 
 ## API
 
@@ -57,7 +57,7 @@ Configurable via sysctl `net.mptcp.scheduler`.
 - API: `IPPROTO_MPTCP` instead of `IPPROTO_TCP`.
 - Subflow endpoints configured via `ip mptcp endpoint`.
 - Default scheduler picks lowest-RTT subflow per segment.
-- Linux MPTCP has been improving rapidly (still adding features in 7.x).
+- Linux MPTCP has been improving rapidly (still adding features in 7.1).
 
 ## Check question
 

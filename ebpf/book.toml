@@ -1,7 +1,7 @@
 [book]
 title = "Practical eBPF in 30 Days"
 authors = ["biefy"]
-description = "A hands-on, experiment-driven path through modern eBPF on Linux 7.x. Head First style. Builds on kernel-internals knowledge."
+description = "A hands-on, experiment-driven path through modern eBPF on Linux 7.1. Head First style. Builds on kernel-internals knowledge."
 language = "en"
 src = "src"
 
@@ -15,8 +15,8 @@ mathjax-support = false
 no-section-label = false
 fold = { enable = true, level = 1 }
 playground = { editable = false, copyable = true }
-additional-css = ["src/lightbox.css"]
-additional-js = ["src/lightbox.js"]
+additional-css = ["src/lightbox.css", "src/kernel-source.css"]
+additional-js = ["src/lightbox.js", "src/kernel-source.js"]
 
 [output.html.search]
 enable = true

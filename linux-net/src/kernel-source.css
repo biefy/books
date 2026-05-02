@@ -1,0 +1,98 @@
+/* Inline kernel source viewer styling. */
+
+#content code.ksrc-link {
+  cursor: pointer;
+  border-bottom: 1px dashed currentColor;
+  text-decoration-skip-ink: none;
+}
+#content code.ksrc-link:hover {
+  background: rgba(255, 180, 84, 0.18);
+}
+
+.ksrc-details {
+  margin: 0.6rem 0 1rem;
+  border: 1px solid var(--theme-popup-border, #ccc);
+  border-radius: 6px;
+  background: var(--quote-bg, #f8f8f8);
+}
+.ksrc-details > summary {
+  cursor: pointer;
+  padding: 0.4rem 0.8rem;
+  user-select: none;
+  font-size: 0.9rem;
+  color: var(--quote-border, #888);
+  list-style: none;
+}
+.ksrc-details > summary::-webkit-details-marker { display: none; }
+.ksrc-details > summary::before {
+  content: "▶ ";
+  display: inline-block;
+  transition: transform 0.15s;
+  margin-right: 0.3rem;
+}
+.ksrc-details[open] > summary::before {
+  transform: rotate(90deg);
+}
+.ksrc-body {
+  padding: 0.5rem 0.8rem 0.8rem;
+}
+
+.ksrc-header {
+  font-size: 0.85rem;
+  margin-bottom: 0.4rem;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+.ksrc-header a {
+  color: var(--links, #1f6feb);
+  text-decoration: none;
+  font-weight: 600;
+}
+.ksrc-header a:hover { text-decoration: underline; }
+.ksrc-header .ksrc-meta {
+  color: var(--quote-border, #888);
+  font-weight: normal;
+}
+
+.ksrc-code {
+  background: var(--quote-bg, #fff);
+  border: 1px solid var(--theme-popup-border, #e0e0e0);
+  border-radius: 4px;
+  padding: 0.6rem 0.4rem;
+  margin: 0;
+  max-height: 28rem;
+  overflow-y: auto;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+.ksrc-code code {
+  background: transparent;
+  padding: 0;
+}
+.ksrc-line {
+  display: block;
+  padding-left: 0.4rem;
+}
+.ksrc-line-target {
+  background: rgba(255, 180, 84, 0.2);
+  border-left: 3px solid var(--accent, #d6730e);
+  padding-left: calc(0.4rem - 3px);
+}
+.ksrc-lineno {
+  display: inline-block;
+  width: 3.5em;
+  color: var(--quote-border, #888);
+  user-select: none;
+  text-align: right;
+  padding-right: 0.6em;
+  border-right: 1px solid var(--theme-popup-border, #eee);
+  margin-right: 0.5em;
+}
+.ksrc-linetext { white-space: pre; }
+
+.ksrc-loading,
+.ksrc-error {
+  font-style: italic;
+  color: var(--quote-border, #888);
+  font-size: 0.9rem;
+}
+.ksrc-error a { color: var(--links, #1f6feb); }

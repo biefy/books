@@ -1,6 +1,6 @@
 # Practical eBPF in 30 Days
 
-A hands-on, experiment-driven path through modern eBPF on Linux 7.x. Written in Head First style with rendered diagrams.
+A hands-on, experiment-driven path through modern eBPF on Linux 7.1. Written in Head First style with rendered diagrams.
 
 ## What you'll know by Day 30
 
