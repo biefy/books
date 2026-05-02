@@ -1,68 +1,173 @@
 # Day 20 — kfuncs: the modern kernel-extension mechanism
 
-> **Today's mission:** call a kfunc from BPF, understand acquire/release semantics, and know why new BPF features arrive as kfuncs rather than helpers. Total time: ~75 minutes.
+> **Today's mission:** call a kfunc from BPF, understand the acquire/release reference-counting semantics that the verifier enforces, and know why new BPF features ship as kfuncs rather than helpers. Total time: ~75 minutes.
 
-> **Phase 4 starts here.** Days 20–24 cover the modern primitives that distinguish 2024+ BPF from 2019 BPF: kfuncs, kptrs, struct_ops, and BTF spelunking.
+> **Phase 4 starts here.** Days 20–24 cover the modern primitives that distinguish 2024+ BPF from the older days: kfuncs, kptrs, struct_ops, and BTF spelunking.
 
-## Helpers stopped growing
+## Why kfuncs exist
 
-Helpers (`bpf_get_current_pid_tgid`, `bpf_map_lookup_elem`, etc.) are **frozen UAPI**. The list is in `include/uapi/linux/bpf.h` as `enum bpf_func_id`. The kernel community decided around 2022 that the helper list won't grow further — instead, new BPF capabilities ship as **kfuncs**.
+For years, the way BPF programs called kernel functionality was **helpers**: a frozen list of functions in `include/uapi/linux/bpf.h`'s `enum bpf_func_id`. Each helper had a fixed UAPI number, a fixed signature, and a forever-stable contract. Adding one was a lifetime commitment.
+
+By ~2022 the kernel community decided that contract was too costly. Adding a helper meant:
+
+1. New UAPI number (forever burned).
+2. New code in `bpf_helpers.h` userspace headers.
+3. Per-program-type allowance updates.
+4. Documentation that has to live forever.
+5. **Inability to evolve the signature** — if the kernel needed to change the function's signature, BPF programs using the helper broke.
+
+**The community decided to stop adding helpers.** New BPF capabilities now ship as **kfuncs** — kernel functions exposed to BPF *not via UAPI*, with the explicit understanding that they're allowed to evolve.
 
 ![helper vs kfunc](diagrams/day20_kfunc_helper.png)
 
-A kfunc is just a kernel function exposed to BPF via BTF + a registration call. It looks like a regular C function. The differences are operational, not syntactic:
+## What a kfunc is
 
-- **Discovery**: by name, against kernel BTF, at load time. Helpers are by enum, fixed at compile time.
-- **Stability**: kfuncs are **not UAPI**. They can change signature or be removed; programs using the old shape break.
-- **Reach**: kfuncs can access types and operations helpers can't (because helpers can't grow).
-- **Lifetime semantics**: the verifier enforces acquire/release tracking via metadata on each kfunc.
+A regular C function in the kernel, marked with `__bpf_kfunc`, registered against a `BTF_KFUNCS_START`/`BTF_KFUNCS_END` block, and resolved by name (against kernel BTF) at BPF program load time.
 
-## Acquire and release
+```c
+/* In kernel/bpf/helpers.c — line 2733 */
+__bpf_kfunc struct task_struct *bpf_task_acquire(struct task_struct *p)
+{
+    /* take a refcount on p */
+    if (refcount_inc_not_zero(&p->rcu_users))
+        return p;
+    return NULL;
+}
 
-Many kfuncs return refcounted resources. The verifier tracks each one and refuses program load if you forget to release.
+/* line 2744 */
+__bpf_kfunc void bpf_task_release(struct task_struct *p)
+{
+    put_task_struct_rcu_user(p);
+}
 
-![acquire/release](diagrams/day20_acquire_release.png)
+/* And later, registered: */
+BTF_KFUNCS_START(generic_btf_ids)
+BTF_ID_FLAGS(func, bpf_task_acquire, KF_ACQUIRE | KF_TRUSTED_ARGS | KF_RET_NULL)
+BTF_ID_FLAGS(func, bpf_task_release, KF_RELEASE)
+/* ... */
+BTF_KFUNCS_END(generic_btf_ids)
 
-The first kfunc you'll meet is `bpf_task_acquire`:
+register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING, &kfunc_set);
+```
+
+The flags annotate the function's behavior for the verifier:
+
+- **`KF_ACQUIRE`** — returns a refcounted resource. Verifier tracks it; you must release.
+- **`KF_RELEASE`** — releases a previously-acquired resource. Verifier marks the ref id closed.
+- **`KF_TRUSTED_ARGS`** — argument pointers must be `PTR_TO_BTF_ID | PTR_TRUSTED` (not from arbitrary load).
+- **`KF_RCU`** — argument is RCU-protected; valid for the duration of the program's RCU read section.
+- **`KF_SLEEPABLE`** — only callable from sleepable BPF programs.
+- **`KF_RET_NULL`** — return value may be NULL; the verifier requires checking.
+
+These flags are how the verifier knows what safety properties to check.
+
+## Calling a kfunc from BPF
+
+Declare it in your BPF source as an extern with `__ksym`:
 
 ```c
 extern struct task_struct *bpf_task_acquire(struct task_struct *p) __ksym;
 extern void bpf_task_release(struct task_struct *p) __ksym;
 ```
 
-`bpf_task_acquire` takes a refcount on the task. `bpf_task_release` returns it. Forget the release and the verifier rejects:
+The `__ksym` attribute tells libbpf "look this up by name in the kernel's BTF at load time." If the name doesn't resolve, the load fails — no silent miss.
+
+Use:
+
+```c
+struct task_struct *cur = bpf_get_current_task_btf();
+struct task_struct *acq = bpf_task_acquire(cur);
+if (!acq) return 0;             // KF_RET_NULL: must check
+
+/* now we hold a refcount on acq; verifier knows ref id #1 is open */
+
+bpf_printk("acquired pid=%d", acq->pid);
+
+bpf_task_release(acq);          // closes ref id #1
+return 0;
+```
+
+## The verifier's reference tracking
+
+The single most important kfunc-related verifier behavior is the **acquire/release lifetime check**.
+
+![acquire/release](diagrams/day20_acquire_release.png)
+
+When you call a `KF_ACQUIRE` function, the verifier:
+1. Creates a fresh **reference id** (an integer, e.g., id #1).
+2. Marks the return-value register with that id.
+3. Tracks the id through your program's flow: copies, branches, stores into maps.
+4. **At every program exit point**, requires the id to be either released or transferred to a place where the kernel can release it (e.g., a kptr-typed map slot).
+
+If you forget to release on any path:
 
 ```
-unreleased reference id=1
+unreleased reference id=1, alloc_insn=2
 ```
 
-Call release twice and the verifier rejects:
+If you release a non-acquired pointer:
 
 ```
 release on non-acquired reference
 ```
 
-This is checked at *load time* — runtime is safe.
+If you release twice:
 
-> ### There are no Dumb Questions
->
-> **Q: Why are kfuncs better than helpers if they break compatibility?**
->
-> A: Two reasons. First, kfuncs let kernel maintainers refactor freely without UAPI commitments — keeps internal evolution healthy. Second, programs that use a kfunc just need to be recompiled (or have their `__ksym` declarations adjusted) — that's manageable. Frozen helpers create permanent maintenance burden in the kernel.
->
-> **Q: How do I find which kfuncs exist on my kernel?**
->
-> A: We dedicate Day 24 to exactly this. Short version: `bpftool btf dump` and look for `FUNC` entries that aren't internal-use; or `Documentation/bpf/kfuncs.rst` lists the major categories.
->
-> **Q: Are there kfuncs for every program type?**
->
-> A: No — kfuncs are **registered for specific program types**. A kfunc registered for tracing won't be available in XDP. The verifier checks at call sites.
+```
+release on non-acquired reference
+```
+
+(The second release sees the ref id as already closed; same error.)
+
+These are checked **at load time**, not runtime — runtime is safe.
+
+### Why reference tracking is necessary
+
+Kernel objects (tasks, sockets, files, dentries) have refcounts. A BPF program that takes a reference but never releases it leaks kernel memory. A program that releases a reference it didn't acquire crashes the kernel by corrupting refcounts.
+
+Without verifier-time tracking, BPF would inherit all the refcount-management bugs of normal kernel C code. The static check makes BPF safer than hand-written kernel C in this dimension.
+
+## Per-program-type registration
+
+Not every kfunc is available in every BPF program type. The registration is **explicit**:
+
+```c
+register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING, &generic_kfunc_set);
+register_btf_kfunc_id_set(BPF_PROG_TYPE_STRUCT_OPS, &cpumask_kfunc_set);
+```
+
+Tracing programs (`fentry`, `fexit`, etc.) get the generic set. struct_ops programs get the cpumask set. XDP programs get neither — `bpf_task_acquire` from XDP fails the verifier with "program type ... can not call kernel function".
+
+Why? Because XDP runs in a context that doesn't have a meaningful `current` task; allowing it would be misleading.
+
+## Discovery: what kfuncs exist?
+
+Three approaches:
+
+1. **Kernel source.** Grep `BTF_KFUNCS_START` blocks in `kernel/bpf/` and elsewhere:
+
+   ```bash
+   grep -rn 'BTF_KFUNCS_START' kernel/bpf net/ drivers/ | head
+   ```
+
+   Each block lists kfuncs in one logical family.
+
+2. **Documentation.** `Documentation/bpf/kfuncs.rst` lists categories: cpumask, dynptr, lists, refcount, task, etc.
+
+3. **bpftool BTF dump:**
+
+   ```bash
+   sudo bpftool btf dump file /sys/kernel/btf/vmlinux | grep "FUNC.*bpf_" | head -30
+   ```
+
+   Filters all `FUNC` entries with `bpf_` prefix. Many are kfuncs (and many are helpers, mixed in).
+
+Day 24 covers BTF spelunking in detail.
 
 ## The lab
 
-### `kfunc_demo.bpf.c`
-
 ```c
+/* kfunc_demo.bpf.c */
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
@@ -79,7 +184,6 @@ int BPF_PROG(on_unlink)
     struct task_struct *acq = bpf_task_acquire(cur);
     if (!acq) return 0;
 
-    /* now we hold a refcount; the task is guaranteed alive */
     bpf_printk("acquired pid=%d", acq->pid);
 
     bpf_task_release(acq);
@@ -87,7 +191,7 @@ int BPF_PROG(on_unlink)
 }
 ```
 
-### Run
+Build, load, attach, observe:
 
 ```bash
 make
@@ -96,31 +200,21 @@ touch /tmp/x && rm /tmp/x
 sudo cat /sys/kernel/debug/tracing/trace_pipe
 ```
 
-You'll see `acquired pid=N` per delete.
+You should see `acquired pid=N` per delete.
 
----
+## What to break
 
-## What to break, in order
+### Forget release
 
-### Break 1 — Forget release
-
-Comment out `bpf_task_release(acq);`. Verifier rejects at load:
+Comment out `bpf_task_release(acq)`. Verifier rejects:
 
 ```
 Unreleased reference id=1, alloc_insn=2
 ```
 
-The number tells you which acquire was leaked. Multiple acquires in a program get unique ids.
+The number tells you which acquire was leaked (multiple acquires get distinct ids).
 
-### Break 2 — Release without acquire
-
-```c
-bpf_task_release(cur);  /* cur isn't acquired */
-```
-
-Rejected: `release on non-acquired reference`.
-
-### Break 3 — Conditional release
+### Conditional release
 
 ```c
 if (acq->pid > 1000)
@@ -128,9 +222,7 @@ if (acq->pid > 1000)
 return 0;
 ```
 
-Verifier rejects — there's an exit path where `acq` is leaked. Verifier requires release on **every** path.
-
-Fix: release before any conditional return:
+Verifier rejects — there's an exit path (when `pid <= 1000`) where the ref is leaked. Verifier requires release on **every** exit path. Fix: release before any conditional return:
 
 ```c
 __u32 pid = acq->pid;
@@ -138,35 +230,53 @@ bpf_task_release(acq);
 if (pid > 1000) return 0;
 ```
 
-### Break 4 — Use the wrong release function
+### Double release
 
 ```c
 bpf_task_release(acq);
-bpf_task_release(acq);  /* twice */
+bpf_task_release(acq);
 ```
 
-Rejected: `release on non-acquired reference` (the first release closed the id; the second has nothing to release).
+Rejected: the second call sees the id as already closed.
 
----
+### Use an XDP program type
+
+```c
+SEC("xdp")
+int xdp_prog(struct xdp_md *ctx) {
+    struct task_struct *cur = bpf_get_current_task_btf();
+    /* ... */
+}
+```
+
+`bpf_get_current_task_btf` and `bpf_task_acquire` aren't in the XDP allowance set; the verifier rejects with "program type ... can not call kernel function".
 
 ## What to read in the kernel
 
-- **`Documentation/bpf/kfuncs.rst`** — official categories: KF_RELEASE, KF_ACQUIRE, KF_TRUSTED_ARGS, KF_RCU, KF_SLEEPABLE.
-- **`kernel/bpf/helpers.c`** — search `BTF_KFUNCS_START`. Each block registers a set of kfuncs.
-- **`kernel/bpf/cpumask.c`** — search `bpf_cpumask_create`. A self-contained kfunc family worth reading in full.
-- **`tools/testing/selftests/bpf/progs/test_task_kfunc*.c`** — test programs.
+- **`Documentation/bpf/kfuncs.rst`** — official categories and flags. Read top to bottom; ~10 pages. The reference for what each KF_* flag means.
 
----
+- **`kernel/bpf/helpers.c:2733`** and surrounding — `bpf_task_acquire`, `bpf_task_release`, and friends. Real kfunc implementations. Note the `__bpf_kfunc` annotation and how short these are — kfuncs are usually thin wrappers around kernel APIs.
+
+- **`kernel/bpf/helpers.c:4698`** — `BTF_KFUNCS_START(generic_btf_ids)`. The big "general purpose" kfunc set. Skim the list — it's the catalog of what a tracing program can call.
+
+- **`kernel/bpf/cpumask.c`** — a *complete* kfunc family in one file (~700 lines). Read top to bottom. Notice the pattern: short C functions + a `BTF_KFUNCS_START` block + a `register_btf_kfunc_id_set` call at module init. This is the template for adding new kfuncs.
+
+- **`kernel/bpf/btf.c:8996`** — `register_btf_kfunc_id_set`. The registration entry. Short function (~50 lines). Note the per-`enum bpf_prog_type` registration.
+
+- **`kernel/bpf/verifier.c`** — search `KF_ACQUIRE`. The verifier check that creates a new ref id. Trace forward to see how `acquire_reference_state` interacts with `release_reference_state`.
+
+- **`tools/testing/selftests/bpf/progs/test_task_kfunc*.c`** — test programs exercising every aspect of acquire/release/store-in-map. Real, working examples.
 
 ## Bullet Points
 
-- **kfuncs** are in-tree kernel functions exposed to BPF via BTF and registration. Not UAPI.
-- Declared in BPF code with `extern T name(args) __ksym;`.
-- The verifier enforces **acquire/release lifetimes** for kfuncs marked KF_ACQUIRE.
-- New BPF features (cpumask, dynptr, lists) ship as kfuncs, not helpers.
-- Per-program-type registration; not all kfuncs are available everywhere.
-
----
+- **kfuncs** are in-tree kernel functions exposed to BPF via BTF. Not UAPI; **can evolve**.
+- Marked **`__bpf_kfunc`**, registered in **`BTF_KFUNCS_START`** blocks.
+- **`KF_ACQUIRE`** / **`KF_RELEASE`** flags drive verifier reference-tracking.
+- Declare in BPF code with **`extern T name(args) __ksym;`**.
+- The verifier statically tracks reference lifetimes — leaks are rejected at load time.
+- **Per-program-type registration:** not all kfuncs everywhere.
+- Discover: kernel source `BTF_KFUNCS_START`, `Documentation/bpf/kfuncs.rst`, `bpftool btf dump`.
+- New BPF features (cpumask, dynptr, lists, refcount, ...) ship as kfuncs, not helpers.
 
 ## Check question
 
@@ -175,7 +285,11 @@ Why does the verifier check release lifetimes statically rather than at runtime?
 <details>
 <summary>Click to reveal answer</summary>
 
-**Answer:** Static checking is fast and total. A runtime ref-leak detector would either (a) impose per-call overhead or (b) only catch leaks after the fact (not preventing them). Static analysis catches every leak at load time, before the program ever runs. The verifier already tracks every register's type, so adding reference-id tracking is a small extension. Trade-off: programs with conditional release require explicit care from the writer.
+**Answer:** Static checking is **fast** and **total**. A runtime ref-leak detector would either (a) impose per-call overhead on every BPF program (fail at scale where BPF is in the data path), or (b) only catch leaks after the fact, which is too late — by then the leak has already happened and the kernel resource is unrecoverable.
+
+Static analysis catches every leak at load time, before the program ever runs. The cost is paid by the **author** (writing release-correct code) instead of by every kernel that runs the program. The verifier already tracks every register's type, so adding reference-id tracking is a small extension of the existing analysis. The tradeoff is well-understood: more friction at load time in exchange for guaranteed safety at runtime.
+
+The same principle drives the rest of the verifier — bounds checks, pointer types, register typing — all done statically. BPF's safety story is: prove it before running it.
 
 </details>
 
@@ -183,4 +297,4 @@ Why does the verifier check release lifetimes statically rather than at runtime?
 
 ## Tomorrow
 
-Day 21: store an acquired kptr in a map across program invocations. Refcounted state that survives across calls.
+Day 21: store an acquired kptr in a map across program invocations.
