@@ -27,10 +27,12 @@ IP_CT_RELATED            // packet is related to an existing connection (e.g., F
 IP_CT_NEW                // first packet of a new connection (the SYN, in TCP)
 IP_CT_IS_REPLY           // flag: this packet is a reply (the response direction)
 IP_CT_ESTABLISHED_REPLY  // ESTABLISHED in the reply direction
-IP_CT_NEW_REPLY          // unusual: NEW in reply direction (for non-symmetric protocols)
+IP_CT_RELATED_REPLY      // RELATED in the reply direction
+// (there is no NEW in the reply direction; IP_CT_NEW_REPLY exists only as a
+//  userspace-compatibility alias. In the kernel value 7 is IP_CT_UNTRACKED.)
 ```
 
-Plus an internal **`IP_CT_INVALID`** for malformed or out-of-state packets that the kernel refuses to track (e.g., a TCP segment that isn't part of any known sequence).
+There is no `IP_CT_INVALID` enumerator — malformed or out-of-state packets (e.g., a TCP segment that isn't part of any known sequence) simply get no conntrack entry. The INVALID classification that surfaces to userspace is the bitmask `NF_CT_STATE_INVALID_BIT` (bit 0, in the same header), not an `ip_conntrack_info` value.
 
 ### How NEW becomes ESTABLISHED
 
@@ -61,10 +63,10 @@ ICMP errors (Destination Unreachable, Time Exceeded) referencing an existing con
 
 ![conntrack states](diagrams/day22_conntrack.png)
 
-For every incoming packet, the conntrack machinery in **`nf_conntrack_in`** (`net/netfilter/nf_conntrack_core.c:2003`):
+For every incoming packet, the conntrack machinery in **`nf_conntrack_in`** (`net/netfilter/nf_conntrack_core.c:2013`):
 
 1. **Build a tuple** from the packet's L3 + L4 headers (`nf_ct_get_tuple`).
-2. **Look up the tuple** in the per-netns hash (`__nf_conntrack_find_get`). The hash is `net->ct.htable`.
+2. **Look up the tuple** in the global conntrack hash (`__nf_conntrack_find_get`). The hash is the global `nf_conntrack_hash` (the netns is part of the key, not a separate per-netns table).
 3. **Three outcomes:**
    - **Hit (forward direction)**: tag skb with the existing entry, set `info = ESTABLISHED`.
    - **Hit (reverse direction)**: tag with the entry, set `info = ESTABLISHED + IS_REPLY`.
@@ -180,9 +182,9 @@ Always restore the timeout. It is global state, and lowering it can break legiti
 
 ## What to read in the kernel
 
-- **`net/netfilter/nf_conntrack_core.c:2003`** — `nf_conntrack_in`. The main entry point, registered as a Netfilter hook at PRE_ROUTING and LOCAL_OUT priority `NF_IP_PRI_CONNTRACK = -200`. Read top to bottom (~80 lines for the function plus its helpers). Trace: tuple → lookup → either tag-existing or alloc-new → usually return ACCEPT. Conntrack can still drop invalid or stressed packets; filter rules are just the common place where policy drops happen.
+- **`net/netfilter/nf_conntrack_core.c:2013`** — `nf_conntrack_in`. The main entry point, registered as a Netfilter hook at PRE_ROUTING and LOCAL_OUT priority `NF_IP_PRI_CONNTRACK = -200`. Read top to bottom (~80 lines for the function plus its helpers). Trace: tuple → lookup → either tag-existing or alloc-new → usually return ACCEPT. Conntrack can still drop invalid or stressed packets; filter rules are just the common place where policy drops happen.
 
-- **`include/net/netfilter/nf_conntrack.h:74`** — `struct nf_conn`. The per-connection record. ~80 fields. Important: `tuplehash[2]` (forward and reverse tuples), `status` (bitfield with bits like `IPS_CONFIRMED`, `IPS_NAT`), `timeout` (jiffies until expiry), and `ext` (extensible header for NAT info, helper data, etc.).
+- **`include/net/netfilter/nf_conntrack.h:74`** — `struct nf_conn`. The per-connection record. Only ~10-14 direct fields (a handful gated on config options like zones, NAT, and marks). Important: `tuplehash[2]` (forward and reverse tuples), `status` (bitfield with bits like `IPS_CONFIRMED`, `IPS_SRC_NAT`/`IPS_DST_NAT`), `timeout` (jiffies until expiry), and `ext` (a pointer to dynamically-allocated extensions for NAT info, helper data, etc.).
 
 - **`include/net/netfilter/nf_conntrack_tuple.h:37`** — `struct nf_conntrack_tuple`. The 5-tuple key. Note the union over L3 (IPv4 vs IPv6 addresses) and L4 (port pairs vs ICMP id/seq).
 
@@ -218,7 +220,7 @@ A SYN packet arrives. Conntrack creates a NEW entry. Then a netfilter rule decid
 <details>
 <summary>Click to reveal answer</summary>
 
-**Answer:** The unconfirmed entry is **freed**, not added to the global table. Conntrack entries created in PRE_ROUTING (or LOCAL_OUT) are *unconfirmed* — they live on a per-CPU "unconfirmed" list while the rest of the netfilter pipeline runs. Only when the packet is **ACCEPTED at the end** does `__nf_conntrack_confirm` insert the entry into the global hash. If any intermediate rule drops the packet, the unconfirmed entry is dropped along with the skb. This is what prevents a port-scanning attacker from filling your conntrack table with NEW entries that never see a reply: scans of closed ports don't leave permanent state. Implementation: see `nf_confirm` and the unconfirmed-list freeing in `nf_ct_destroy_unconfirmed`.
+**Answer:** The unconfirmed entry is **freed**, not added to the global table. Conntrack entries created in PRE_ROUTING (or LOCAL_OUT) are *unconfirmed* — they live on a per-CPU "unconfirmed" list while the rest of the netfilter pipeline runs. Only when the packet is **ACCEPTED at the end** does `__nf_conntrack_confirm` insert the entry into the global hash. If any intermediate rule drops the packet, the unconfirmed entry is dropped along with the skb. This is what prevents a port-scanning attacker from filling your conntrack table with NEW entries that never see a reply: scans of closed ports don't leave permanent state. Implementation: confirmation happens in `nf_confirm` / `__nf_conntrack_confirm`; an unconfirmed entry is simply freed via its refcount (`nf_ct_put`) when the skb is dropped, and bulk teardown of unconfirmed entries is `nf_ct_iterate_destroy`.
 
 </details>
 

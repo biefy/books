@@ -22,7 +22,7 @@ sendmsg(fd, msg, flags)
           → ip_local_out → ip_output → ... (Day 3's TX path)
 ```
 
-`udp_sendmsg` is roughly **400 lines** of code — most of it option handling (MSG_CONFIRM, MSG_MORE, GSO_BY_FRAGS, control-message processing) and the route lookup for the destination. The actual datagram construction is a single call to `ip_make_skb` or, for cork mode, `ip_append_data`.
+`udp_sendmsg` is roughly **274 lines** of code — most of it option handling (MSG_CONFIRM, MSG_MORE, GSO_BY_FRAGS, control-message processing) and the route lookup for the destination. The actual datagram construction is a single call to `ip_make_skb` or, for cork mode, `ip_append_data`.
 
 ### Why two paths (`ip_make_skb` and `ip_append_data`)?
 
@@ -68,7 +68,7 @@ recvmsg(fd, msg, flags)
     → udp_recvmsg                         // net/ipv4/udp.c:2023
       → __skb_recv_udp                    // dequeue from sk_receive_queue
       → skb_copy_datagram_msg              // copy into user buffer
-      → consume_skb                        // free the skb
+      → skb_consume_udp                    // free the skb (UDP-specific wrapper)
 ```
 
 Each `recvmsg` returns *exactly one* datagram. If the user buffer is smaller than the datagram, the rest is silently truncated and `MSG_TRUNC` is set in `msg->msg_flags`. (TCP doesn't do this — TCP gives you bytes, UDP gives you packets.)
@@ -78,7 +78,7 @@ Each `recvmsg` returns *exactly one* datagram. If the user buffer is smaller tha
 ## UDP-Lite, GSO, and other variations
 
 - **UDP-Lite (RFC 3828)**: same wire format, partial checksum (only first N bytes covered). Useful for video/audio streams where corrupted-but-late frames are better than retransmits. Linux supports it via `IPPROTO_UDPLITE`. Code path is the same `udp_sendmsg/recv` logic with a flag.
-- **UDP GSO** (`UDP_SEGMENT` sockopt): the application sends one large buffer, kernel fragments it into MTU-sized datagrams in software. This is how QUIC/HTTP3 implementations achieve high throughput from userspace — one syscall delivers many packets. See `Documentation/networking/udp.rst`.
+- **UDP GSO** (`UDP_SEGMENT` sockopt): the application sends one large buffer, kernel fragments it into MTU-sized datagrams in software. This is how QUIC/HTTP3 implementations achieve high throughput from userspace — one syscall delivers many packets.
 - **UDP-encap** (IPsec, VXLAN, GENEVE, FoU): UDP socket on a special port; instead of queueing on `sk_receive_queue`, calls a registered `encap_rcv` handler. Day 12 covered VXLAN's use of this.
 
 ## Today's experiment
@@ -120,13 +120,13 @@ sudo sysctl -w net.core.rmem_max=33554432
 
 ## What to read in the kernel
 
-- **`net/ipv4/udp.c:1233`** — `udp_sendmsg`. The TX side. Read top to bottom (~400 lines). Notice three sections: control-message parsing (cmsg loop), route lookup, and skb construction (the `ip_make_skb` vs `ip_append_data` branch). If you ever wonder "what does MSG_CONFIRM do?" — search this file.
+- **`net/ipv4/udp.c:1233`** — `udp_sendmsg`. The TX side. Read top to bottom (~274 lines). Notice three sections: control-message parsing (cmsg loop), route lookup, and skb construction (the `ip_make_skb` vs `ip_append_data` branch). If you ever wonder "what does MSG_CONFIRM do?" — search this file.
 
-- **`net/ipv4/udp.c:2580`** — `udp_rcv`. The RX entry. Short (~80 lines). Performs the basic checks (length, checksum), looks up the destination socket via `__udp4_lib_lookup`, dispatches to multicast/unicast paths.
+- **`net/ipv4/udp.c:2580`** — `udp_rcv`. The RX entry. Short (~107 lines). Performs the basic checks (length, checksum), looks up the destination socket via `__udp4_lib_lookup`, dispatches to multicast/unicast paths.
 
 - **`net/ipv4/udp.c:667`** — `__udp4_lib_lookup`. The 4-tuple → socket lookup. Note the two-pass strategy: first check the 4-tuple-keyed (connected) hash, then fall back to the 2-tuple (port-only) hash. Reading this clarifies what "connected UDP" actually means kernel-side.
 
-- **`net/ipv4/udp.c:2414`** — `udp_queue_rcv_skb`. The queueing path. Notice the SO_FILTER / sk_filter check (BPF socket filters), the multicast membership check, and the back-pressure handling. ~200 lines including the `__udp_enqueue_schedule_skb` slow path.
+- **`net/ipv4/udp.c:2414`** — `udp_queue_rcv_skb`. The queueing path. It's a thin (~21-line) wrapper; the work — the SO_FILTER / sk_filter check (BPF socket filters), the multicast membership check, and the back-pressure handling — lives in the call chain it heads (`udp_queue_rcv_one_skb` → `__udp_queue_rcv_skb` → `__udp_enqueue_schedule_skb`), which runs ~200 lines total including that slow path.
 
 - **`net/ipv4/udp.c:2023`** — `udp_recvmsg`. The dequeue side. Read the MSG_PEEK handling — it's surprisingly subtle (locks the socket, walks the queue without removing).
 
@@ -134,11 +134,11 @@ sudo sysctl -w net.core.rmem_max=33554432
 
 - **`net/ipv4/udp_offload.c`** — UDP GSO/GRO. Search `udp4_ufo_fragment` for the segmentation function and `udp_gro_receive` for the receive-side coalescing. Read this if you're pushing high-rate UDP (QUIC) and want to understand why GSO matters.
 
-- **`Documentation/networking/udp.rst`** — official doc. Notes on UDP_GRO, UDP_SEGMENT, error queues, the encap mechanism. Brief.
+- **`net/ipv4/udp.c`** UDP_GRO / UDP_SEGMENT sockopt handlers — there is no dedicated `udp.rst`; UDP GSO/GRO and error queues are documented mainly in the code and the original commit logs. (`Documentation/networking/udplite.rst` covers the UDP-Lite variant.)
 
 ## Bullet Points
 
-- UDP code lives in **`net/ipv4/udp.c`** (~3000 lines), `udp_offload.c`, and IPv6 mirror.
+- UDP code lives in **`net/ipv4/udp.c`** (~3900 lines), `udp_offload.c`, and IPv6 mirror.
 - TX: `udp_sendmsg → ip_make_skb → ip_send_skb → ...`. **No send queue** — datagrams hand off to IP immediately.
 - RX: `udp_rcv → __udp4_lib_lookup → udp_queue_rcv_skb → enqueue + wake`.
 - Lookups: 4-tuple for connected UDP, 2-tuple (port-only) for unconnected.
@@ -161,4 +161,4 @@ Why does UDP have a per-socket receive queue (`sk_receive_queue`) but no send qu
 
 ## Tomorrow
 
-Day 15: TCP state machine — eleven states, 5000 lines of state-handling code in `tcp_input.c`.
+Day 15: TCP state machine — eleven states, ~7,700 lines of state-handling code in `tcp_input.c`.

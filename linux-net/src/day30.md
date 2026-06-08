@@ -44,12 +44,12 @@ Let's pre-walk what your trace might look like.
 - Kernel: **`udp_sendmsg`** (`net/ipv4/udp.c:1233`) builds an skb, hands to IP.
 - Outbound: `ip_send_skb` → routing → `dev_queue_xmit` → qdisc (`fq_codel`) → driver → wire.
 - Wait for response.
-- Inbound: NIC RX → NAPI poll → driver allocates skb → GRO → `__netif_receive_skb_core` → `ip_rcv` → routing → `udp_rcv` (`net/ipv4/udp.c:2580`) → 4-tuple lookup → enqueue on `sk_receive_queue` → wake `recvfrom`.
+- Inbound: NIC RX → NAPI poll → driver allocates skb → GRO → `__netif_receive_skb_core` → `ip_rcv` → routing → `udp_rcv` (`net/ipv4/udp.c:2588`) → 4-tuple lookup → enqueue on `sk_receive_queue` → wake `recvfrom`.
 - Userspace: `recvfrom` returns the DNS response.
 
 ### Step 2: TCP connect (SYN)
 
-`curl` calls `socket(AF_INET, SOCK_STREAM)` → `connect(8080.com:80)`.
+`curl` calls `socket(AF_INET, SOCK_STREAM)` → `connect(example.com:80)`.
 
 - Userspace: connect syscall.
 - Kernel: `tcp_v4_connect` (`net/ipv4/tcp_ipv4.c:221`).
@@ -118,7 +118,7 @@ The report will be long — hundreds to thousands of lines. Pick **one TCP segme
 
 - Find the entry point (e.g., `tcp_sendmsg` for an outgoing segment, `tcp_v4_rcv` for incoming).
 - Note every function called in sequence.
-- For each, look up which file/line it's at (use the kernel source viewer in this book — click any `path:N` reference).
+- For each, look up which file/line it's at (click any `path:N` reference to open that file/line on GitHub at the pinned kernel tag).
 - Write the sequence as: "tcp_sendmsg → tcp_sendmsg_locked → ip_queue_xmit → ip_local_out → ...".
 
 ## Annotated walk-through deliverable
@@ -139,7 +139,7 @@ In 30 days you skipped:
 
 - **rxrpc** (AFS-style transport — `net/rxrpc/`).
 - **SCTP** — interesting alternate transport (`net/sctp/`).
-- **DCCP** — mostly historical (`net/dccp/`).
+- **DCCP** — mostly historical; the in-tree implementation was removed in 6.16, so there's no longer a `net/dccp/`.
 - **RDS, TIPC, Sun RPC** — niche transports.
 - **Bluetooth** (`net/bluetooth/`) — entirely different stack with its own protocols.
 - **CAN bus** (`net/can/`) — automotive networking.

@@ -121,6 +121,7 @@ The hash function is configurable via `net.ipv4.fib_multipath_hash_policy`:
 - **0** — L3 only: hash `(src_ip, dst_ip)`. **Same source-destination pair always uses one nexthop**, even if it's many connections. Poor balance for client-server workloads with few clients.
 - **1** — L4: hash `(src_ip, dst_ip, src_port, dst_port, proto)`. Different connections from the same client spread across nexthops. Useful when a few client/server pairs carry many connections, but it is an opt-in sysctl setting, not the kernel default.
 - **2** — Inner L3: for tunneled traffic, hash on the *inner* IPs, not the outer. Used when a single tunnel carries many flows that should spread across paths.
+- **3** — Custom: hash on a bitmask of fields you select via `net.ipv4.fib_multipath_hash_fields` (the sysctl accepts 0–3, `extra2 = SYSCTL_THREE`). Lets you cherry-pick exactly which L3/L4 fields enter the hash.
 
 The kernel default is mode 0. Pick mode 1 when you want better balancing across many L4 flows between the same endpoints. Mode 2 is for overlay networks (VXLAN, GRE) where outer addresses are the same for many inner flows.
 
@@ -128,7 +129,7 @@ The kernel default is mode 0. Pick mode 1 when you want better balancing across 
 
 ECMP guarantees a connection's packets stay on the same path **as long as the nexthop set is unchanged**. The moment you add or remove a nexthop, the modulo changes — *every* flow re-hashes. Connections that were on (say) nexthop A may suddenly hash to B, mid-flight. Their packets get reordered or routed differently, and TCP throughput tanks for seconds.
 
-### Resilient nexthop groups (kernel 5.10+)
+### Resilient nexthop groups (kernel 5.13+)
 
 The fix: **resilient hashing**. Instead of `hash % N`, the kernel maintains a 65536-bucket table mapping buckets to nexthops. Removing a nexthop only re-maps the buckets that pointed at it; everything else is undisturbed.
 
@@ -139,7 +140,7 @@ sudo ip nexthop add id 100 group 10/20 type resilient buckets 65536 idle_timer 1
 sudo ip route add default nhid 100
 ```
 
-Implementation: `net/ipv4/nexthop.c:563` and surrounding (`nh_grp_res_table`). The `idle_timer` is how long a bucket can be idle before the kernel can re-balance; `unbalanced_timer` is the soft deadline for forcing rebalance.
+Implementation: `net/ipv4/nexthop.c:563` and surrounding (`nh_res_table`). The `idle_timer` is how long a bucket can be idle before the kernel can re-balance; `unbalanced_timer` is the soft deadline for forcing rebalance.
 
 **Use resilient hashing on production gateways with multiple uplinks.** Plain ECMP is fine for symmetric, stable topologies (rare in practice).
 
@@ -184,13 +185,13 @@ You'll see `table_id=99` for the first ping and `table_id=254` (main) for the se
 
 - **`net/ipv4/fib_semantics.c:2164`** — `fib_select_multipath`. Picks one nexthop given a precomputed hash. Note the loop that walks `fib_info`'s next-hop array, accumulating "weight credit" until the credit exceeds the modulo. This is how non-uniform weights work.
 
-- **`net/ipv4/route.c:1950`** — `fib_multipath_hash_from_keys`. The hash function for `fib_multipath_hash_policy=0/1/2`. Notice how it folds the chosen fields into a `flow_keys` struct, then runs `flow_hash_from_keys` (jhash). Reading this answers "which exact bytes does the kernel hash for ECMP?"
+- **`include/net/ip_fib.h:556`** — `fib_multipath_hash_from_keys`. The hash function for `fib_multipath_hash_policy=0/1/2/3`. Notice how it folds the chosen fields into a `flow_keys` struct, then runs `flow_hash_from_keys` (siphash). Reading this answers "which exact bytes does the kernel hash for ECMP?"
 
-- **`net/ipv4/nexthop.c:563`** and surrounding — resilient nexthop groups. The `nh_grp_res_table` and bucket migration machinery. Look at `nh_res_table_upkeep` to see how the kernel decides which buckets to migrate when a nexthop is added/removed without disturbing others.
+- **`net/ipv4/nexthop.c:563`** and surrounding — resilient nexthop groups. The `nh_res_table` and bucket migration machinery. Look at `nh_res_table_upkeep` to see how the kernel decides which buckets to migrate when a nexthop is added/removed without disturbing others.
 
 - **`include/net/fib_rules.h:20`** — `struct fib_rule`. The selectors are the fields. Quick read; gives you the complete vocabulary of what's matchable.
 
-- **`Documentation/networking/policy-routing.rst`** — the official guide. One read; explains the model end-to-end.
+- **`Documentation/networking/ip-sysctl.rst`** — the official reference for the routing/rp_filter/multipath sysctls used here. One read; explains the knobs end-to-end.
 
 ## Bullet Points
 
@@ -200,7 +201,7 @@ You'll see `table_id=99` for the first ping and `table_id=254` (main) for the se
 - **Source-based routing** is the most common use case; **mark-based** for firewall integration.
 - **`rp_filter=1`** can break source-based routing — set to `2` (loose) on relevant interfaces.
 - **ECMP**: multi-nexthop route, kernel hashes per-flow to pick one. Same flow → same nexthop.
-- **Hash policy**: 0 (L3 — kernel default), 1 (L4, opt-in for better flow spread), 2 (inner L3 for tunnels).
+- **Hash policy**: 0 (L3 — kernel default), 1 (L4, opt-in for better flow spread), 2 (inner L3 for tunnels), 3 (custom fields via `fib_multipath_hash_fields`).
 - **Plain ECMP rehashes everything when nexthops change.** Use **resilient nexthop groups** (`type resilient`) for stable production gateways.
 
 ## Check question

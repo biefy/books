@@ -9,7 +9,7 @@
 The kernel has *two* "socket" structures, with confusingly similar names:
 
 - **`struct socket`** (`include/linux/net.h`) — the BSD-API-level handle. One per file descriptor. Owns the protocol-independent stuff: the file pointer, the type (SOCK_STREAM/SOCK_DGRAM/...), the wait queue, a pointer to the `proto_ops` table.
-- **`struct sock`** (`include/net/sock.h:365`) — the *protocol-level* state. Owns receive/send queues, the protocol's send/recv functions, the routing-table reference (`sk_dst`), the socket option storage, etc.
+- **`struct sock`** (`include/net/sock.h:365`) — the *protocol-level* state. Owns receive/send queues, the protocol's send/recv functions, the routing-table reference (`sk_dst_cache`), the socket option storage, etc.
 
 Each `struct socket` has a `struct sock *sk` pointing at its protocol state. They're separate because:
 1. The same `struct socket` API works for AF_INET, AF_UNIX, AF_NETLINK, AF_PACKET, etc. — wildly different protocol stacks.
@@ -35,7 +35,7 @@ struct udp_sock { struct inet_sock inet; /* + udp-specific */ ... };
 A pointer to a `tcp_sock` is *also* a valid pointer to an `inet_connection_sock`, *also* a valid pointer to an `inet_sock`, *also* a valid `sock`. C's structural inheritance via "first field" embedding. Helper macros:
 
 ```c
-struct tcp_sock *tp = tcp_sk(sk);     // cast sk to tcp_sock (inline check)
+struct tcp_sock *tp = tcp_sk(sk);     // container_of macro: compile-time cast to tcp_sock
 struct udp_sock *up = udp_sk(sk);
 struct inet_sock *inet = inet_sk(sk);
 ```
@@ -69,7 +69,7 @@ sk_rcvbuf, sk_sndbuf // per-socket buffer limits
 sk_filter            // BPF socket filter (sk_filter_attach)
 sk_lock              // per-socket lock (lock_sock / release_sock)
 sk_prot              // the proto vtable
-sk_dst               // refcounted route entry — see Day 8
+sk_dst_cache         // refcounted route entry — see Day 8
 sk_net               // pointer back to the netns
 ```
 
@@ -86,7 +86,7 @@ Walk through a TCP server's lifecycle, kernel-side:
 3. For AF_INET that's **`inet_create`** (`net/ipv4/af_inet.c:259`). It:
    - Allocates a `struct socket`.
    - Allocates a `struct tcp_sock` (or `udp_sock` etc.) via the protocol's `prot->slab` cache.
-   - Calls **`tcp_init_sock`** (`net/ipv4/tcp.c:424`) for TCP-specific initialization — sets up snd_cwnd, smoothed RTT, write queue, accept queue, etc.
+   - Calls **`tcp_init_sock`** (`net/ipv4/tcp.c:421`) for TCP-specific initialization — sets up snd_cwnd, smoothed RTT, write queue, accept queue, etc.
    - Returns; the FD points at the socket which points at the sock.
 
 ### `bind(fd, ...)`
@@ -104,8 +104,8 @@ Marks the sock as `TCP_LISTEN`. Allocates the **accept queue** (a hash of incomp
 
 1. Looks up sock.
 2. Calls `sk->sk_prot->connect` — for TCP **`tcp_v4_connect`** (`net/ipv4/tcp_ipv4.c:221`).
-3. Picks a source port (ephemeral range), inserts into the established hash (`tcp_hashinfo.ehash`) keyed by 4-tuple.
-4. Builds and sends SYN. Transitions sock state to `TCP_SYN_SENT`.
+3. Sets sock state to `TCP_SYN_SENT`, then calls `inet_hash_connect` to pick a source port (ephemeral range) and insert into the established hash (`tcp_hashinfo.ehash`) keyed by 4-tuple.
+4. Calls `tcp_connect` to build and send the SYN.
 5. Returns `EINPROGRESS` (non-blocking) or sleeps until SYN-ACK arrives (blocking).
 
 ### `accept(fd, ...)` — server side
@@ -166,9 +166,9 @@ ss -tim
 
 ## What to read in the kernel
 
-- **`include/net/sock.h:365`** — `struct sock`. Read all fields (~150 lines of struct). Note the comments grouping fields into hot/cold cache lines (`/* RX hot */`, `/* TX hot */`, etc.). This struct is one of the most cache-line-tuned in the kernel; respect the layout.
+- **`include/net/sock.h:365`** — `struct sock`. Read all fields (~150 lines of struct). Note the `__cacheline_group_begin`/`__cacheline_group_end` macros grouping fields into hot/cold cache lines (`sock_write_rx`, `sock_read_rx`, etc.). This struct is one of the most cache-line-tuned in the kernel; respect the layout.
 
-- **`include/net/inet_sock.h:218`** — `struct inet_sock`. Adds IPv4/IPv6 common fields: addresses, ports, ttl, mc_addr, sk_dst. Quick read.
+- **`include/net/inet_sock.h:218`** — `struct inet_sock`. Adds IPv4/IPv6 common fields: addresses, ports, ttl, mc_addr, sk_dst_cache. Quick read.
 
 - **`include/net/inet_connection_sock.h:81`** — `struct inet_connection_sock`. Adds retransmit timer, accept queue, ack delay timer. The "connection-oriented" base for TCP and DCCP.
 
@@ -184,11 +184,11 @@ ss -tim
 
 - **`net/ipv4/inet_connection_sock.c:500`** — `inet_csk_get_port`. Port reservation. Read this to understand SO_REUSEPORT (Day 24): the function walks bind hash buckets and decides whether collision is allowed based on the `reuse` flag and UID match.
 
-- **`net/ipv4/tcp.c:424`** — `tcp_init_sock`. TCP per-socket init. Sets up cwnd, ssthresh, RTT estimators, write/accept queues. Read this once to see what state a fresh TCP socket starts with.
+- **`net/ipv4/tcp.c:421`** — `tcp_init_sock`. TCP per-socket init. Sets up cwnd, ssthresh, RTT estimators, write/accept queues. Read this once to see what state a fresh TCP socket starts with.
 
 - **`net/ipv4/tcp_ipv4.c:221`** — `tcp_v4_connect`. The client connect path. Walk through: route lookup, source-port allocation, ehash insertion, SYN build/send.
 
-- **`Documentation/networking/sockets.rst`** — overview of the socket framework. Brief.
+- **`Documentation/networking/kapi.rst`** — the networking kernel API reference, including the socket/`struct sock` interfaces. Brief.
 
 ## Bullet Points
 

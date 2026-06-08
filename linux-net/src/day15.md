@@ -10,7 +10,7 @@ TCP is a connection-oriented protocol — every connection has *state* that both
 - Received segments (SYN, SYN-ACK, ACK, FIN, RST).
 - Timer events (RTO firing, 2MSL elapsed).
 
-The whole apparatus is in `tcp_rcv_state_process` (`net/ipv4/tcp_input.c:7119`) for incoming-segment-driven transitions, and in `tcp_set_state` (`net/ipv4/tcp.c:2964`) for explicit state changes from anywhere. Reading those two functions teaches you 80% of TCP control flow.
+The whole apparatus is in `tcp_rcv_state_process` (`net/ipv4/tcp_input.c:7119`) for incoming-segment-driven transitions, and in `tcp_set_state` (`net/ipv4/tcp.c:2961`) for explicit state changes from anywhere. Reading those two functions teaches you 80% of TCP control flow.
 
 ## The eleven states
 
@@ -96,7 +96,7 @@ For non-trivial states (ESTABLISHED, FIN_WAIT_*) it falls through to `tcp_data_q
 
 - **SYN-ACK retransmit timer**: in SYN_SENT and SYN_RECV, the SYN/SYN-ACK is retransmitted with exponential backoff if no progress.
 - **Retransmit timer (RTO)**: in ESTABLISHED, fires when an ACK is overdue (Day 17).
-- **TIME_WAIT timer (2*MSL)**: ~60s on Linux; controlled by `net.ipv4.tcp_fin_timeout` (which is misleadingly named — it actually controls FIN_WAIT_2, but is widely used).
+- **TIME_WAIT timer (2*MSL)**: ~60s on Linux, hardcoded to `TCP_TIMEWAIT_LEN` (`60*HZ`) and not configurable. This is separate from `net.ipv4.tcp_fin_timeout`, which (despite its name) controls the FIN_WAIT_2 timeout, not TIME_WAIT.
 - **Keepalive timer** (if `SO_KEEPALIVE`): probes idle connections.
 
 ## Why TIME_WAIT exists
@@ -113,7 +113,7 @@ Each TIME_WAIT socket consumes a small amount of kernel memory and one entry in 
 Mitigations:
 
 - **`SO_REUSEADDR`** lets a new socket bind even if a recent connection's TIME_WAIT entry occupies the 4-tuple.
-- **`net.ipv4.tcp_max_tw_buckets`** caps the global TIME_WAIT count; older entries get RST'd. Default 262144.
+- **`net.ipv4.tcp_max_tw_buckets`** caps the global TIME_WAIT count; older entries get RST'd. The default is `ehash_entries / 2`, so it scales with system memory (often tens to hundreds of thousands).
 - **`net.ipv4.tcp_tw_reuse=1`** lets the kernel reuse TIME_WAIT sockets for new outgoing connections (uses TCP timestamps to ensure no overlap). Safe for client-side; doesn't affect listening sockets.
 - (~~`tcp_tw_recycle`~~ was removed in 4.12 — was unsafe behind NAT.)
 
@@ -169,7 +169,7 @@ Observe: the closing side sits in TIME_WAIT for ~60s. The other side returns to 
 ## What to break
 
 - **Set `tcp_fin_timeout=5`**, then close a connection where the server doesn't reciprocate. You'll see the FIN_WAIT_2 expire after ~5s. Useful for diagnosing connection leaks.
-- **Hammer `tcp_max_tw_buckets`**: reduce it to 100 (`sudo sysctl -w net.ipv4.tcp_max_tw_buckets=100`), run a load test that opens many short connections. After 100 TIME_WAITs, new closes get RST'd; you'll see `tcpext.tw_bucket_overflow` increment.
+- **Hammer `tcp_max_tw_buckets`**: reduce it to 100 (`sudo sysctl -w net.ipv4.tcp_max_tw_buckets=100`), run a load test that opens many short connections. After 100 TIME_WAITs, new closes get RST'd; you'll see `TcpExt: TCPTimeWaitOverflow` (in `nstat` / `/proc/net/netstat`) increment.
 - **Try `tcp_tw_reuse=1`** for outgoing-only workloads: relieves the bucket pressure for clients that connect frequently to the same servers (test client + benchmarking tools).
 
 ## What to read in the kernel
@@ -178,17 +178,17 @@ Observe: the closing side sits in TIME_WAIT for ~60s. The other side returns to 
 
 - **`net/ipv4/tcp_input.c:7119`** — `tcp_rcv_state_process`. The big state-machine function (~300 lines including all branches). Read it once with the diagram open. Notice: it dispatches by current state (`switch (sk->sk_state)`) and handles each state's possible incoming events. The bulk is the SYN_SENT and SYN_RECV cases (handshake completion); the other states share a fall-through to data processing plus close-flag handling.
 
-- **`net/ipv4/tcp.c:2964`** — `tcp_set_state`. The explicit state change function. Note the per-state SNMP counter increments (`TCP_INC_STATS`); this is how `nstat` reports `Tcp.CurrEstab`, etc. Also note the ehash insert/remove on transitions to/from ESTABLISHED.
+- **`net/ipv4/tcp.c:2961`** — `tcp_set_state`. The explicit state change function. Note the per-state SNMP counter increments (`TCP_INC_STATS`); this is how `nstat` reports `Tcp.CurrEstab`, etc. Also note the ehash insert/remove on transitions to/from ESTABLISHED.
 
-- **`net/ipv4/tcp.c:3313`** — `tcp_close`. What happens when the application calls `close()`. Read this end-to-end (~150 lines). Notice the LINGER handling, the multi-step state transitions (ESTABLISHED → FIN_WAIT_1, etc.), and the `tcp_close_pending_data` cleanup.
+- **`net/ipv4/tcp.c:3310`** — `tcp_close`. What happens when the application calls `close()`. This is a thin wrapper; read the substantive ~170-line implementation in `__tcp_close` (`net/ipv4/tcp.c:3138`) end-to-end. Notice the LINGER handling, the multi-step state transitions (ESTABLISHED → FIN_WAIT_1, etc.), and the `tcp_close_pending_data` cleanup.
 
-- **`net/ipv4/tcp_ipv4.c:2072`** — `tcp_v4_rcv`. The IP-layer entry. Looks up the sock via the ehash (4-tuple match) and dispatches into the state machine. Read this to see how a packet arrives, gets associated with a sock, and proceeds.
+- **`net/ipv4/tcp_ipv4.c:2068`** — `tcp_v4_rcv`. The IP-layer entry. Looks up the sock via the ehash (4-tuple match) and dispatches into the state machine. Read this to see how a packet arrives, gets associated with a sock, and proceeds.
 
 - **`net/ipv4/tcp_minisocks.c`** — minisockets (TIME_WAIT, NEW_SYN_RECV). TIME_WAIT sockets are *reduced* sock objects (no full state, just enough to ACK retransmitted FINs). Look at `tcp_time_wait` for the conversion.
 
 - **`net/ipv4/tcp_timer.c`** — all TCP timers. `tcp_keepalive_timer`, `tcp_compressed_ack_kick`, etc. Useful when a state is stuck and you wonder which timer should be advancing it.
 
-- **`Documentation/networking/tcp.rst`** — overview. Brief.
+- **`Documentation/networking/ip-sysctl.rst`** (TCP section) and **`Documentation/networking/proc_net_tcp.rst`** — sysctl reference and the `/proc/net/tcp` format. Brief.
 
 ## Bullet Points
 

@@ -2,7 +2,7 @@
 
 > **Today's mission:** see exactly where in the network stack `iptables`/`nftables` run, the verdict pipeline that turns a rule decision into a packet action, and the per-protocol/per-netns hook tables that make it all per-namespace. Total time: ~75 minutes.
 
-> **Phase 4 starts here.** Days 20–26 cover the kernel's network subsystems: netfilter, nftables, conntrack, traffic control, kTLS, MPTCP.
+> **Phase 4 starts here.** Days 20–26 cover the kernel's network subsystems: netfilter, nftables, conntrack, traffic control, `SO_REUSEPORT`, kTLS, MPTCP.
 
 ## What Netfilter is
 
@@ -14,7 +14,7 @@ The framework is intentionally minimal: it's just a set of hook points, a regist
 
 ![nf hooks](diagrams/day20_nf_hooks.png)
 
-For IPv4 (`NFPROTO_IPV4`), defined at `include/uapi/linux/netfilter.h:43`:
+For IPv4 (`NFPROTO_IPV4`), defined at `include/uapi/linux/netfilter.h:42`:
 
 ```c
 enum nf_inet_hooks {
@@ -27,6 +27,8 @@ enum nf_inet_hooks {
 };
 ```
 
+(The real enum also carries a trailing `NF_INET_INGRESS = NF_INET_NUMHOOKS` (value 5) — a special-purpose inet ingress hook; the five entries above are the traditional hooks we focus on.)
+
 ### Where each one fires
 
 - **PRE_ROUTING** runs in `ip_rcv` (`net/ipv4/ip_input.c`), right after `ip_rcv_core` validates the header, *before* the routing decision. This is where you do **DNAT** (destination NAT — change where the packet is going) because the routing decision uses the post-rewrite destination.
@@ -35,7 +37,7 @@ enum nf_inet_hooks {
 
 - **FORWARD** runs in `ip_forward` after routing determines the packet is *not* for us. iptables' `FORWARD` chain. It is the transit-only filter point, but a forwarded packet also passed through PREROUTING before the route lookup and will pass through POSTROUTING before TX.
 
-- **LOCAL_OUT** runs in `__ip_local_out` for packets we're generating, immediately after the IP header is built. Note: this fires *before* the route lookup is final, which is why you can do source-IP rewriting that the route lookup honors.
+- **LOCAL_OUT** runs in `__ip_local_out` for packets we're generating, immediately after the IP header is built. Note: by the time this fires the **initial route lookup has already run** (`ip_route_output_flow` precedes `ip_local_out`, so `skb_dst` is set). If a NAT rule here changes the destination, the original route no longer applies and the packet must be re-routed (`ip_route_me_harder`).
 
 - **POST_ROUTING** runs in `ip_output` after all routing decisions, just before handing to the device. This is where you do **SNAT** (source NAT, including masquerading) because the new source IP doesn't change where the packet goes from here.
 
@@ -122,7 +124,7 @@ For a forwarded TCP SYN to port 80 going through a NAT box:
 
 1. **`ip_rcv`** is called. Calls `NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING, ...)`.
    - `nf_conntrack_in` (priority -200): create or look up conntrack entry. State = NEW.
-   - `nf_nat_ipv4_in` (priority -100): apply DNAT rule if any. Maybe rewrites dst from `1.2.3.4:80` to `10.0.0.5:8080`.
+   - `nf_nat_ipv4_pre_routing` (priority -100): apply DNAT rule if any. Maybe rewrites dst from `1.2.3.4:80` to `10.0.0.5:8080`.
    - User filter at priority 0 (e.g., `nft add rule ip filter prerouting accept`).
    - All ACCEPT → `okfn = ip_rcv_finish`.
 2. **`ip_rcv_finish`** does the routing lookup using the (now possibly rewritten) destination. Decides this packet goes to `10.0.0.5` via `eth1`.
@@ -185,7 +187,7 @@ sudo nft delete table inet test
 
 - **`net/netfilter/core.c:550`** — `nf_register_net_hook`. The registration function. How a module (nftables, conntrack, IPVS) plants its hook callback. Note the per-priority insertion (sorted insertion).
 
-- **`include/linux/netfilter.h`** — `NF_HOOK` macro and friends. `NF_HOOK` is conditional on the `nf_hook_indep_*` static branches; if no hooks, it skips the call entirely. This is the zero-cost-when-unused machinery.
+- **`include/linux/netfilter.h`** — `NF_HOOK` macro and friends. `NF_HOOK` is conditional on the `nf_hooks_needed[pf][hook]` static key; if no hooks, it skips the call entirely. This is the zero-cost-when-unused machinery.
 
 - **`include/uapi/linux/netfilter.h`** — verdicts, hook IDs, and `enum nf_inet_hooks`. The vocabulary file.
 
@@ -195,7 +197,7 @@ sudo nft delete table inet test
 
 - **`net/netfilter/nf_conntrack_core.c`** — conntrack registers at PRE_ROUTING and LOCAL_OUT (the two "first sight" hooks). Day 22 covers this.
 
-- **`Documentation/networking/netfilter-hooks.txt`** — older text doc with the hook diagram. Good for reference.
+- **`Documentation/networking/netfilter-sysctl.rst`** — netfilter sysctl knobs (the closest in-tree netfilter doc; there is no hook-diagram text file). See also `nf_conntrack-sysctl.rst` and `nf_flowtable.rst`.
 
 - **External: nftables wiki** at https://wiki.nftables.org — has nice diagrams of where each hook fires.
 

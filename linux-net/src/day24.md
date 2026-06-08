@@ -128,7 +128,7 @@ Now incoming connections are hashed across cores 0-3. Combined with NIC RSS (whi
 
 ## What to read in the kernel
 
-- **`net/core/sock_reuseport.c:320`** — `reuseport_add_sock`. How a new socket joins an existing reuseport group. ~70 lines. Note the array of socks (the group is a flat array, not a linked list — the array is indexed by hash modulo size).
+- **`net/core/sock_reuseport.c:320`** — `reuseport_add_sock`. How a new socket joins an existing reuseport group. ~47 lines. Note the array of socks (the group is a flat array, not a linked list — the array is indexed by hash modulo size).
 
 - **`net/core/sock_reuseport.c:568`** — `reuseport_select_sock`. The selector. Default: hash the 4-tuple, return the indexed socket. With BPF: invoke the BPF program. Read the BPF dispatch path to see how the program type is wired.
 
@@ -138,7 +138,7 @@ Now incoming connections are hashed across cores 0-3. Combined with NIC RSS (whi
 
 - **`net/ipv4/udp.c`** — search for `reuseport_select_sock` to find UDP's analogous path.
 
-- **`tools/testing/selftests/bpf/progs/test_select_reuseport_kern.c`** — example SK_REUSEPORT BPF program. ~100 lines, shows how to write the selector.
+- **`tools/testing/selftests/bpf/progs/test_select_reuseport_kern.c`** — example SK_REUSEPORT BPF program. ~183 lines, shows how to write the selector.
 
 - **`Documentation/networking/`** — search for SO_REUSEPORT writeups; mostly in the man page for socket(7).
 

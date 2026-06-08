@@ -34,7 +34,7 @@ Outer IP + 4-byte GRE header + inner packet. The GRE header is variable: optiona
 
 ### VXLAN — Virtual eXtensible LAN (RFC 7348)
 
-The standard for datacenter overlays. Outer Ethernet + outer IP + outer UDP (port 4789) + 8-byte VXLAN header + inner Ethernet frame.
+The standard for datacenter overlays. Outer Ethernet + outer IP + outer UDP (port 4789) + 8-byte VXLAN header + inner Ethernet frame. (4789 is the IANA-assigned port; the Linux module's legacy default is 8472 for backward compatibility, so always set `dstport` explicitly as the labs do.)
 
 - **What:** Ethernet-in-UDP. The 24-bit VNI ("VXLAN Network Identifier") in the VXLAN header identifies the overlay — 16 million possible overlays per IP underlay.
 - **Why:** scale beyond 4096 VLANs (the 802.1Q limit). Lets a single physical IP network carry many isolated L2 networks. Each VNI is its own broadcast domain.
@@ -72,7 +72,7 @@ VXLAN header layout: Flags(1B) | Reserved(3B) | VNI(3B) | Reserved(1B). The Flag
 
 When a packet hits a VXLAN netdev's TX:
 
-1. **Resolve the destination VTEP** — for unicast inner MAC, the bridge-style FDB tells which remote VTEP IP holds that MAC. For unknown unicast/multicast, send to the multicast underlay group (default `239.1.1.1`) or to the configured remote unicast IP.
+1. **Resolve the destination VTEP** — for unicast inner MAC, the bridge-style FDB tells which remote VTEP IP holds that MAC. For unknown unicast/multicast, send to the configured multicast underlay group (commonly `239.1.1.1` in examples) or to the configured remote unicast IP.
 2. **Build outer headers** — Ethernet, IP, UDP, VXLAN. Source UDP port is hashed from the inner flow (gives ECMP-like spread on the underlay).
 3. **`udp_tunnel_xmit_skb`** — the generic UDP-tunnel send helper at `net/ipv4/udp_tunnel_core.c:174`. Routes the outer packet through the underlay's normal IP stack.
 

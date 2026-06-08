@@ -140,13 +140,13 @@ If on, your NIC has TLS offload available; kTLS will use it transparently when t
 
 ## What to read in the kernel
 
-- **`net/tls/tls_main.c:863`** — `do_tls_setsockopt`. The dispatcher for TLS_TX, TLS_RX, TLS_TX_ZEROCOPY_RO, etc. Read top to bottom; ~300 lines including the per-option handlers.
+- **`net/tls/tls_main.c:863`** — `do_tls_setsockopt`. The dispatcher (~44 lines, ending at line 906) for TLS_TX, TLS_RX, TLS_TX_ZEROCOPY_RO, etc. To follow the full setsockopt flow including the per-option handlers, read from `do_tls_setsockopt_conf` (line 635) through line 906 — ~272 lines.
 
 - **`net/tls/tls_main.c:635`** — `do_tls_setsockopt_conf`. The TX/RX key configuration. This is where the kernel decides software (`tls_set_sw_offload`) vs hardware (`tls_set_device_offload`) and validates the crypto_info struct.
 
-- **`net/tls/tls_sw.c`** — software encryption path. Read `tls_sw_sendmsg` and `tls_sw_recvmsg` (line 2042). The flow: receive plaintext from user via `tcp_sendmsg` interception, accumulate into a record, AES-GCM encrypt with the kernel's crypto API, send the ciphertext via `tcp_sendmsg`.
+- **`net/tls/tls_sw.c`** — software encryption path. Read `tls_sw_sendmsg` (line 1288) and `tls_sw_recvmsg` (line 2060). The flow: receive plaintext from user via `tcp_sendmsg` interception, accumulate into a record, AES-GCM encrypt with the kernel's crypto API, send the ciphertext via `tcp_sendmsg`.
 
-- **`net/tls/tls_device.c:1062`** — `tls_set_device_offload`. The hardware path. Tells the NIC about the per-flow key. The driver implements `ndo_tls_dev_add` to register the flow with the hardware. Read this if you want to understand how kernel ↔ NIC TLS coordination works.
+- **`net/tls/tls_device.c:1062`** — `tls_set_device_offload`. The hardware path. Tells the NIC about the per-flow key. The driver implements `tls_dev_add` (a member of `struct tlsdev_ops`) to register the flow with the hardware. Read this if you want to understand how kernel ↔ NIC TLS coordination works.
 
 - **`net/tls/tls_device_fallback.c`** — what happens when hardware offload is partially failing (e.g., a packet has to be retransmitted but the NIC's key state has advanced). The kernel handles those records in software.
 

@@ -19,7 +19,7 @@ Both iptables and nftables hook into the same Netfilter framework (Day 20). They
 
 - **One tool**: `nft`. Single syntax for inet (IPv4+IPv6 unified), arp, bridge, netdev (per-iface).
 - **Expression VM**: rules compile to compact expression sequences evaluated by `nft_do_chain` (`net/netfilter/nf_tables_core.c:250`). Each rule is a sequence of `nft_expr` ops; common expressions have fast eval paths, but this is not a BPF-style JIT.
-- **Native sets and maps**: hash sets, range sets, IP-prefix tries, key→value maps as first-class types. Membership tests are O(1) instead of O(N) linear walks.
+- **Native sets and maps**: hash sets, interval/range sets (red-black tree), concatenated-range sets (pipapo), key→value maps as first-class types. Membership tests are O(1) instead of O(N) linear walks.
 - **Atomic updates**: changes are applied transactionally via netlink; no full-table rewrite for one rule add.
 - **Implementation**: `nft_do_chain` (`net/netfilter/nf_tables_core.c:250`). Reads the chain's expression list, evaluates each.
 
@@ -203,7 +203,7 @@ sudo iptables -D INPUT -p tcp --dport 12346 -j DROP   # clean up exactly this ru
 
 - **`net/netfilter/nf_tables_core.c:250`** — `nft_do_chain`. The runtime VM. Read end to end (~100 lines). Notice the `nft_regs` structure — each chain run gets a fresh 16-register file. The expression eval pattern (`expr->ops->eval(expr, regs, pkt)`) is how each kind of expression contributes.
 
-- **`net/netfilter/nf_tables_api.c`** — netlink interface for adding/removing rules. ~10000 lines. Don't read straight; key entries: `nf_tables_newrule`, `nf_tables_delrule`, `nf_tables_dump_chain`. This is where transactional updates are processed.
+- **`net/netfilter/nf_tables_api.c`** — netlink interface for adding/removing rules. ~10000 lines. Don't read straight; key entries: `nf_tables_newrule`, `nf_tables_delrule`, `nf_tables_dump_chains`. This is where transactional updates are processed.
 
 - **`net/netfilter/nft_*.c`** — individual expression implementations. Pick a few short ones to read:
   - `nft_immediate.c` — sets a register value or a verdict.
@@ -212,11 +212,11 @@ sudo iptables -D INPUT -p tcp --dport 12346 -j DROP   # clean up exactly this ru
   - `nft_lookup.c` — set membership test.
   - `nft_meta.c` — loads skb metadata.
 
-  Each is short (~100–300 lines) and self-contained; reading 2-3 teaches you the expression model.
+  Sizes vary (`nft_lookup.c` ~290 lines; `nft_payload.c` and `nft_meta.c` over 1000), but each is self-contained; reading 2-3 teaches you the expression model.
 
 - **`include/uapi/linux/netfilter/nf_tables.h`** — UAPI definitions. `enum nft_verdicts`, expression IDs, etc.
 
-- **`net/ipv4/netfilter/ip_tables.c:223`** — `ipt_do_table`. The legacy iptables runtime. Compare against `nft_do_chain`. Notice it has its own micro-loop with `xt_match` and `xt_target` plugging in. ~250 lines for the hot path.
+- **`net/ipv4/netfilter/ip_tables.c:223`** — `ipt_do_table`. The legacy iptables runtime. Compare against `nft_do_chain`. Notice it has its own micro-loop with `xt_match` and `xt_target` plugging in. ~140 lines for the hot path.
 
 - **`man nft`** — comprehensive but dense. Use the **nftables wiki** (https://wiki.nftables.org) for examples.
 

@@ -33,7 +33,7 @@ A neighbour entry walks through states:
 - **STALE** — has MAC but old. Next packet triggers a confirmation probe.
 - **DELAY** — sent a packet expecting the L4 to confirm reachability quickly.
 - **PROBE** — actively probing via ARP.
-- **FAILED** — ARP timed out (default 3 retries with 1s spacing).
+- **FAILED** — ARP timed out. Probe limits are state-dependent: INCOMPLETE resolution allows up to 6 probes (3 multicast + 3 unicast), PROBE state up to 3 (unicast only), each spaced by `retrans_time` (1s default).
 
 The state machine is the canonical answer to "why does my first ping take 1ms longer than subsequent ones?" — first packet goes through INCOMPLETE → REACHABLE; later packets hit a cached entry directly.
 
@@ -49,7 +49,7 @@ If the lookup hits FAILED, the skb is dropped and the kernel may send an ICMP "D
 >
 > **Q: What is "gratuitous ARP"?**
 >
-> A: A node announcing its MAC unsolicited (e.g., on interface up, or after a failover). Linux sends one with `arp_send(ARPOP_REPLY, ETH_P_ARP, ...)` from `arp_solicit`. It updates other nodes' caches without them having to ask.
+> A: A node announcing its MAC unsolicited (e.g., on interface up, or after a failover). Linux sends one as an `arp_send(ARPOP_REQUEST, ETH_P_ARP, ...)` with target IP == source IP, from `inetdev_send_gratuitous_arp` in `net/ipv4/devinet.c`. It updates other nodes' caches without them having to ask.
 >
 > **Q: What's `arp_announce` for?**
 >
@@ -57,7 +57,7 @@ If the lookup hits FAILED, the skb is dropped and the kernel may send an ICMP "D
 >
 > **Q: Why are there gc_thresh1/2/3?**
 >
-> A: gc_thresh3 is a hard cap; new ARP attempts beyond it fail. Heavy-traffic gateways routinely hit the default 1024 — symptom: "Neighbour table overflow" in dmesg. Bump via sysctl.
+> A: gc_thresh3 is a hard cap; new ARP attempts beyond it fail. Heavy-traffic gateways routinely hit the default 1024 — symptom: `neighbor table overflow!` in dmesg. Bump via sysctl.
 
 ## Today's experiment
 
@@ -137,16 +137,16 @@ ip neigh show 10.99.99.99
 ## What to read in the kernel
 
 - **`net/core/neighbour.c`** — the generic subsystem. Read `neigh_lookup` (line 625), `___neigh_create` (line 646), `neigh_update`, `neigh_timer_handler` (the state machine).
-- **`net/ipv4/arp.c`** — ARP-specific protocol. `arp_rcv`, `arp_send`, `arp_solicit`. ~1000 lines.
+- **`net/ipv4/arp.c`** — ARP-specific protocol. `arp_rcv`, `arp_send`, `arp_solicit`. ~1500 lines.
 - **`include/net/neighbour.h`** — `struct neighbour` (line 140), the NUD_* state constants.
-- **`Documentation/networking/neighbour.rst`** — official guide; one-time read.
+- **`Documentation/networking/ip-sysctl.rst`** — the `neigh.*` sysctls (gc thresholds, probe counts, timers); pair it with the source itself.
 
 ---
 
 ## Bullet Points
 
 - The neighbour subsystem (ARP for IPv4, NDP for IPv6) lives at `net/core/neighbour.c`.
-- Entries cycle through **NONE → INCOMPLETE → REACHABLE → STALE → PROBE → REACHABLE/FAILED**.
+- Entries cycle through **NONE → INCOMPLETE → REACHABLE → STALE → DELAY → PROBE → REACHABLE/FAILED**.
 - TX-side lookup is via **`neigh_lookup`** in `ip_finish_output2`.
 - Skbs queue on `arp_queue` while a neighbour is INCOMPLETE.
 - **GC thresholds** (`gc_thresh1/2/3`) cap entry count; default 128/512/1024.
@@ -162,7 +162,7 @@ You set `net.ipv4.neigh.default.gc_thresh3=128` on a server with 500 active clie
 <details>
 <summary>Click to reveal answer</summary>
 
-**Answer:** "Neighbour table overflow" messages in `dmesg`. New connections to peers whose ARP entries got evicted will hang briefly while ARP re-resolves; if entries are evicted faster than they're re-resolved, traffic stalls. The fix is to raise `gc_thresh3` (and `gc_thresh1/2` proportionally — typically 4096/8192/16384 for a busy server). The kernel doesn't drop packets directly because of this; it just refuses to create new entries, which manifests as resolution failures.
+**Answer:** `neighbor table overflow!` messages in `dmesg`. New connections to peers whose ARP entries got evicted will hang briefly while ARP re-resolves; if entries are evicted faster than they're re-resolved, traffic stalls. The fix is to raise `gc_thresh3` (and `gc_thresh1/2` proportionally — typically 4096/8192/16384 for a busy server). The kernel doesn't drop packets directly because of this; it just refuses to create new entries, which manifests as resolution failures.
 
 </details>
 

@@ -23,12 +23,12 @@ A hands-on, experiment-driven path through the Linux kernel network stack. Read 
 
 ## How to use this
 
-Each day is ~75–90 minutes. Format:
+Each day is ~75–90 minutes. Most days follow this shape (loosely — not every section appears every day):
 
 1. **Concepts introduced today** — what the new structures and paths are.
-2. **Code reading** — specific files and functions in your kernel source checkout. Line numbers verified against kernel 7.1.
-3. **Live experiments** — what to trace/modify/observe to see the structures running.
-4. **What to break** — sysctls or configurations that demonstrate the effect.
+2. **What to read in the kernel** — specific files and functions in your kernel source checkout. Line numbers verified against kernel 7.1.
+3. **Today's experiment** — what to trace/modify/observe to see the structures running.
+4. **What to break** — sysctls or configurations that demonstrate the effect (sometimes folded into the experiment).
 5. **Bullet Points**.
 6. **Check question**.
 

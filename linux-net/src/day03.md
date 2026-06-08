@@ -29,7 +29,7 @@ For TCP that's **`tcp_sendmsg`** at `net/ipv4/tcp.c:1450`. The function locks th
 
 `tcp_sendmsg_locked` does **two distinct things**:
 
-1. **Copy bytes from userspace into kernel skbs.** Allocate skbs via `sk_stream_alloc_skb`, copy data via `copy_from_iter` or zero-copy if MSG_ZEROCOPY. Append to `sk->sk_write_queue`.
+1. **Copy bytes from userspace into kernel skbs.** Allocate skbs via `tcp_stream_alloc_skb`, copy data via `copy_from_iter` or zero-copy if MSG_ZEROCOPY. Append to `sk->sk_write_queue`.
 
 2. **Maybe trigger transmission.** Calls `tcp_push` which eventually invokes `tcp_write_xmit` (line 2962 in `tcp_output.c`).
 
@@ -71,13 +71,13 @@ That's where **two netfilter hooks** fire: `NF_INET_LOCAL_OUT` (just after IP he
 
 Steps inside `__dev_queue_xmit`:
 
-1. **Pick a TX queue.** `netdev_pick_tx` uses `skb->queue_mapping`, RFS hints, or hash. Modern NICs have many TX queues for parallelism.
-2. **Find the root qdisc** on that queue (`txq->qdisc`).
-3. **tcx/tc-bpf egress hook** runs here (after the qdisc lookup, before enqueue).
+1. **tcx/tc-bpf egress hook** runs first (before TX queue selection and the qdisc lookup).
+2. **Pick a TX queue.** `netdev_pick_tx` uses `skb->queue_mapping`, RFS hints, or hash. Modern NICs have many TX queues for parallelism.
+3. **Find the root qdisc** on that queue (`txq->qdisc`).
 4. **Enqueue**: `q->enqueue(skb, q, &to_free)`.
 5. **Pump**: `qdisc_run` → `__qdisc_run` → `q->dequeue` → `sch_direct_xmit` → `netdev_start_xmit` → driver's `ndo_start_xmit`.
 
-Default qdisc on most modern systems is `fq_codel` (set in `/sys/class/net/<dev>/queues/tx-N/`). Day 23 covers qdiscs in detail.
+Default qdisc on most modern systems is `fq_codel` (selected via the `net.core.default_qdisc` sysctl; the kernel's built-in default is still `pfifo_fast`). Day 23 covers qdiscs in detail.
 
 ## Stage 5: driver and hardware
 
@@ -156,7 +156,7 @@ sudo tc qdisc replace dev eth0 root fq_codel
 
 - **`net/ipv4/tcp.c`** — `tcp_sendmsg` (line 1450), `tcp_sendmsg_locked` (line 1120). The core of TCP user-side semantics.
 - **`net/ipv4/tcp_output.c`** — `tcp_write_xmit` (line 2962), `tcp_transmit_skb`. Decides what to send when.
-- **`net/ipv4/ip_output.c`** — `ip_queue_xmit` (line 546), `ip_local_out` (line 125), `ip_finish_output2`, `ip_finish_output_neigh`.
+- **`net/ipv4/ip_output.c`** — `ip_queue_xmit` (line 546), `ip_local_out` (line 125), `ip_finish_output2`.
 - **`net/core/dev.c`** — `__dev_queue_xmit` (line 4766), the qdisc dance.
 - **`net/sched/sch_generic.c`** — `__qdisc_run`, `sch_direct_xmit`, the qdisc pump.
 - **`include/linux/netdevice.h`** — `struct net_device_ops` with `ndo_start_xmit` (line 1441).
@@ -171,7 +171,7 @@ sudo tc qdisc replace dev eth0 root fq_codel
 - **`tcp_write_xmit`** decides what to send *now* based on cwnd, snd_wnd, Nagle, TSO size.
 - **Two netfilter hooks** on TX: `NF_INET_LOCAL_OUT` and `NF_INET_POST_ROUTING`.
 - **Neighbour resolution** (ARP/NDP) happens in `ip_finish_output2`.
-- **`__dev_queue_xmit`** picks a TX queue, runs tcx/tc-bpf egress, enqueues to qdisc.
+- **`__dev_queue_xmit`** runs tcx/tc-bpf egress, picks a TX queue, enqueues to qdisc.
 - Default qdisc on modern Linux is **`fq_codel`**.
 - Driver's **`ndo_start_xmit`** is the final hand-off to hardware.
 
