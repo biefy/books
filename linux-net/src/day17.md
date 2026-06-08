@@ -16,11 +16,13 @@ The hard part is *suspecting loss* without overreacting to mere reordering.
 
 ### 1. RTO — Retransmission Timeout
 
-The classical mechanism. The sender maintains a smoothed RTT estimate (`srtt_us`) and an RTT variance (`rttvar_us`). The RTO is approximately:
+The classical mechanism. The sender maintains a smoothed RTT estimate (`srtt_us`) and an RTT variance (`rttvar_us`). The kernel's RTO calculation (`__tcp_set_rto`, `include/net/tcp.h`) is literally:
 
 ```
-RTO = srtt + rttvar    (clamped to [200ms, 120s])
+RTO = (srtt_us >> 3) + rttvar_us    (clamped to [200ms, 120s])
 ```
+
+This is the RFC 6298 form `RTO = srtt + 4·rttvar`: `srtt_us` is stored ×8 (hence `>> 3`), and `rttvar_us` is already maintained on a ×4 scale of the mean deviation — so the classic ×4 weight is *baked into* `rttvar_us` and the kernel just adds the two fields. (Don't multiply by 4 again.)
 
 If no ACK arrives within RTO of the *first* unacked segment, the timer fires:
 
