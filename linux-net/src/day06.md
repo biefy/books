@@ -6,7 +6,7 @@
 
 ## What L2 means in Linux
 
-The "Layer 2" code in Linux is small but ubiquitous. Every received frame passes through it; every transmitted frame has its Ethernet header built there. The implementation lives mostly in **`net/ethernet/eth.c`** (~500 lines).
+The "Layer 2" code in Linux is small but ubiquitous. Every received frame passes through it; every transmitted frame has its Ethernet header built there. The implementation lives mostly in **`net/ethernet/eth.c`** (~640 lines).
 
 The single most important function in this layer is `eth_type_trans` — called by every Ethernet driver on RX, every time.
 
@@ -16,7 +16,7 @@ The single most important function in this layer is `eth_type_trans` — called 
 
 `eth_type_trans(skb, dev)` (`net/ethernet/eth.c:155`) does five things in tight succession:
 
-1. **Set `skb->mac_header = 0`** — record where the Ethernet header is (it's at `skb->data` right now).
+1. **`skb_reset_mac_header(skb)`** — record where the Ethernet header is by storing the offset of `skb->data` within the buffer (`skb->data - skb->head`); it's at `skb->data` right now.
 2. **Read `eth = (struct ethhdr *)skb->data`**.
 3. **Set `skb->pkt_type`** based on destination MAC:
    - `PACKET_BROADCAST` if dst is `ff:ff:ff:ff:ff:ff`.
@@ -38,7 +38,7 @@ The kernel handles VLANs in two ways:
 
 1. **HW acceleration** — most modern NICs strip the tag on RX and stash it in `skb->vlan_tci` + `skb->vlan_proto`. The stack sees an untagged frame plus metadata. Test with `skb_vlan_tag_present(skb)`. On TX, the kernel hands the NIC a tagged-or-not skb and the NIC adds the tag if requested.
 
-2. **Software path** — for NICs without HW VLAN, or for stacked VLANs (QinQ), `vlan_skb_recv` in `net/8021q/vlan_core.c` parses the tag and dispatches.
+2. **Software path** — for NICs without HW VLAN, or for stacked VLANs (QinQ), `vlan_do_receive` in `net/8021q/vlan_core.c` parses the tag and dispatches.
 
 A **VLAN device** (`eth0.100`) is a virtual netdev that filters frames by VLAN ID:
 
@@ -82,7 +82,7 @@ ping -c 1 8.8.8.8
 sudo killall bpftrace
 ```
 
-You'll see actual MAC addresses and EtherTypes flying through.
+You'll see actual MAC addresses and EtherTypes flying through. Note that `h_proto` is `__be16` (big-endian on the wire), so on a little-endian host the raw `%04x` print is byte-swapped — IP shows as `0x0008` rather than `0x0800`. Mentally swap the bytes, or wrap the field in `bswap()`.
 
 ### Create a VLAN and watch traffic
 
@@ -133,7 +133,7 @@ Now `eth_type_trans` sees this MAC as "us." Frames addressed here are PACKET_HOS
 
 ## What to read in the kernel
 
-- **`net/ethernet/eth.c`** — `eth_type_trans` (line 155), `eth_header`, header_ops. The whole file is ~500 lines.
+- **`net/ethernet/eth.c`** — `eth_type_trans` (line 155), `eth_header`, header_ops. The whole file is ~640 lines.
 - **`include/linux/if_ether.h`** — `struct ethhdr`, EtherType constants.
 - **`net/8021q/vlan_core.c`** — VLAN reception path.
 - **`net/8021q/vlan_dev.c`** — VLAN device implementation.
@@ -159,7 +159,7 @@ A frame arrives at eth0 with VLAN tag 100, but no `eth0.100` device exists. What
 <details>
 <summary>Click to reveal answer</summary>
 
-**Answer:** The kernel hits `vlan_skb_recv` (or its equivalent in HW-accelerated path), sees no registered VLAN device for (eth0, 100), and drops the frame — incrementing the `vlans_dropped` stat. The frame doesn't bubble up to L3. To accept untagged "unknown VLAN" traffic, you'd configure the bridge with VLAN-aware filtering, or use `ip link set eth0 type bridge_slave vlan_tunnel on`.
+**Answer:** `vlan_do_receive()` looks up a registered VLAN device for (eth0, 100), finds none, and returns false. The frame isn't redirected to a VLAN netdev; `__netif_receive_skb_core` marks it `PACKET_OTHERHOST` and it's later dropped in `ip_rcv`, which bumps the `rx_otherhost_dropped` core stat (via `dev_core_stats_rx_otherhost_dropped_inc`). It doesn't bubble up to L3. To accept untagged "unknown VLAN" traffic, you'd configure the bridge with VLAN-aware filtering, or use `ip link set eth0 type bridge_slave vlan_tunnel on`.
 
 </details>
 

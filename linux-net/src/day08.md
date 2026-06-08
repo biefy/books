@@ -12,12 +12,11 @@ That speed comes from the **FIB** (Forwarding Information Base) and the **LC-tri
 
 ![Route lookup](diagrams/day08_route_lookup.png)
 
-For an incoming packet, `ip_rcv_finish` calls `ip_route_input_noref` (`net/ipv4/route.c:2546`) which:
+For an incoming packet, `ip_rcv_finish` (via `ip_rcv_finish_core`) first checks whether the skb already has a dst attached (`skb_valid_dst` → fast path). If not, it calls `ip_route_input_noref` (`net/ipv4/route.c:2546`) which:
 
-1. **Checks the cache** (skb already has a dst attached → fast path).
-2. Calls `fib_lookup` → walks `fib_rules` to pick a table.
-3. Calls `fib_table_lookup` (`net/ipv4/fib_trie.c:1420`) on that table — the LC-trie walk.
-4. Builds an `rtable` (route entry) from the result, attaches it to the skb via `skb_dst_set`.
+1. Calls `fib_lookup` → walks `fib_rules` to pick a table.
+2. Calls `fib_table_lookup` (`net/ipv4/fib_trie.c:1420`) on that table — the LC-trie walk.
+3. Builds an `rtable` (route entry) from the result, attaches it to the skb via `skb_dst_set`.
 
 The skb's `dst->input` function pointer dispatches the next step:
 - `ip_local_deliver` if the packet is for us.
@@ -33,7 +32,7 @@ The lookup key is a `struct flowi4`:
 struct flowi4 {
     __be32  daddr;
     __be32  saddr;
-    __u8    flowi4_tos;
+    dscp_t  flowi4_dscp;
     __u32   flowi4_mark;
     int     flowi4_oif;
     int     flowi4_iif;
@@ -176,7 +175,7 @@ Mostly zeros nowadays — the cache is gone, but the proc file remains for compa
 - **`net/ipv4/fib_rules.c`** — fib_rules implementation.
 - **`include/net/flow.h`** — `struct flowi4`.
 - **`include/net/ip_fib.h`** — `struct fib_result`, `struct fib_nh_common`.
-- **`Documentation/networking/policy-routing.rst`** — official guide.
+- **`Documentation/networking/fib_trie.rst`** — LC-trie internals; **`Documentation/networking/ip-sysctl.rst`** — routing-related sysctls.
 
 ---
 
@@ -198,7 +197,7 @@ You add `ip route add 10.0.0.0/24 via 192.168.1.1 dev eth0`. A packet with daddr
 <details>
 <summary>Click to reveal answer</summary>
 
-**Answer:** `ip_rcv_finish` → `ip_route_input_noref` → `fib_lookup` walks rules; first match is the kernel's default `from all lookup main`. `fib_table_lookup(main, &flowi4)` walks the LC-trie, hits the `10.0.0.0/24` entry. `fib_result` has `prefix=10.0.0.0`, `prefixlen=24`, `nhc->nh_gw4=192.168.1.1`, `nhc->nh_dev=eth0`. The route is the gateway form, so the kernel knows to ARP for 192.168.1.1 (Day 7's neighbour subsystem) when transmitting. An rtable is built and attached to the skb; `dst->input = ip_forward` (assuming we're not 10.0.0.5 ourselves), and forwarding proceeds.
+**Answer:** `ip_rcv_finish` → `ip_route_input_noref` → `fib_lookup` walks rules; first match is the kernel's default `from all lookup main`. `fib_table_lookup(main, &flowi4)` walks the LC-trie, hits the `10.0.0.0/24` entry. `fib_result` has `prefix=10.0.0.0`, `prefixlen=24`, `nhc->nhc_gw.ipv4=192.168.1.1`, `nhc->nhc_dev=eth0`. The route is the gateway form, so the kernel knows to ARP for 192.168.1.1 (Day 7's neighbour subsystem) when transmitting. An rtable is built and attached to the skb; `dst->input = ip_forward` (assuming we're not 10.0.0.5 ourselves), and forwarding proceeds.
 
 </details>
 

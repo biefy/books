@@ -87,7 +87,7 @@ You can attach both to the same interface. They don't interfere — XDP runs at 
 - **No fragmentation handling.** XDP sees the raw frame as the NIC delivered it; it can't reassemble IP fragments (would require buffering).
 - **No GRO.** GRO happens after XDP. If you want coalesced superpackets, see them in tc-bpf, not XDP.
 - **Limited mutation.** You can `bpf_xdp_adjust_head` to add/remove bytes at the front, `bpf_xdp_adjust_tail` for the back. But you can't reach inside arbitrarily without bounds checking.
-- **No skb metadata.** No conntrack info, no netfilter mark, no socket lookup (until kernel 5.6 added `bpf_sk_lookup_tcp/udp`).
+- **No skb metadata.** No conntrack info, no netfilter mark, no socket lookup (until kernel 5.0 added `bpf_sk_lookup_tcp/udp` to the XDP hook).
 
 ## Today's experiment
 
@@ -144,11 +144,11 @@ sudo bpftool prog show
 
 - **`net/core/filter.c`** — search `xdp_func_proto`. The helper allowance table for XDP programs (which BPF helpers XDP can call).
 
-- **`drivers/net/ethernet/intel/ixgbe/ixgbe_xdp.c`** (or other drivers) — concrete native-XDP implementation. Look at `ixgbe_run_xdp` to see how a driver calls into BPF in its NAPI poll.
+- **`drivers/net/ethernet/intel/ixgbe/ixgbe_main.c`** (or other drivers) — concrete native-XDP implementation. Look at `ixgbe_run_xdp` (line 2400) to see how a driver calls into BPF in its NAPI poll.
 
 - **`drivers/net/veth.c`** — search `veth_xdp`. veth's XDP support; useful because it's simpler than NIC drivers.
 
-- **`Documentation/networking/xdp.rst`** — official guide. Brief.
+- **`Documentation/networking/af_xdp.rst`** (and `xdp-rx-metadata.rst`) — official guide. Brief.
 
 - **`tools/testing/selftests/bpf/progs/test_xdp_*.c`** — example programs.
 

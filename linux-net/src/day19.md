@@ -60,73 +60,19 @@ Default semantics: when an event fires on an FD that has multiple `epoll_wait` w
 
 (Aside: `SO_REUSEPORT` — Day 24 — is a more powerful alternative. Each worker has its own listening socket; the kernel hashes incoming SYNs across them, so each worker's epoll only ever sees SYNs that were destined for *it*.)
 
-## io_uring — the completion model
+## io_uring — the completion model (preview)
 
-The mental model: *"Do this network operation for me. Tell me when it's done."*
-
-io_uring inverts the syscall model. Userspace and kernel share two memory-mapped ring buffers:
+epoll's model is *readiness*: "tell me when this FD is ready; I'll do the syscall myself." io_uring inverts it to *completion*: **"do this network operation for me — tell me when it's done."** Instead of learning which FD is ready and then issuing `recv`/`send` yourself, you hand the kernel the whole operation through two memory-mapped ring buffers:
 
 - **Submission Queue (SQ)**: userspace pushes Submission Queue Entries (SQEs) describing work to do.
-- **Completion Queue (CQ)**: kernel pushes Completion Queue Entries (CQEs) when work finishes.
+- **Completion Queue (CQ)**: the kernel pushes Completion Queue Entries (CQEs) when the work finishes.
 
-```c
-struct io_uring ring;
-io_uring_queue_init(256, &ring, 0);
+The practical contrast that matters today:
 
-struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
-io_uring_prep_recv(sqe, sock_fd, buf, sizeof(buf), 0);
-io_uring_submit(&ring);
+- **epoll: 2 syscalls per I/O** — `epoll_wait` to learn readiness, then `recv`/`send`.
+- **io_uring: ~1 syscall per *batch*** (`io_uring_enter` carrying many SQEs at once), or *zero* in steady state with `IORING_SETUP_SQPOLL` (a kernel thread polls the SQ).
 
-struct io_uring_cqe *cqe;
-io_uring_wait_cqe(&ring, &cqe);
-/* cqe->res = bytes received (or negative errno) */
-io_uring_cqe_seen(&ring, cqe);
-```
-
-Compared to epoll:
-
-- **Epoll: 2 syscalls per I/O** (epoll_wait + recv).
-- **io_uring: 1 syscall per batch** (submit, optionally batched with many SQEs at once). Or *zero* syscalls in steady state with kernel polling mode (`IORING_SETUP_SQPOLL`) — kernel thread polls the SQ.
-
-For request rates above ~100k/sec, this matters. For lower rates, the difference is invisible.
-
-### Network operations in io_uring
-
-`io_uring/net.c` has the kernel-side implementations. Common ops (in `enum io_uring_op`):
-
-- **`IORING_OP_RECV` / `SEND`** (`io_uring_prep_recv` / `io_uring_prep_send`) — equivalent to recv()/send() but submitted async.
-- **`IORING_OP_RECVMSG` / `SENDMSG`** — equivalent to recvmsg()/sendmsg(); supports control messages, scatter-gather.
-- **`IORING_OP_ACCEPT`** — async accept(). One CQE per accepted connection.
-- **`IORING_OP_CONNECT`** — async connect(). CQE on completion.
-
-### Multishot recv (5.18+)
-
-`IORING_RECV_MULTISHOT` flag: one SQE submission, *many* CQEs as data arrives. The kernel keeps the recv "armed" — every time data is available it produces another CQE. Saves the per-recv submission cost; effectively turns recv into a streaming operation.
-
-### Provided buffers (5.19+)
-
-Instead of providing a buffer with each recv, register a pool of buffers. Recvs draw from the pool when ready. Reduces buffer allocation churn for high-rate servers.
-
-### Zero-copy send (6.0+)
-
-`IORING_OP_SEND_ZC` / `IORING_OP_SENDMSG_ZC` — kernel pins user pages and DMAs the data to the NIC without copying. Two CQEs per send:
-
-1. The first when the kernel queues the send.
-2. The second when the user pages are no longer in use (you can free/reuse the buffer).
-
-Significantly higher throughput for big transfers; more complex flow control.
-
-## When to choose which
-
-For most servers, **epoll is fine**. It's been the standard for two decades; the implementation is mature; the API is small enough to use correctly. Notable users: nginx, redis, node.js (via libuv), most Python/Go/Rust async runtimes.
-
-**io_uring shines** when:
-- Sustained > 100k operations/sec per thread.
-- You're already doing batched I/O (e.g., a database fsync alongside sends).
-- You want zero-copy send for large transfers.
-- You can pay the development complexity (bigger API surface, more failure modes).
-
-Notable io_uring adopters: ScyllaDB, some experimental nginx forks, some Kubernetes runtimes, parts of QEMU. Adoption is growing but slowly — epoll's "just works" reputation is hard to beat.
+For sustained request rates above ~100k/sec per thread that saving is real; below that it's invisible, and epoll's smaller, battle-tested API is the right default (nginx, redis, node.js via libuv, and most Python/Go/Rust async runtimes all ride epoll). Hold onto the one distinction — **epoll signals readiness; io_uring signals completion** — and pick it up in depth on **Day 28**, which covers the full network op set, multishot recv, provided buffers, and zero-copy send.
 
 ## Today's experiment
 
@@ -143,24 +89,7 @@ nginx &
 ab -n 100000 -c 100 http://127.0.0.1/   # if you have apache-bench
 ```
 
-Watch how often epoll_wait returns and how many events per call.
-
-### Try a small io_uring example
-
-```bash
-sudo apt install liburing-dev
-# Sample: hostname pings via io_uring. From the liburing examples directory.
-ls /usr/share/doc/liburing/examples/
-```
-
-Or write a minimal accept loop:
-
-```c
-#include <liburing.h>
-/* ... use io_uring_prep_accept on a listening socket, batch many ... */
-```
-
-The liburing API is friendly; the underlying io_uring syscalls (`io_uring_setup`, `io_uring_enter`, `io_uring_register`) are wrapped.
+Watch how often epoll_wait returns and how many events per call. (For the io_uring side — an async accept loop plus tracing the kernel-side net ops — see Day 28's experiment.)
 
 ## What to read in the kernel
 
@@ -174,13 +103,7 @@ The liburing API is friendly; the underlying io_uring syscalls (`io_uring_setup`
 
 - **`fs/eventpoll.c:1249`** — `ep_poll_callback`. The wait-queue callback that gets called when a registered FD becomes ready. Short (~50 lines). This is where readiness gets translated into an epoll event.
 
-- **`io_uring/io_uring.c`** — io_uring main. Big file (~5000 lines). Don't read straight; trace specific ops. Key entry: `io_uring_enter` syscall handler.
-
-- **`io_uring/net.c`** — networking ops. `io_send_setup` (line 349), `io_sendmsg_setup` (line 395), and the corresponding completion handlers. Read these to see how a SUBMIT_QUEUE_ENTRY translates to a real `tcp_sendmsg` (or its async equivalent) call.
-
-- **`Documentation/networking/io_uring.rst`** — official guide. Brief but pointed.
-
-- **liburing repo** (https://github.com/axboe/liburing) — the userspace wrappers. The `examples/` directory has runnable code for every common pattern.
+- **io_uring** — for the `io_uring/net.c` and `io_uring/io_uring.c` entry points, the liburing examples, and the man pages, see Day 28's "What to read." Today, focus on the epoll path above.
 
 ## Bullet Points
 
@@ -188,11 +111,8 @@ The liburing API is friendly; the underlying io_uring syscalls (`io_uring_setup`
 - Three syscalls: `epoll_create1`, `epoll_ctl`, `epoll_wait`.
 - **Level-triggered (default)** vs **edge-triggered (`EPOLLET`)** — ET requires draining to EAGAIN.
 - **`EPOLLEXCLUSIVE`** — wake only one waiter per event. Solves thundering herd.
-- **io_uring** = completion model. "Do this for me, tell me when done." Higher throughput at higher complexity.
-- Net ops: `IORING_OP_RECV/SEND/RECVMSG/SENDMSG/ACCEPT/CONNECT`.
-- **Multishot recv** (5.18+) — one submission, many completions.
-- **Zero-copy send** (6.0+) — pin user pages, no copy. Two CQEs per send.
-- For most servers, epoll. For very high-throughput batched workloads, io_uring.
+- **io_uring** = completion model: submit ops, collect completions; ~1 syscall per batch (zero with `SQPOLL`). Covered in depth on **Day 28**.
+- For most servers, epoll. For sustained > 100k ops/sec per thread or batched workloads, io_uring.
 
 ## Check question
 
@@ -213,4 +133,4 @@ Why is `EPOLLEXCLUSIVE` important for accepting connections in a multi-worker se
 
 You can now read the L4 layer: socket lifecycles, UDP, TCP states + congestion control + retransmission, sockopts, the modern wait APIs.
 
-Phase 4 (Days 20–26) goes into the kernel's network subsystems: netfilter, conntrack, traffic control, kTLS, MPTCP.
+Phase 4 (Days 20–26) goes into the kernel's network subsystems: netfilter, nftables, conntrack, traffic control, `SO_REUSEPORT`, kTLS, MPTCP.

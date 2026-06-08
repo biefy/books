@@ -55,7 +55,7 @@ The GRO engine (`net/core/gro.c`) compares the new skb against a list of "in fli
 
 Flush triggers:
 - Different flow arrives.
-- Timeout (`net.core.gro_flush_timeout`).
+- Timeout (per-device `/sys/class/net/<dev>/gro_flush_timeout`, or per-NAPI via netlink).
 - NAPI poll exits.
 - Special flag (FIN, RST, PSH).
 

@@ -4,7 +4,7 @@
 
 ## What a Linux bridge is, and why you have one
 
-A Linux bridge is a software L2 switch. It looks like a netdev (you can give it an IP, ping it, configure routes through it) but its job is to forward Ethernet frames between member ports based on destination MAC. The implementation lives in `net/bridge/` (~10k lines).
+A Linux bridge is a software L2 switch. It looks like a netdev (you can give it an IP, ping it, configure routes through it) but its job is to forward Ethernet frames between member ports based on destination MAC. The implementation lives in `net/bridge/` (~28k lines of top-level `.c`).
 
 You're using bridges constantly even if you've never explicitly created one:
 
@@ -20,7 +20,7 @@ The bridge is the fastest L2-forwarding plane in the kernel — much faster than
 
 A bridge is two structs working together:
 
-- **`struct net_bridge`** (`include/net/net_bridge.h`) — the bridge itself. Holds the FDB hash, port list, VLAN config, IGMP-snooping state, MST/STP state. One of these per `brN` netdev.
+- **`struct net_bridge`** (`net/bridge/br_private.h:495`) — the bridge itself. Holds the FDB hash, port list, VLAN config, IGMP-snooping state, MST/STP state. One of these per `brN` netdev.
 - **`struct net_bridge_port`** — one per slave interface. Holds the `dev` pointer (the underlying netdev), the port number, STP state (DISABLED, LEARNING, FORWARDING, ...), and per-port flags (BPDU guard, root guard, hairpin, etc.).
 
 When you do `ip link set eth0 master br0`, the kernel attaches a `net_bridge_port` to `eth0`, registers `br_handle_frame` as `eth0`'s `rx_handler`, and the slave's frames now flow into bridge logic instead of the normal stack.
@@ -163,7 +163,7 @@ sudo bridge vlan add dev v2p vid 200 pvid untagged
 
 - **`net/bridge/br_input.c:76`** — `br_handle_frame_finish`. The actual switch logic. Walk through it: FDB lookup, multicast handling, forward vs flood decision. This is the function whose performance limits how fast a Linux bridge can switch — every cycle here is on the per-frame hot path.
 
-- **`net/bridge/br_fdb.c:263`** — `br_fdb_find_rcu`. Hash lookup. Note the RCU-protected design — readers don't lock, writers update under `br->hash_lock`. The hash function is `fdb_salt + jhash` over the MAC bytes plus VID.
+- **`net/bridge/br_fdb.c:263`** — `br_fdb_find_rcu`. Hash lookup. Note the RCU-protected design — readers don't lock, writers update under `br->hash_lock`. The FDB is the kernel's `rhashtable` (`br_fdb_rht_params`), keyed on `{vlan_id, MAC}` and looked up via `rhashtable_lookup`.
 
 - **`net/bridge/br_fdb.c:972`** — `br_fdb_update`. The learning path. Notice the "added_by_external_learn" flag — this is how SDN controllers push entries from userspace.
 
@@ -171,9 +171,9 @@ sudo bridge vlan add dev v2p vid 200 pvid untagged
 
 - **`net/bridge/br_forward.c:201`** — `br_flood`. Iterate ports, skip the input port and any with `BR_FLOOD` cleared, send to each via `__br_forward`. Notice the optimization: clones are deferred until the second egress port (the original skb is consumed by the first port).
 
-- **`net/bridge/br_vlan.c`** — VLAN-aware bridge logic. ~1000 lines. The two main functions are `br_vlan_filter_check` (ingress filtering) and `br_handle_vlan` (egress tagging).
+- **`net/bridge/br_vlan.c`** — VLAN-aware bridge logic. ~2350 lines. The two main functions are `br_allowed_ingress` (ingress filtering) and `br_handle_vlan` (egress tagging).
 
-- **`net/bridge/br_stp_*.c`** — STP/RSTP implementation. Skim `br_stp_set_bridge_priority` and `br_stp_become_root` for the high-level state machine.
+- **`net/bridge/br_stp_*.c`** — STP/RSTP implementation. Skim `br_stp_set_bridge_priority` and `br_become_root_bridge` for the high-level state machine.
 
 - **`net/bridge/br_netfilter_hooks.c`** — bridge ↔ netfilter glue. The `br_nf_*` functions hook into PRE_ROUTING and POST_ROUTING for bridged traffic. Read this if you ever need to debug "iptables sees bridged frames" issues.
 

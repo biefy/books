@@ -61,7 +61,7 @@ In `io_uring/net.c`, where the actual `io_send`, `io_recv`, etc. functions live.
 
 Each is async: submit → kernel does the work in the background → CQE posted when done.
 
-### Multishot recv (5.18+)
+### Multishot recv (6.0+)
 
 `IORING_RECV_MULTISHOT` flag on `io_uring_prep_recv`: one submission, *many* CQEs. The kernel keeps the recv "armed" — every time data arrives, a CQE is posted. The recv stays in flight until the socket closes or you cancel it.
 
@@ -97,8 +97,8 @@ When you submit recv with `IOSQE_BUFFER_SELECT`, the kernel picks a buffer from 
 
 **Two CQEs per send:**
 
-1. **Notification of submission**: kernel queued the send. Kernel may or may not have transmitted yet.
-2. **Notification of completion**: user pages are no longer in use; the buffer is safe to free or reuse.
+1. **Send result** (`IORING_CQE_F_MORE`): carries the actual send outcome — bytes sent (`cqe->res`). The data has been handed to the stack, but the NIC may not have DMAed it yet.
+2. **Notification of completion** (`IORING_CQE_F_NOTIF`): user pages are no longer in use; the buffer is safe to free or reuse.
 
 ```c
 sqe = io_uring_get_sqe(&ring);
@@ -196,19 +196,19 @@ Watch the kernel side:
 ```bash
 sudo bpftrace -e '
 fentry:io_send_setup { @send = count(); }
-fentry:io_recvmsg_setup { @recv = count(); }
+fentry:io_recvmsg_prep { @recv = count(); }
 interval:s:5 { print(@send); print(@recv) }'
 ```
 
 ## What to read in the kernel
 
-- **`io_uring/net.c`** — networking ops. ~2500 lines. Key entries:
+- **`io_uring/net.c`** — networking ops. ~1900 lines. Key entries:
   - `io_send_setup` (line 349), `io_send` and friends — the send paths.
   - `io_sendmsg_setup` (line 395), `io_recvmsg`.
   - `io_send_zc`, `io_sendmsg_zc` — zero-copy paths.
   - The `io_kiocb` struct holds per-op state.
 
-- **`io_uring/io_uring.c`** — main entry points: `io_uring_setup`, `io_uring_register`, `io_uring_enter`. Read `io_submit_sqes` for the submission walk and `io_iopoll_getevents` for the completion side.
+- **`io_uring/io_uring.c`** — main entry points: `io_uring_setup`, `io_uring_register`, `io_uring_enter`. Read `io_submit_sqes` for the submission walk and `io_iopoll_check` for the polled-IO completion path (the general completion wait is `io_cqring_wait`, now in `io_uring/wait.c`).
 
 - **`io_uring/poll.c`** — multishot infrastructure. Multishot recv keeps requests in a "ready" state and re-fires CQEs.
 
@@ -216,7 +216,7 @@ interval:s:5 { print(@send); print(@recv) }'
 
 - **liburing repo** (https://github.com/axboe/liburing) — userspace API. The `examples/` directory has annotated code for every common pattern.
 
-- **`Documentation/networking/io_uring.rst`** — kernel docs, brief.
+- **io_uring man pages** (`io_uring_setup(2)`, `io_uring_enter(2)`, and the liburing `man/` pages) — the primary reference docs; the kernel tree has no networking io_uring.rst.
 
 - **External**: Jens Axboe's "io_uring: efficient io" papers/talks; the libuv issue tracker for nuanced behavior comparisons.
 
@@ -225,8 +225,8 @@ interval:s:5 { print(@send); print(@recv) }'
 - **io_uring** = completion model. Submit ops as SQEs; kernel posts CQEs.
 - **One syscall per batch** (`io_uring_enter`) instead of two per I/O (epoll + recv).
 - **Zero syscalls in steady state** with `IORING_SETUP_SQPOLL` (kernel-thread polls).
-- **Multishot recv** (5.18+): one submission, many CQEs as data arrives.
-- **Zero-copy send** (6.0+): `IORING_OP_SEND_ZC`. Two CQEs per send (queued, then "buffer free to reuse").
+- **Multishot recv** (6.0+): one submission, many CQEs as data arrives.
+- **Zero-copy send** (6.0+): `IORING_OP_SEND_ZC`. Two CQEs per send (send result with `F_MORE`, then `F_NOTIF` "buffer free to reuse").
 - **Provided buffers** (5.19+): kernel picks from a registered pool when data arrives.
 - For most servers, **epoll is fine**. io_uring is for sustained > 100k ops/sec or batched workloads.
 - The complexity tax is real; adoption is slow but growing.

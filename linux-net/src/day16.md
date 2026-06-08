@@ -63,7 +63,7 @@ Each algorithm registers an instance via `tcp_register_congestion_control` (`net
 
 ### CUBIC
 
-`net/ipv4/tcp_cubic.c:475` — **was** the Linux default for ~15 years (until 2024). Replaces Reno's linear growth with a cubic function: grows aggressively after a loss, then plateaus near the previous max, then slowly probes upward. Designed for high-BDP networks (long fat pipes) where Reno's linear growth was too slow.
+`net/ipv4/tcp_cubic.c:475` — the Linux default for ~15 years (and still the default in 7.1). Replaces Reno's linear growth with a cubic function: grows aggressively after a loss, then plateaus near the previous max, then slowly probes upward. Designed for high-BDP networks (long fat pipes) where Reno's linear growth was too slow.
 
 - **What:** loss-based AIMD with a cubic growth curve.
 - **Why:** Reno underutilizes long-RTT links; CUBIC fills them faster.
@@ -124,7 +124,7 @@ Some algorithms are kernel modules (`tcp_bbr.ko`, `tcp_dctcp.ko`); load with `mo
 For each TCP connection:
 
 1. **At connect/accept**: `tcp_init_sock` calls `tcp_assign_congestion_control` which picks the algorithm (per-route, per-default, per-app sockopt).
-2. **`init` callback** runs once. Allocates per-sock private state (in `icsk_ca_priv` — 64 bytes of scratch space inside the inet_connection_sock).
+2. **`init` callback** runs once. Allocates per-sock private state (in `icsk_ca_priv` — 104 bytes of scratch space inside the inet_connection_sock).
 3. **Per ACK**: `tcp_ack` (`tcp_input.c`) calls `cong_avoid(sk, ack, acked)`. The algorithm updates `tp->snd_cwnd` based on its model.
 4. **On loss/RTO**: kernel calls `set_state(sk, CA_Loss)` and `ssthresh(sk)`. The algorithm computes the new threshold and sets cwnd accordingly.
 5. **On RTT sample**: kernel calls `pkts_acked(sk, sample)` with the latest RTT measurement. Pure feedback for the algorithm.
@@ -194,13 +194,13 @@ ss -tin
 
 - **`net/ipv4/tcp_cubic.c:475`** — `cubictcp` instance + the implementation. Read the `bictcp_cong_avoid` function and its helpers; the math is mostly in `bictcp_update`. Compare against the CUBIC paper if you want academic precision.
 
-- **`net/ipv4/tcp_bbr.c:1144`** — BBR's full state machine. Long file (~1500 lines) but the structure is clear: `bbr_main` is the entry per ACK; it cycles through states (Startup, Drain, ProbeBW, ProbeRTT). Read the top-of-file comment; it's a textbook explanation.
+- **`net/ipv4/tcp_bbr.c:1144`** — BBR's full state machine. Long file (~1200 lines) but the structure is clear: `bbr_main` is the entry per ACK; it cycles through states (Startup, Drain, ProbeBW, ProbeRTT). Read the top-of-file comment; it's a textbook explanation.
 
 - **`net/ipv4/tcp_dctcp.c:255`** — DCTCP. Short and instructive (~300 lines). Notice how it consumes ECN marks via `in_ack_event`.
 
 - **`net/ipv4/tcp_cong.c:531`** — `tcp_reno`. The reference implementation; ~30 lines. Every other algorithm is "Reno plus extra cleverness."
 
-- **`Documentation/networking/cc-algorithms.rst`** — official guide. Brief.
+- **`Documentation/networking/ip-sysctl.rst`** — the `tcp_congestion_control` sysctl and related knobs. See also `Documentation/networking/dctcp.rst` for DCTCP specifics.
 
 ## Bullet Points
 
@@ -211,7 +211,7 @@ ss -tin
 - **DCTCP** — ECN-based. Datacenter only. Order-of-magnitude lower latency than CUBIC.
 - **Reno** — the reference implementation; ~30 lines. Everyone else "is Reno but...".
 - Switch via sysctl, sockopt (`TCP_CONGESTION`), or per-route. BPF (`sock_ops`) can override per-cgroup.
-- Per-connection state lives in `icsk_ca_priv` (64 bytes inside `inet_connection_sock`).
+- Per-connection state lives in `icsk_ca_priv` (104 bytes inside `inet_connection_sock`).
 
 ## Check question
 

@@ -84,7 +84,7 @@ Do not assume `redundant`, `round-robin`, or `bpf` exists unless it appears in `
 `net/mptcp/pm_*.c` — decides *when* to add/remove subflows. Two flavors:
 
 - **In-kernel**: the kernel's path manager uses the configured endpoints to add subflows on its own.
-- **Userspace**: an application via netlink (`/proc/net/netlink`) drives subflow lifecycle. Used by tools like `mptcpd`.
+- **Userspace**: an application drives subflow lifecycle via the Netlink API (netlink sockets). Used by tools like `mptcpd`.
 
 ## Reliability and recovery
 
@@ -161,7 +161,7 @@ sudo tcpdump -i lo -n -X 'tcp port 9999' | grep -E "MPC|MP_CAPABLE|MP_JOIN|DSS"
 
 - **`net/mptcp/protocol.c`** — main file. Read `__mptcp_socket_create` to see how an msk is built. The msk owns a list of subflows.
 
-- **`net/mptcp/subflow.c`** — subflow lifecycle. `subflow_finish_connect`, `subflow_create_socket`. How a TCP subflow becomes part of an MPTCP connection.
+- **`net/mptcp/subflow.c`** — subflow lifecycle. `subflow_finish_connect`, `mptcp_subflow_create_socket`. How a TCP subflow becomes part of an MPTCP connection.
 
 - **`net/mptcp/sched.c:130`** — `mptcp_init_sched`. The scheduler entry. Read the default scheduler path to see how the kernel picks "best" subflow per send.
 
@@ -205,6 +205,6 @@ If one subflow's RTT spikes severely (e.g., cellular degrades during a transfer)
 
 ## End of Phase 4
 
-You've covered the kernel's network subsystems: netfilter for packet filtering, conntrack for state tracking, traffic control for queueing, SO_REUSEPORT for socket scaling, kTLS for transport crypto, MPTCP for multipath. That's the bulk of "kernel networking infrastructure beyond the basic stack."
+You've covered the kernel's network subsystems: netfilter for packet filtering, nftables for the modern filter API, conntrack for state tracking, traffic control for queueing, SO_REUSEPORT for socket scaling, kTLS for transport crypto, MPTCP for multipath. That's the bulk of "kernel networking infrastructure beyond the basic stack."
 
 Phase 5 (Days 27–30) covers modern features and the capstone.

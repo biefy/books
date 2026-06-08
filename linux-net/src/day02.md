@@ -22,11 +22,10 @@ The softirq runs `net_rx_action` (`net/core/dev.c`), which iterates the per-CPU 
 
 ![NAPI](diagrams/day02_napi.png)
 
-The softirq dispatch loop is in `net/core/dev.c:6980`:
+The softirq dispatch loop is `net_rx_action` in `net/core/dev.c:7914`; the per-NAPI dispatch call is at `dev.c:7953`:
 ```c
-work = napi_poll(napi, budget);
-trace_napi_poll(napi, work, budget);
-gro_normal_list(&napi->gro);
+n = list_first_entry(&list, struct napi_struct, poll_list);
+budget -= napi_poll(n, &repoll);
 ```
 
 `napi_poll` is the driver's poll function (e.g., `e1000_clean_rx_irq`, `mlx5e_poll_rx_cq`). The budget caps how many packets one softirq run can process — default 300 from `net.core.netdev_budget`.
@@ -151,12 +150,12 @@ Watch `softnet_stat` shift, then restore the original budget so the host is not 
 ## What to read in the kernel
 
 - **`net/core/dev.c`** — the central RX dispatch.
-  - `__napi_poll` (~line 6970) — softirq's per-NAPI poll loop.
+  - `__napi_poll` (line 7719) — softirq's per-NAPI poll loop.
   - `__netif_receive_skb_core` (line 5972) — the workhorse.
   - `netif_receive_skb` (line 6454) — entry from drivers/GRO.
 - **`net/core/gro.c`** — GRO machinery. Read `napi_gro_receive`, `gro_list_prepare`, `gro_complete`.
 - **`net/ipv4/ip_input.c`** — IPv4 receive.
-  - `ip_rcv` (line 603), `ip_rcv_core` (line 478), `ip_rcv_finish` (line 478), `ip_local_deliver` (line 250).
+  - `ip_rcv` (line 603), `ip_rcv_core` (line 499), `ip_rcv_finish` (line 478), `ip_local_deliver` (line 250).
 - **`net/ipv4/af_inet.c`** — search `ip_packet_type`, see how `ip_rcv` is registered.
 - **`include/linux/netdevice.h`** — `struct napi_struct`, `struct net_device`'s rx-related fields.
 

@@ -16,17 +16,19 @@ The hard part is *suspecting loss* without overreacting to mere reordering.
 
 ### 1. RTO — Retransmission Timeout
 
-The classical mechanism. The sender maintains a smoothed RTT estimate (`srtt_us`) and an RTT variance (`rttvar_us`). The RTO is approximately:
+The classical mechanism. The sender maintains a smoothed RTT estimate (`srtt_us`) and an RTT variance (`rttvar_us`). The kernel's RTO calculation (`__tcp_set_rto`, `include/net/tcp.h`) is literally:
 
 ```
-RTO = srtt + 4 * rttvar    (clamped to [200ms, 120s])
+RTO = (srtt_us >> 3) + rttvar_us    (clamped to [200ms, 120s])
 ```
+
+This is the RFC 6298 form `RTO = srtt + 4·rttvar`: `srtt_us` is stored ×8 (hence `>> 3`), and `rttvar_us` is already maintained on a ×4 scale of the mean deviation — so the classic ×4 weight is *baked into* `rttvar_us` and the kernel just adds the two fields. (Don't multiply by 4 again.)
 
 If no ACK arrives within RTO of the *first* unacked segment, the timer fires:
 
 - The first unacked segment is retransmitted.
 - The kernel enters CA_Loss state.
-- `cwnd` is reset to 1 MSS (slow start from scratch).
+- `cwnd` is reset to `tcp_packets_in_flight(tp) + 1` — effectively ~1 MSS after a timeout (slow start from scratch).
 - RTO is doubled (exponential backoff).
 
 Implementation: **`tcp_retransmit_timer`** at `net/ipv4/tcp_timer.c:535`. Read this once — it's the canonical loss-recovery entry point.
@@ -81,7 +83,7 @@ Open      → Loss        (RTO fired)
 Loss      → Open        (after RTO recovery)
 ```
 
-Each state has its own logic for what to send and how to count cwnd. ~400 lines; read it once.
+Each state has its own logic for what to send and how to count cwnd. ~114 lines; read it once.
 
 ## ACK clocking and PRR
 
@@ -137,13 +139,13 @@ Where `RX` is total retransmits (cumulative) and `TX` is unacked retransmits in 
 
 - **`net/ipv4/tcp_input.c:3328`** — `tcp_fastretrans_alert`. The state-machine entry called per ACK. Read top to bottom. Notice how it uses `prior_snd_una` (the ACK before this one) to detect new acknowledgments and dispatch into the right action.
 
-- **`net/ipv4/tcp_input.c:3177`** — `tcp_enter_recovery`. The "we're in trouble" entry point. ~80 lines. Walk through: cwnd reduction, calling `set_state` on the CC algorithm, setting up PRR.
+- **`net/ipv4/tcp_input.c:3177`** — `tcp_enter_recovery`. The "we're in trouble" entry point. ~25 lines. Walk through: cwnd reduction, calling `set_state` on the CC algorithm, setting up PRR.
 
-- **`net/ipv4/tcp_input.c:2554`** — `tcp_enter_loss`. The RTO-driven recovery. Much more punitive than `tcp_enter_recovery` — used only for RTO. Notice cwnd resets to 1 MSS.
+- **`net/ipv4/tcp_input.c:2554`** — `tcp_enter_loss`. The RTO-driven recovery. Much more punitive than `tcp_enter_recovery` — used only for RTO. Notice cwnd resets to `tcp_packets_in_flight(tp) + 1` (≈1 MSS).
 
 - **`net/ipv4/tcp_input.c:3602`** — `tcp_clean_rtx_queue`. The function that walks `sk_write_queue` and removes ACKed segments. The complexity here is computing RTT samples for each ACKed segment (many SACK edge cases).
 
-- **`net/ipv4/tcp_recovery.c`** — RACK implementation. Short (~250 lines). Read all of it. The key function is `tcp_rack_detect_loss` — given the latest ACK time and SACK info, decide which earlier segments are now considered lost.
+- **`net/ipv4/tcp_recovery.c`** — RACK implementation. Short (~160 lines). Read all of it. The key function is `tcp_rack_detect_loss` — given the latest ACK time and SACK info, decide which earlier segments are now considered lost.
 
 - **`net/ipv4/tcp_timer.c:535`** — `tcp_retransmit_timer`. The RTO-fires entry. Read top to bottom (~150 lines). Notice the "user timeout" handling (gives up after `TCP_USER_TIMEOUT` even if RTO would keep retrying), and the explicit congestion exit if too many retries.
 

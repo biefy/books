@@ -36,7 +36,7 @@ The pump is invoked from two places:
 
 ## The default: `fq_codel`
 
-Default since 4.12 (and a sensible default for almost all workloads). `net/sched/sch_fq_codel.c`. Combines two ideas:
+The de-facto default on most Linux distros (systemd sets `net.core.default_qdisc=fq_codel`; the upstream kernel default is still `pfifo_fast`, `sch_generic.c:37`), and a sensible default for almost all workloads. `net/sched/sch_fq_codel.c`. Combines two ideas:
 
 ### SFQ — Stochastic Fair Queueing
 
@@ -56,7 +56,7 @@ Why drop early? **Bufferbloat.** Big buffers + drop-tail = packets queue forever
 
 ```bash
 tc qdisc show dev eth0
-# qdisc fq_codel 0: root refcnt 2 limit 10240p flows 1024 quantum 1518 target 5ms ce_threshold 4ms
+# qdisc fq_codel 0: root refcnt 2 limit 10240p flows 1024 quantum 1518 target 5ms
 ```
 
 `limit` = max packets across all flows; `flows` = number of buckets; `quantum` = round-robin credit; `target` = CoDel latency target.
@@ -177,7 +177,7 @@ sudo tc qdisc replace dev lo root noqueue    # restore
 
 ## What to read in the kernel
 
-- **`net/sched/sch_generic.c:440`** — `__qdisc_run`. The pump. Read end to end (~70 lines). Notice the `qdisc_restart` loop with budget tracking and the deferred-to-softirq path.
+- **`net/sched/sch_generic.c:440`** — `__qdisc_run`. The pump. Compact (~17 lines): a `qdisc_restart` loop with budget tracking and the deferred-to-softirq path. Read the helpers it drives (`qdisc_restart`, `sch_direct_xmit`) for the full picture.
 
 - **`net/sched/sch_generic.c:344`** — `sch_direct_xmit`. The "actually push to driver" call. Handles the requeue case when the driver returns BUSY.
 
@@ -185,22 +185,22 @@ sudo tc qdisc replace dev lo root noqueue    # restore
 
 - **`net/sched/sch_fq_codel.c:282`** — `fq_codel_dequeue`. The interesting one — runs CoDel AQM logic in the dequeue path. Walk through to see how the latency-target check decides drops.
 
-- **`net/sched/sch_fq.c`** — `fq` for BBR. Read the per-flow pacing logic. Notice `q->time_next_packet` per flow tracks "earliest send time" to honor pacing rate.
+- **`net/sched/sch_fq.c`** — `fq` for BBR. Read the per-flow pacing logic. Notice `f->time_next_packet` (`sch_fq.c:94`) per flow tracks "earliest send time" to honor the pacing rate; the qdisc-wide field is `q->time_next_delayed_flow`.
 
 - **`net/sched/sch_htb.c`** — HTB. Long file (~2000 lines) but the core is clear: classful tree, per-class token buckets, dequeue picks the highest-priority class with tokens.
 
-- **`net/sched/sch_ingress.c`** — clsact. ~150 lines; mostly registration. The actual BPF dispatch is via `tcx` (modern) or via the tc-bpf classifier in `cls_bpf.c`.
+- **`net/sched/sch_ingress.c`** — clsact. ~376 lines; mostly registration. The actual BPF dispatch is via `tcx` (modern) or via the tc-bpf classifier in `cls_bpf.c`.
 
 - **`include/net/sch_generic.h`** — `struct Qdisc`, `struct Qdisc_ops`. The vtable each qdisc implements.
 
-- **`Documentation/networking/sch_*.rst`** — per-qdisc docs. `sch_fq_codel.txt` is short and clear.
+- **Source comments** in `net/sched/sch_fq_codel.c` and `include/net/codel*.h` are short and clear; for background see RFC 8289 and bufferbloat.net (the per-qdisc `Documentation/networking/sch_*.txt` files no longer exist in the tree).
 
 - **External**: bufferbloat.net has the canonical writeup of the problem fq_codel solves.
 
 ## Bullet Points
 
 - **qdiscs** sit between IP and driver; control queueing, pacing, dropping on egress.
-- Default since 4.12: **`fq_codel`** = SFQ (per-flow fairness) + CoDel (early-drop AQM).
+- De-facto distro default (via systemd; upstream kernel default is `pfifo_fast`): **`fq_codel`** = SFQ (per-flow fairness) + CoDel (early-drop AQM).
 - **`fq`**: per-flow pacing; required for BBR's bandwidth estimate to work.
 - **HTB / HFSC**: hierarchical bandwidth division for classful QoS.
 - **`clsact`** is a hook scaffold for tc-bpf (no queueing logic).

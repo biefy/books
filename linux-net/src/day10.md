@@ -27,7 +27,7 @@ Every IPv6 interface gets at least a link-local address in `fe80::/64`. The host
 - **`tempaddr`** (RFC 4941): privacy extensions; periodically rotate the host portion.
 
 Sysctls that matter:
-- `net.ipv6.conf.<dev>.addr_gen_mode`: 0 = EUI-64, 1 = none, 2 = stable_secret, 3 = stable_secret with random fallback.
+- `net.ipv6.conf.<dev>.addr_gen_mode`: 0 = EUI-64, 1 = none, 2 = stable_privacy, 3 = random (initializes a random secret, then generates via the stable_privacy algorithm).
 - `net.ipv6.conf.<dev>.use_tempaddr`: 0 = no privacy addrs, 1 = use them but prefer stable, 2 = prefer privacy.
 
 Implementation: `net/ipv6/addrconf.c:3415` `addrconf_addr_gen` — branches on `addr_gen_mode` and calls the right generator.
@@ -107,7 +107,7 @@ Each extension is parsed by a per-protocol handler registered in `inet6_protos[]
 
 Extension-header parsers are length-prefixed-buffer parsers in C, deep in the network stack. They've been a recurring source of CVEs:
 
-- **2024 (kernel 7.0):** SRv6 RPL OOB write — `ipv6_rpl_srh_rcv` could push a recompressed SRH that exceeded headroom, causing `skb_mac_header_rebuild` to underflow `mac_header` to ~65530 and `memmove` to write 14 bytes ~64KiB past `skb->head`. Fix in commit `9e6bf146b559`.
+- **2026 (kernel 7.1):** SRv6 RPL OOB write — `ipv6_rpl_srh_rcv` could push a recompressed SRH that exceeded headroom, causing `skb_mac_header_rebuild` to underflow `mac_header` to ~65530 and `memmove` to write 14 bytes ~64KiB past `skb->head`. Fix in commit `9e6bf146b559`.
 - **2018:** SegmentRoutingHeader processing flaw (CVE-2018-14633).
 - Various jumbogram bugs in `ipv6_hop_jumbo` (`net/ipv6/exthdrs.c:981`).
 
@@ -118,7 +118,7 @@ The pattern: an attacker controls extension-header *lengths*, and a parser misco
 To get to L4, code calls `ipv6_skip_exthdr(skb, start, &nexthdr, &frag_off)` — walks the chain until reaching a non-extension `nexthdr` and returns the offset. Quirks:
 
 - Some L4 lookups need to skip *all* extension headers; others (like conntrack) want to inspect specific ones.
-- A malformed chain (loop, oversized) returns `-EINVAL` and the kernel drops the packet.
+- A malformed chain (loop, oversized) causes `ipv6_skip_exthdr` to return `-1`, and the kernel drops the packet.
 - The function takes `frag_off` because a Fragment header tells you the packet is part of a larger original — caller may need to defer processing.
 
 ## Today's experiment
@@ -146,7 +146,7 @@ sudo bpftrace -e 'fentry:ipv6_skip_exthdr { printf("skip nexthdr=%d\n", args->ne
 
 ## What to read in the kernel
 
-- **`net/ipv6/ip6_input.c:344`** — `ipv6_rcv`. The IPv6 receive entry. Read end to end (~80 lines of real logic). Notice how it parses the base header, validates `version=6`, and dispatches via the registered `inet6_protos[]` table — same pattern as IPv4's `ip_rcv` but with the extension-header parser as the first handler.
+- **`net/ipv6/ip6_input.c:188`** — `ip6_rcv_core`. The IPv6 receive core logic (~145 lines, ~80 of real logic). `ipv6_rcv` (line 344) is a ~10-line wrapper that calls `ip6_rcv_core`, then runs the netfilter PRE_ROUTING hook. Notice how it parses the base header, validates `version=6`, and dispatches via the registered `inet6_protos[]` table — same pattern as IPv4's `ip_rcv` but with the extension-header parser as the first handler.
 
 - **`net/ipv6/addrconf.c`** — autoconf state machine. ~5000 lines but you only need a few entry points:
   - `addrconf_dad_start` (search for the function; no fixed line) — kicks off DAD.

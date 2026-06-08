@@ -15,7 +15,7 @@ The **`level`** picks a namespace: `SOL_SOCKET` (generic), `SOL_IP` / `SOL_IPV6`
 
 1. The syscall lands in `do_sock_setsockopt` (`net/socket.c:2348`).
 2. For `level == SOL_SOCKET` (generic), the kernel calls `sock_setsockopt` (`net/core/sock.c:1680`) directly.
-3. For other levels, it goes through `sk->sk_prot->setsockopt` (or, for AF_INET, `sock->ops->setsockopt`), which dispatches to per-protocol code: `tcp_setsockopt` (`net/ipv4/tcp.c:4178`), `udp_setsockopt`, `ip_setsockopt` (`net/ipv4/ip_sockglue.c:1409`), etc.
+3. For other levels, it goes through `sk->sk_prot->setsockopt` (or, for AF_INET, `sock->ops->setsockopt`), which dispatches to per-protocol code: `tcp_setsockopt` (`net/ipv4/tcp.c:4175`), `udp_setsockopt`, `ip_setsockopt` (`net/ipv4/ip_sockglue.c:1409`), etc.
 
 Each option is a `case` in a giant switch statement. When you read `tcp_setsockopt`, you're reading the canonical "what does this knob change?" reference.
 
@@ -30,8 +30,8 @@ These work on any socket regardless of protocol family. Implementation: `sock_se
 - **What:** maximum bytes queued in the socket's receive (`sk_rcvbuf`) or send (`sk_sndbuf`) queue.
 - **Why:** larger buffers absorb more burst traffic without dropping or back-pressuring. For high-BDP paths (high-bandwidth × high-latency), the default may be too small to keep the pipe full.
 - **When:** any high-throughput TCP server. Default `tcp_rmem`/`tcp_wmem` triplets give a baseline; `SO_RCVBUF`/`SO_SNDBUF` override per-socket.
-- **Gotcha:** the kernel **doubles the value you set** (one half is for kernel data structures); reads return the doubled value. This is in `sock_setsockopt` lines 1369–1378. Also: setting these disables the kernel's automatic buffer auto-tuning (`tcp_moderate_rcvbuf=1` is the default; explicit setsockopt opts out).
-- **Where:** `net/core/sock.c:1369-1378` (RCVBUF/SNDBUF cases).
+- **Gotcha:** the kernel **doubles the value you set** (one half is for kernel data structures); reads return the doubled value. This is in `sock_setsockopt` — the SO_SNDBUF case doubles at the `set_sndbuf` label (~line 1351). Also: setting these disables the kernel's automatic buffer auto-tuning (`tcp_moderate_rcvbuf=1` is the default; explicit setsockopt opts out).
+- **Where:** `net/core/sock.c:1337` (SO_SNDBUF case) and `net/core/sock.c:1369` (SO_RCVBUF case).
 
 ### `SO_REUSEADDR` — bind on TIME_WAIT
 
@@ -118,7 +118,7 @@ Implementation: `do_ip_setsockopt` (`net/ipv4/ip_sockglue.c:892`).
 - **What:** allows `bind()` to a non-local IP. Combined with iptables `TPROXY`, lets you intercept traffic destined elsewhere.
 - **Why:** transparent proxies (squid, HAProxy with `transparent`, Envoy in some modes).
 - **When:** L7 transparent proxies, packet capture tools that re-inject.
-- **Gotcha:** requires `CAP_NET_ADMIN` and a corresponding TPROXY iptables rule + policy routing.
+- **Gotcha:** requires `CAP_NET_RAW` or `CAP_NET_ADMIN` (either suffices), plus a corresponding TPROXY iptables rule + policy routing.
 - **Where:** `net/ipv4/ip_sockglue.c:1010`.
 
 ### `IP_FREEBIND` — bind before address is configured
@@ -129,7 +129,7 @@ Implementation: `do_ip_setsockopt` (`net/ipv4/ip_sockglue.c:892`).
 
 ## SOL_TCP — TCP-specific options
 
-Implementation: `do_tcp_setsockopt` (`net/ipv4/tcp.c:3843`).
+Implementation: `do_tcp_setsockopt` (`net/ipv4/tcp.c:3840`).
 
 ### `TCP_NODELAY` — disable Nagle
 
@@ -137,7 +137,7 @@ Implementation: `do_tcp_setsockopt` (`net/ipv4/tcp.c:3843`).
 - **Why:** latency-critical apps (interactive: SSH, X, gaming, real-time messaging) where waiting for batch is unacceptable.
 - **When:** request-response protocols where each request fits in <1 segment and latency matters. Most modern servers.
 - **Gotcha:** if both NODELAY and CORK are off, default Nagle applies. NODELAY beats CORK for any individual `write`.
-- **Where:** `net/ipv4/tcp.c:3973`.
+- **Where:** `net/ipv4/tcp.c:3970`.
 
 ### `TCP_CORK` — buffer until full or uncorked
 
@@ -145,7 +145,7 @@ Implementation: `do_tcp_setsockopt` (`net/ipv4/tcp.c:3843`).
 - **Why:** an application building a multi-piece response (header + body) wants to ensure they go in one segment.
 - **When:** static-file servers (`sendfile()` followed by uncork), HTTP servers building structured responses.
 - **Gotcha:** corked sockets *will* eventually send (after ~200 ms) even without uncorking. But don't rely on that — explicitly uncork.
-- **Where:** `net/ipv4/tcp.c:4046`.
+- **Where:** `net/ipv4/tcp.c:4043`.
 
 ### `TCP_QUICKACK` — disable delayed ACKs (one-shot)
 
@@ -161,7 +161,7 @@ Implementation: `do_tcp_setsockopt` (`net/ipv4/tcp.c:3843`).
 - **Why:** different connections want different algorithms; per-socket override is the cleanest way.
 - **When:** specialized workloads (intra-datacenter wants DCTCP; cross-WAN wants BBR).
 - **Gotcha:** the algorithm must be loaded (`modprobe tcp_bbr`). Check `tcp_available_congestion_control`.
-- **Where:** `net/ipv4/tcp.c:3854`.
+- **Where:** `net/ipv4/tcp.c:3851`.
 
 ### `TCP_USER_TIMEOUT` — give up after milliseconds
 
@@ -169,7 +169,7 @@ Implementation: `do_tcp_setsockopt` (`net/ipv4/tcp.c:3843`).
 - **Why:** keep-alive isn't enough — you want hard "give up after 30 seconds" semantics.
 - **When:** any application where stale connections are worse than aggressive aborts (RPC clients, request/response protocols with deadlines).
 - **Gotcha:** in milliseconds (other timeouts are seconds — check the docs). 0 = use system default (which is roughly 15 min via RTO retry).
-- **Where:** `net/ipv4/tcp.c:3925`.
+- **Where:** `net/ipv4/tcp.c:3922`.
 
 ### `TCP_FASTOPEN` — TCP Fast Open (TFO)
 
@@ -184,7 +184,7 @@ Implementation: `do_tcp_setsockopt` (`net/ipv4/tcp.c:3843`).
 - **What:** getsockopt-only. Returns `struct tcp_info` with rtt, cwnd, retrans count, state, etc.
 - **Why:** observability without parsing `/proc/net/tcp`.
 - **When:** monitoring agents, performance debugging.
-- **Where:** `net/ipv4/tcp.c` — search `tcp_get_info` (line 4216). Read this function: it's the source of truth for what `ss -tin` shows.
+- **Where:** `net/ipv4/tcp.c` — search `tcp_get_info` (line 4213). Read this function: it's the source of truth for what `ss -tin` shows.
 
 ### `TCP_TX_DELAY` — BBR pacing delay
 
@@ -242,15 +242,15 @@ sudo sysctl -w net.ipv4.tcp_congestion_control=bbr
 
 - **`net/core/sock.c:1680`** — `sock_setsockopt`. The SOL_SOCKET handler. Long switch (~600 lines). Read the cases for the options you care about — each is its own micro-routine. Notice the consistent pattern: copy from user, validate, take socket lock, update field, release lock.
 
-- **`net/ipv4/tcp.c:4178`** — `tcp_setsockopt`. The TCP-specific dispatcher; passes through to `do_tcp_setsockopt` (line 3843). Read `do_tcp_setsockopt` end-to-end if you ever wonder "what does TCP_FOO actually do?" — every option has its case here.
+- **`net/ipv4/tcp.c:4175`** — `tcp_setsockopt`. The TCP-specific dispatcher; passes through to `do_tcp_setsockopt` (line 3840). Read `do_tcp_setsockopt` end-to-end if you ever wonder "what does TCP_FOO actually do?" — every option has its case here.
 
-- **`net/ipv4/tcp.c:3973`** — TCP_NODELAY case. ~10 lines. The simplest TCP option; useful as a starting reference.
+- **`net/ipv4/tcp.c:3970`** — TCP_NODELAY case. ~10 lines. The simplest TCP option; useful as a starting reference.
 
-- **`net/ipv4/tcp.c:4046`** — TCP_CORK case. Note the interaction with TCP_NODELAY (mutually exclusive in spirit but both can be set).
+- **`net/ipv4/tcp.c:4043`** — TCP_CORK case. Note the interaction with TCP_NODELAY (mutually exclusive in spirit but both can be set).
 
-- **`net/ipv4/tcp.c:3854`** — TCP_CONGESTION case. Calls `tcp_set_congestion_control` (Day 16). Notice the `cap_net_admin` requirement for some non-default algorithms.
+- **`net/ipv4/tcp.c:3851`** — TCP_CONGESTION case. Calls `tcp_set_congestion_control` (Day 16). Notice the `cap_net_admin` requirement for some non-default algorithms.
 
-- **`net/ipv4/tcp.c:4216`** — `tcp_get_info`. Fills `struct tcp_info` for `TCP_INFO` getsockopt. Read this to know what fields are in `tcp_info` and where each comes from (rtt → `tp->srtt_us >> 3`, cwnd → `tp->snd_cwnd`, etc.).
+- **`net/ipv4/tcp.c:4213`** — `tcp_get_info`. Fills `struct tcp_info` for `TCP_INFO` getsockopt. Read this to know what fields are in `tcp_info` and where each comes from (rtt → `tp->srtt_us >> 3`, cwnd → `tp->snd_cwnd`, etc.).
 
 - **`net/ipv4/ip_sockglue.c:892`** — `do_ip_setsockopt`. The IP-level dispatcher. Read the cases for `IP_PKTINFO` (line 952), `IP_FREEBIND` (line 988), `IP_TRANSPARENT` (line 1010) — they're each illuminating examples of how a single line of userspace code unlocks a whole behavior.
 

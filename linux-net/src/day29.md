@@ -24,7 +24,7 @@ Observability infrastructure for "where do packets get dropped?"
 kfree_skb_reason(skb, SKB_DROP_REASON_TCP_INVALID_SEQUENCE);
 ```
 
-Replaces the older `kfree_skb(skb)`. The reason is one of ~150 categories defined in `include/net/dropreason-core.h`:
+Replaces the older `kfree_skb(skb)`. The reason is one of ~125 categories defined in `include/net/dropreason-core.h`:
 
 ```c
 enum skb_drop_reason {
@@ -36,11 +36,11 @@ enum skb_drop_reason {
     SKB_DROP_REASON_UDP_CSUM,
     SKB_DROP_REASON_NETFILTER_DROP,        // iptables/nftables rule
     SKB_DROP_REASON_TC_INGRESS,
-    /* ... 150+ more ... */
+    /* ... ~115 more ... */
 };
 ```
 
-**Why the change:** old `kfree_skb` gave no signal beyond "a packet died here." With reasons, dropwatch tells you `SOCKET_FILTER` (a BPF filter dropped) vs `NETFILTER_DROP` (a firewall rule did) vs `IP_INHDR_INVALID` (the packet was malformed). Differentiating those is the difference between "fix my firewall rules" and "fix my broken sender."
+**Why the change:** old `kfree_skb` gave no signal beyond "a packet died here." With reasons, dropwatch tells you `SOCKET_FILTER` (a BPF filter dropped) vs `NETFILTER_DROP` (a firewall rule did) vs `IP_INHDR` (the packet was malformed). Differentiating those is the difference between "fix my firewall rules" and "fix my broken sender."
 
 **Inspect drops:**
 
@@ -125,7 +125,7 @@ A grab bag of features that aren't dedicated days but matter:
 
 ECMP that survives nexthop changes without re-hashing every flow.
 
-### tcx and netkit (Days 17 of eBPF book / 16-17 of network book)
+### tcx and netkit (Day 17 of eBPF book / Day 23 of network book)
 
 Modern tc-bpf attach with `bpf_link` lifecycle and link-based multi-program ordering. Replaces classic `tc filter add bpf` for new code.
 
@@ -171,7 +171,7 @@ python3 ./pyynl/cli.py --spec ../../../Documentation/netlink/specs/devlink.yaml 
 
 - **`net/core/drop_monitor.c`** — the drop-monitor implementation. Read `trace_drop_common` to see how the tracepoint is dispatched to userspace via netlink.
 
-- **`net/devlink/`** — devlink core. ~10000 lines across multiple files. Read `core.c` for the registration model, `dev.c` for device lifecycle, `health.c` for the health-reporter framework.
+- **`net/devlink/`** — devlink core. ~15000 lines across multiple files. Read `core.c` for the registration model, `dev.c` for device lifecycle, `health.c` for the health-reporter framework.
 
 - **`Documentation/netlink/specs/`** — the YAML protocol specs. Open `devlink.yaml` or `ethtool.yaml`; the structure is self-descriptive.
 

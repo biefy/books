@@ -87,8 +87,8 @@ ping 10.99.99.2                              # works (init→red)
 
 The state per ns includes:
 
-- **Routing**: `net->ipv4.fib_main_tbl`, `ipv4.fib_local_tbl`, `ipv6.fib6_main_tbl`. `ip route` only shows the current ns's table.
-- **Netfilter**: `net->nf.hooks_ipv4[]` (per-hook arrays), `net->nft.tables`, `net->ct.htable`. nftables and conntrack tables are independent.
+- **Routing**: `net->ipv4.fib_main`, `ipv4.fib_default`, `ipv6.fib6_main_tbl`. `ip route` only shows the current ns's table.
+- **Netfilter**: `net->nf.hooks_ipv4[]` (per-hook arrays), `nft_pernet(net)->tables` (net_generic-backed), per-ns conntrack stats in `net->ct`. nftables and conntrack state are independent.
 - **Sockets**: per-ns bind tables (`tcp_hashinfo.bhash[]`). Two ns can bind the same port simultaneously.
 - **Sysctls**: most `net.ipv4.*` are per-ns (`tcp_congestion_control`, `rp_filter`, `ip_forward`).
 - **proc/net**: each ns sees its own `/proc/net`, `/proc/sys/net`.
@@ -117,7 +117,7 @@ cat /proc/sys/net/ipv4/tcp_congestion_control
 
 # In green:
 sudo ip netns exec green cat /proc/sys/net/ipv4/tcp_congestion_control
-# probably 'cubic' (default for newly-created ns)
+# bbr (a new ns inherits init_net's congestion control, here bbr)
 
 # Set independently:
 sudo ip netns exec green sysctl -w net.ipv4.tcp_congestion_control=bbr
@@ -144,7 +144,7 @@ Different tables, different views.
 ```bash
 sudo bpftrace -e '
 fentry:setup_net  { printf("setup_net %p\n", (void *)args->net); }
-fentry:cleanup_net { printf("cleanup_net %p\n", (void *)args->net_list); }
+fentry:cleanup_net { printf("cleanup_net work %p\n", (void *)args->work); }
 '
 
 # In another terminal:

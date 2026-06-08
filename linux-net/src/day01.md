@@ -8,7 +8,7 @@
 
 Every packet that crosses any layer of the kernel network stack rides in an `sk_buff`. RX from the NIC, TX to the wire, packet filtering, routing, encapsulation, segmentation — all operate on this structure. Knowing how it works is the difference between reading kernel networking code fluently and getting lost two function calls deep.
 
-The structure lives at **`include/linux/skbuff.h`** (line 885 in 7.1) and the implementation at **`net/core/skbuff.c`** (~7000 lines as of 7.1 — about 80% of the file is utility functions).
+The structure lives at **`include/linux/skbuff.h`** (line 886 in 7.1) and the implementation at **`net/core/skbuff.c`** (~7000 lines as of 7.1 — about 80% of the file is utility functions).
 
 ![sk_buff anatomy](diagrams/day01_skb_anatomy.png)
 
@@ -128,10 +128,10 @@ Histogram of headroom on packets entering `ip_rcv`. You'll see most packets have
 
 ## What to read in the kernel
 
-- **`include/linux/skbuff.h`** — `struct sk_buff` definition (line 885). Read the field comments. Then look at the helpers (`skb_push`, `skb_pull`, `skb_reserve`, `skb_put`).
-- **`net/core/skbuff.c`** — `__alloc_skb` (line 672), `__build_skb` (line 454), `kfree_skb_reason`, `skb_clone`. ~7000 lines total, but the allocation path is < 100 lines.
+- **`include/linux/skbuff.h`** — `struct sk_buff` definition (line 886). Read the field comments. Then look at the helpers (`skb_push`, `skb_pull`, `skb_reserve`, `skb_put`).
+- **`net/core/skbuff.c`** — `__alloc_skb` (line 672), `__build_skb` (line 488), `kfree_skb_reason`, `skb_clone`. ~7000 lines total, but the allocation path is < 100 lines.
 - **`include/linux/skbuff_ref.h`** — refcount helpers; quick read.
-- **`include/net/dropreason-core.h`** — the `enum skb_drop_reason` list (~150 reasons in 7.1). Skim. This is what you'll see in `perf trace`.
+- **`include/net/dropreason-core.h`** — the `enum skb_drop_reason` list (~128 reasons in 7.1). Skim. This is what you'll see in `perf trace`.
 - **`Documentation/networking/skbuff.rst`** — the official reference. One-time read.
 
 ---
