@@ -108,12 +108,12 @@ tcp-segmentation-offload: on
 ```bash
 sudo bpftrace -e '
 fentry:napi_gro_receive {
-  @gro_lengths = lhist(skb->len, 0, 65536, 4096);
+  @gro_lengths = lhist(args->skb->len, 0, 65536, 4096);
 }
 fentry:ip_rcv {
-  @rcv_lengths = lhist(skb->len, 0, 65536, 4096);
+  @rcv_lengths = lhist(args->skb->len, 0, 65536, 4096);
 }
-interval:s:5 { exit }'
+interval:s:5 { exit(); }'
 
 # In another terminal: do a big TCP transfer
 iperf3 -c 8.8.8.8 -t 5
@@ -126,7 +126,7 @@ You'll see two histograms. `gro_lengths` shows what GRO received from the NIC (o
 ```bash
 sudo ethtool -K eth0 gro off
 # Re-run the experiment
-sudo bpftrace -e 'fentry:ip_rcv { @lens = lhist(skb->len, 0, 65536, 1500); } interval:s:5 { exit }'
+sudo bpftrace -e 'fentry:ip_rcv { @lens = lhist(args->skb->len, 0, 65536, 1500); } interval:s:5 { exit(); }'
 ```
 
 Now `ip_rcv` sees actual wire-sized packets. CPU usage during a high-rate transfer goes up — that's the cost GRO was hiding.

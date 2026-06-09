@@ -130,7 +130,7 @@ ip -6 addr show
 
 # Watch DAD on bring-up
 sudo bpftrace -e 'fentry:ndisc_send_ns {
-  printf("NS sent target=%pI6\n", &args->solicit);
+  printf("NS sent target=%s\n", ntop(args->solicit->in6_u.u6_addr8));
 }' &
 sudo ip link set eth0 down && sleep 1 && sudo ip link set eth0 up
 
@@ -141,7 +141,7 @@ sudo tcpdump -i eth0 -nn icmp6 and not host ::
 sysctl net.ipv6.conf.eth0 | grep -E "addr_gen_mode|accept_ra|use_tempaddr|dad_transmits"
 
 # Trace extension-header parsing
-sudo bpftrace -e 'fentry:ipv6_skip_exthdr { printf("skip nexthdr=%d\n", args->nexthdr); }'
+sudo bpftrace -e 'fentry:ipv6_skip_exthdr { printf("skip nexthdr=%d start=%d\n", *args->nexthdrp, args->start); }'
 ```
 
 ## What to read in the kernel

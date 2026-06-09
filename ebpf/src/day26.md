@@ -36,12 +36,13 @@ Two files to change: `tools/sched_ext/scx_simple.bpf.c` and the userspace driver
 ### BPF side: read a config variable, branch on cgroup
 
 ```c
-/* near the top of scx_simple.bpf.c */
+/* near the top of scx_simple.bpf.c — which already #includes <scx/common.bpf.h> */
 const volatile __u64 priority_cgroup_id = 0;   /* full kernfs id; set from userspace */
 
-extern struct cgroup *scx_bpf_task_cgroup(struct task_struct *p) __ksym;
-extern struct cgroup *bpf_cgroup_ancestor(struct cgroup *cgrp, int level) __ksym;
-extern void bpf_cgroup_release(struct cgroup *cgrp) __ksym;
+/* scx_bpf_task_cgroup(), bpf_cgroup_ancestor(), and bpf_cgroup_release() all
+ * come from <scx/common.bpf.h> (scx_bpf_task_cgroup is a compat macro). Don't
+ * re-declare them with your own `extern ... __ksym;` — that collides with the
+ * header and fails to compile. Just call them, as scx_flatcg.bpf.c does. */
 
 void BPF_STRUCT_OPS(simple_enqueue, struct task_struct *p, u64 enq_flags)
 {
