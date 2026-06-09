@@ -14,7 +14,7 @@ The other big difference: **tc has both ingress and egress hooks**. XDP is ingre
 
 ## The tc context: `struct __sk_buff`
 
-A read-mostly typed view of `struct sk_buff`:
+A read-mostly typed view of `struct sk_buff` (abridged — the real definition in `include/uapi/linux/bpf.h` continues with socket and timestamp fields):
 
 ```c
 struct __sk_buff {
@@ -23,17 +23,20 @@ struct __sk_buff {
     __u32 mark;            /* socket/skb mark */
     __u32 queue_mapping;
     __u32 protocol;        /* L3 protocol */
-    __u32 ifindex;
-    __u32 cb[5];           /* skb control block — pass data between progs */
-    __u32 hash;            /* skb hash */
-    __u32 tc_index;        /* tc classification slot */
+    __u32 vlan_present;
+    __u32 vlan_tci;
+    __u32 vlan_proto;
     __u32 priority;
     __u32 ingress_ifindex;
     __u32 ifindex;
+    __u32 tc_index;        /* tc classification slot */
+    __u32 cb[5];           /* skb control block — pass data between progs */
+    __u32 hash;            /* skb hash */
     __u32 tc_classid;
     __u32 data;            /* same idea as xdp_md */
     __u32 data_end;
-    /* and more — including socket cookie, tstamp, etc. */
+    __u32 napi_id;
+    /* and more — family/remote_ip4/...; data_meta, tstamp, sk, etc. */
 };
 ```
 
@@ -173,7 +176,7 @@ Try `bpf_xdp_adjust_head` from a tc program. Verifier rejects — that helper is
 skb->len = 100;
 ```
 
-Verifier rejects — `__sk_buff` is read-only for most fields. The few writable ones (mark, priority, cb[]) are listed explicitly in `bpf_skb_is_valid_access`.
+Verifier rejects — `__sk_buff` is read-only for most fields. For tc programs the writable ones are listed explicitly in `tc_cls_act_is_valid_access` (`net/core/filter.c`): `mark`, `tc_index`, `priority`, `tc_classid`, `cb[0..4]`, `tstamp`, and `queue_mapping`. `len` is not among them.
 
 ### Break 4 — Multiple programs at one priority
 

@@ -12,7 +12,7 @@ Yesterday's tracing programs ran when *something interesting* happened to a func
 
 That's why XDP is fast. A skb allocation costs ~500 ns on a modern x86; routing/lookup/etc. add hundreds more. XDP runs in the driver's NAPI poll, called with a pointer to the raw frame, returns an action constant, and that's it.
 
-Throughput numbers in the literature: 10 Mpps per core trivially, 100+ Mpps with hardware offload (XDP_DROP_NATIVE on supporting NICs). Your single-core software cap is around the line rate of a 10 Gbps link with small packets.
+Throughput numbers in the literature: 10 Mpps per core trivially, 100+ Mpps with hardware offload (offloaded XDP on supporting NICs). Your single-core software cap is around the line rate of a 10 Gbps link with small packets.
 
 ## The XDP context: `struct xdp_md`
 
@@ -27,7 +27,7 @@ Other fields:
 - `ingress_ifindex` — which interface the packet arrived on.
 - `rx_queue_index` — which NIC RX queue.
 - `data_meta` — optional metadata area (Day 18, AF_XDP).
-- `egress_ifindex` — populated for `XDP_REDIRECT` to mark the destination.
+- `egress_ifindex` — only readable in devmap-egress XDP programs (`expected_attach_type == BPF_XDP_DEVMAP`); the Verifier rejects access from a plain `SEC("xdp")` program (see `xdp_is_valid_access` in `net/core/filter.c`).
 
 **Bounds checking is not optional.** The Verifier requires every byte access be proven below `data_end`:
 
@@ -252,8 +252,9 @@ Each layer needs its own bounds check. Forget any one and the Verifier rejects w
 
 ## What to read in the kernel
 
-- **`net/core/dev.c`** — search `xdp_buff` and `bpf_prog_run_xdp`. The driver-side dispatch.
-- **`include/net/xdp.h`** — `struct xdp_md` and the action constants.
+- **`include/net/xdp.h`** — `bpf_prog_run_xdp`, the inline that drivers call to run an XDP program.
+- **`include/uapi/linux/bpf.h`** — `struct xdp_md` and `enum xdp_action` (the action constants).
+- **`net/core/dev.c`** — search `xdp_buff`; the driver-side dispatch path.
 - **`net/core/filter.c`** — XDP helpers (`xdp_func_proto` table). Note which helpers are XDP-only.
 - **`tools/testing/selftests/bpf/progs/test_xdp_*`** — many examples of common patterns.
 - **`Documentation/networking/xdp.rst`** — official doc; one read recommended.

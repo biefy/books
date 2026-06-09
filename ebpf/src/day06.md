@@ -44,7 +44,7 @@ In modern code, **prefer fexit** wherever it's available — that means: any fun
 >
 > **Q: Can a function be called recursively?**
 >
-> A: Yes, and it's the case where TID-as-key breaks down. We'll cover this on Day 7. For most kernel functions you trace, recursion isn't an issue.
+> A: Yes, and it's the case where TID-as-key breaks down. Today's check question at the end walks through exactly why. For most kernel functions you trace, recursion isn't an issue.
 
 ## Meet `bpf_ktime_get_ns`
 
@@ -92,7 +92,7 @@ If you key by TGID, four threads of the same process all hit the same map slot, 
 > .  
 > .
 >
-> **Answer:** because the BPF helper API was designed when only `bpf_get_current_pid` (returning the kernel's PID, which userspace calls TID) and `bpf_get_current_tgid` existed separately. Combining them saves a helper call. The returned packing reflects what kernel internals also pack: `task_struct` has both `pid` (kernel meaning) and `tgid`. The naming confusion is historical — userspace called processes "PIDs" before threads existed.
+> **Answer:** because one helper call is cheaper than two. The kernel only ever exposed the combined helper `bpf_get_current_pid_tgid` (helper id 14) — there was never a separate `bpf_get_current_pid` or `bpf_get_current_tgid` in the UAPI. The single call returns both fields packed together, mirroring what `task_struct` itself carries: both `pid` (kernel meaning) and `tgid`. The naming confusion is historical — userspace called processes "PIDs" before threads existed.
 
 ## The lifecycle, explicitly
 
@@ -180,8 +180,8 @@ int BPF_PROG(on_exit, struct file *f, char *buf, size_t n, loff_t *pos, ssize_t 
 Standard ringbuf consumer. Print:
 
 ```c
-printf("PID %u TID %u vfs_read(%zd) → %lld bytes in %llu µs (%s)\n",
-       e->pid, e->tid, /* size? */, (long long)e->ret,
+printf("PID %u TID %u vfs_read → %lld bytes in %llu µs (%s)\n",
+       e->pid, e->tid, (long long)e->ret,
        e->dur_ns / 1000, e->comm);
 ```
 
@@ -268,7 +268,7 @@ int BPF_KRETPROBE(on_exit_kretprobe, ssize_t ret)
 
 ### Break 5 — A function that doesn't always return
 
-Try `kernel_clone` (the function that implements `fork`). Most calls return; a few may not (`do_exit` paths, exotic flags). Run for a long time. Check that the map stays bounded — `kernel_clone` is well-behaved here, but try `do_exit` itself:
+Try `kernel_clone` (the function that implements `fork`). Most calls return; a few may not (`do_exit` paths, exotic flags). Run for a long time. Check that the map stays bounded — `kernel_clone` is well-behaved here. Now try to attach fexit to `do_exit` itself:
 
 ```c
 SEC("fentry/do_exit")
@@ -278,11 +278,19 @@ int BPF_PROG(on_exit_enter) {
 
 SEC("fexit/do_exit")
 int BPF_PROG(on_exit_exit) {
-    /* never reached — do_exit doesn't return */
+    /* do_exit never returns */
 }
 ```
 
-You'll find your fentry program ran but your fexit never fires. The map fills. Lesson: **not every function has a sensible fexit pair.** Functions that may not return need a different cleanup strategy (e.g., a periodic sweep from userspace, or a tracepoint at task termination).
+On 7.1 this **doesn't even load.** The Verifier knows `do_exit` is marked `__noreturn`, and it refuses to attach fexit to a function that can never return:
+
+```
+Attaching fexit/fsession/fmod_ret to __noreturn function 'do_exit' is rejected.
+```
+
+The kernel keeps a `noreturn_deny` BTF set (`kernel/bpf/verifier.c`) — `do_exit`, `do_group_exit`, `make_task_dead`, `__module_put_and_kthread_exit`, and friends — and rejects fexit/fmod_ret on any of them at load time. So the leak you might expect here never happens: the Verifier protects you up front.
+
+The leak lesson still stands, though — it just applies to functions the denylist *can't* catch. A function that returns on most paths but conditionally doesn't (a goto into a `do_exit` call, an unwound error path that calls `panic`) isn't `__noreturn`, so fexit attaches happily — and then silently never fires on the non-returning path, leaking that thread's map entry. **Not every function has a sensible fexit pair.** For those, you need a different cleanup strategy (a periodic sweep from userspace, or a tracepoint at task termination such as `sched_process_exit`).
 
 ---
 

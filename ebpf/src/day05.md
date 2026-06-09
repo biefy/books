@@ -136,7 +136,7 @@ static __u64 *get_sum(void) {
 }
 
 /* shape 1: constant bound */
-SEC("fentry/do_unlinkat")
+SEC("fentry/filename_unlinkat")
 int BPF_PROG(loop_const)
 {
     __u64 *s = get_sum();
@@ -154,7 +154,7 @@ static int cb(__u32 i, void *ctx)
     return 0;
 }
 
-SEC("fentry/do_unlinkat")
+SEC("fentry/filename_unlinkat")
 int BPF_PROG(loop_helper)
 {
     __u64 *s = get_sum();
@@ -277,10 +277,10 @@ At callback return the register R0 has unbounded ranges
 
 ## What to read in the kernel
 
-- **`kernel/bpf/helpers.c`** — search `bpf_loop`. The implementation is a tight C loop calling the verified callback. The Verifier knows about this helper specifically and verifies the callback once.
+- **`kernel/bpf/bpf_iter.c`** — search `BPF_CALL_4(bpf_loop`. The implementation is a tight C loop calling the verified callback (`kernel/bpf/helpers.c` only registers the proto). The Verifier knows about this helper specifically and verifies the callback once.
 - **`kernel/bpf/verifier.c`**:
-  - search `is_state_visited` — the heart of state pruning.
-  - search `process_bpf_exit_full` and `propagate_liveness` — how state propagates across paths.
+  - search `bpf_is_state_visited` (defined in `kernel/bpf/states.c`) — the heart of state pruning.
+  - search `process_bpf_exit_full` — how state propagates across paths at exit. For the liveness machinery it leans on, see `kernel/bpf/liveness.c`.
 - **`tools/testing/selftests/bpf/progs/bpf_loop.c`** — official examples of every loop shape.
 - **`Documentation/bpf/verifier.rst`** — the kernel's own doc on how the Verifier handles loops. Worth one read.
 

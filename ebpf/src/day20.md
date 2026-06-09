@@ -42,7 +42,7 @@ __bpf_kfunc void bpf_task_release(struct task_struct *p)
 
 /* And later, registered: */
 BTF_KFUNCS_START(generic_btf_ids)
-BTF_ID_FLAGS(func, bpf_task_acquire, KF_ACQUIRE | KF_TRUSTED_ARGS | KF_RET_NULL)
+BTF_ID_FLAGS(func, bpf_task_acquire, KF_ACQUIRE | KF_RCU | KF_RET_NULL)
 BTF_ID_FLAGS(func, bpf_task_release, KF_RELEASE)
 /* ... */
 BTF_KFUNCS_END(generic_btf_ids)
@@ -102,19 +102,19 @@ When you call a `KF_ACQUIRE` function, the verifier:
 If you forget to release on any path:
 
 ```
-unreleased reference id=1, alloc_insn=2
+Unreleased reference id=1 alloc_insn=2
 ```
 
 If you release a non-acquired pointer:
 
 ```
-release on non-acquired reference
+kfunc bpf_task_release#0 reference has not been acquired before
 ```
 
 If you release twice:
 
 ```
-release on non-acquired reference
+kfunc bpf_task_release#0 reference has not been acquired before
 ```
 
 (The second release sees the ref id as already closed; same error.)
@@ -136,9 +136,7 @@ register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING, &generic_kfunc_set);
 register_btf_kfunc_id_set(BPF_PROG_TYPE_STRUCT_OPS, &cpumask_kfunc_set);
 ```
 
-Tracing programs (`fentry`, `fexit`, etc.) get the generic set. struct_ops programs get the cpumask set. XDP programs get neither — `bpf_task_acquire` from XDP fails the verifier with "program type ... can not call kernel function".
-
-Why? Because XDP runs in a context that doesn't have a meaningful `current` task; allowing it would be misleading.
+Tracing programs (`fentry`, `fexit`, etc.) get the generic set. struct_ops programs get the cpumask set. XDP also gets the generic set (it's registered for `BPF_PROG_TYPE_XDP` too), so `bpf_task_acquire` *does* load in an XDP program — but it's semantically meaningless there, because XDP runs in NIC-driver softirq context with no meaningful `current` task. The cpumask family, by contrast, is registered only for TRACING/STRUCT_OPS/SYSCALL, so calling `bpf_cpumask_create` from XDP genuinely fails the verifier with `calling kernel function bpf_cpumask_create is not allowed`.
 
 ## Discovery: what kfuncs exist?
 
@@ -177,7 +175,7 @@ char LICENSE[] SEC("license") = "GPL";
 extern struct task_struct *bpf_task_acquire(struct task_struct *p) __ksym;
 extern void bpf_task_release(struct task_struct *p) __ksym;
 
-SEC("fentry/do_unlinkat")
+SEC("fentry/filename_unlinkat")
 int BPF_PROG(on_unlink)
 {
     struct task_struct *cur = bpf_get_current_task_btf();
@@ -209,7 +207,7 @@ You should see `acquired pid=N` per delete.
 Comment out `bpf_task_release(acq)`. Verifier rejects:
 
 ```
-Unreleased reference id=1, alloc_insn=2
+Unreleased reference id=1 alloc_insn=2
 ```
 
 The number tells you which acquire was leaked (multiple acquires get distinct ids).
@@ -239,17 +237,25 @@ bpf_task_release(acq);
 
 Rejected: the second call sees the id as already closed.
 
-### Use an XDP program type
+### Call a kfunc the program type isn't allowed
 
 ```c
+extern struct bpf_cpumask *bpf_cpumask_create(void) __ksym;
+
 SEC("xdp")
 int xdp_prog(struct xdp_md *ctx) {
-    struct task_struct *cur = bpf_get_current_task_btf();
+    struct bpf_cpumask *cm = bpf_cpumask_create();
     /* ... */
 }
 ```
 
-`bpf_get_current_task_btf` and `bpf_task_acquire` aren't in the XDP allowance set; the verifier rejects with "program type ... can not call kernel function".
+The cpumask kfunc family is registered only for TRACING, STRUCT_OPS, and SYSCALL program types (`kernel/bpf/cpumask.c`), **not** XDP. The verifier rejects with:
+
+```
+calling kernel function bpf_cpumask_create is not allowed
+```
+
+(Note: the generic set — including `bpf_task_acquire` — *is* registered for XDP, so that one would load; it's just meaningless there. The cpumask family is the one that genuinely isn't in XDP's allowance set.)
 
 ## What to read in the kernel
 

@@ -108,7 +108,7 @@ The family is defined at `kernel/bpf/cpumask.c`. Read the file's `BTF_KFUNCS_STA
 BTF_KFUNCS_START(cpumask_kfunc_btf_ids)
 BTF_ID_FLAGS(func, bpf_cpumask_create, KF_ACQUIRE | KF_RET_NULL)
 BTF_ID_FLAGS(func, bpf_cpumask_release, KF_RELEASE)
-BTF_ID_FLAGS(func, bpf_cpumask_acquire, KF_ACQUIRE | KF_TRUSTED_ARGS)
+BTF_ID_FLAGS(func, bpf_cpumask_acquire, KF_ACQUIRE)
 BTF_ID_FLAGS(func, bpf_cpumask_first, KF_RCU)
 BTF_ID_FLAGS(func, bpf_cpumask_setall)
 BTF_ID_FLAGS(func, bpf_cpumask_set_cpu)
@@ -137,7 +137,7 @@ extern void bpf_cpumask_release(struct bpf_cpumask *cpumask) __ksym;
 extern void bpf_cpumask_set_cpu(__u32 cpu, struct bpf_cpumask *cpumask) __ksym;
 extern bool bpf_cpumask_test_cpu(__u32 cpu, const struct cpumask *cpumask) __ksym;
 
-SEC("fentry/do_unlinkat")
+SEC("fentry/filename_unlinkat")
 int BPF_PROG(p)
 {
     struct bpf_cpumask *m = bpf_cpumask_create();
@@ -182,7 +182,7 @@ struct bpf_cpumask *m = bpf_cpumask_create();
 return 0;   /* without bpf_cpumask_release */
 ```
 
-Verifier rejects: `unreleased reference id=1`. `bpf_cpumask_create` is `KF_ACQUIRE`; the rules from Day 20 apply.
+Verifier rejects: `Unreleased reference id=1 alloc_insn=M`. `bpf_cpumask_create` is `KF_ACQUIRE`; the rules from Day 20 apply.
 
 ### Use a kfunc not registered for your program type
 
@@ -196,7 +196,7 @@ int xdp_prog(struct xdp_md *ctx) {
 }
 ```
 
-Verifier rejects: `program type ... can not call kernel function bpf_cpumask_create`. Check `kernel/bpf/cpumask.c`'s registration:
+Verifier rejects: `calling kernel function bpf_cpumask_create is not allowed`. Check `kernel/bpf/cpumask.c`'s registration:
 
 ```c
 register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING, &cpumask_kfunc_set);

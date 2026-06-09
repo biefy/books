@@ -36,15 +36,15 @@ A subtle constraint of `bpf_ringbuf_reserve(rb, sz, 0)` is that **`sz` must be c
 2. Use `bpf_ringbuf_output` (always copies bytes; skip reserve/submit pattern).
 3. Cap your max event size small.
 
-In 2024 the kernel added **`bpf_dynptr`** — a runtime-sized buffer the Verifier tracks via a special pointer type with bounds.
+In 2022 the kernel added **`bpf_dynptr`** (ring-buffer dynptr support landed in 5.19) — a runtime-sized buffer the Verifier tracks via a special pointer type with bounds.
 
 ![dynptr](diagrams/day13_dynptr.png)
 
 ```c
 struct bpf_dynptr ptr;
 bpf_ringbuf_reserve_dynptr(&rb, sz, 0, &ptr);
-bpf_dynptr_write(&ptr, 0, &header, sizeof(header));
-bpf_dynptr_write(&ptr, sizeof(header), payload, payload_len);
+bpf_dynptr_write(&ptr, 0, &header, sizeof(header), 0);
+bpf_dynptr_write(&ptr, sizeof(header), payload, payload_len, 0);
 bpf_ringbuf_submit_dynptr(&ptr, 0);
 ```
 

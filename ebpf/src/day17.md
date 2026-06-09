@@ -13,7 +13,7 @@ tcx (Linux 6.6+, commit `e420bed02507`) addresses all three.
 
 ![tcx vs classic](diagrams/day17_tcx_vs_classic.png)
 
-One syscall to attach. Returns a `bpf_link` FD. Closing the FD detaches. And ordering between multiple programs uses **mprog**, the same multi-program abstraction that powers `kprobe.multi`.
+One syscall to attach. Returns a `bpf_link` FD. Closing the FD detaches. And ordering between multiple programs uses **mprog**, the same multi-program abstraction that backs tcx and netkit.
 
 ## mprog: ordered chains of BPF programs
 
@@ -139,8 +139,8 @@ You'll see:
 ```
 xdp:
 tc:
-   eth0(2) tcx/ingress counter prog_id 5 link_id 3
-   eth0(2) tcx/ingress firewall prog_id 6 link_id 4
+   veth1(3) tcx/ingress counter prog_id 5 link_id 3
+   veth1(3) tcx/ingress firewall prog_id 6 link_id 4
 ```
 
 ### Run
@@ -165,7 +165,7 @@ Kill `tcx_loader` (Ctrl-C). The links auto-detach. Verify with `bpftool net show
 
 ### Break 1 — Forget `BPF_F_AFTER`
 
-Both programs use default flags. The second attach implicitly goes wherever the kernel decides (often "before"). The order may be `firewall → counter`, which means UDP is dropped *before* counted — total stat reflects only allowed traffic. Inspect with `bpftool net show` to verify the order. Use `BPF_F_BEFORE`/`BPF_F_AFTER` explicitly.
+Both programs use default flags. With no `BPF_F_BEFORE`/`BPF_F_AFTER`, mprog defaults to appending after existing programs (`bpf_mprog_attach` sets `idx = bpf_mprog_total(entry)` and `flags = BPF_F_AFTER`, `kernel/bpf/mprog.c`). So the order ends up `counter → firewall` here by default — but don't rely on it implicitly; pass `BPF_F_BEFORE`/`BPF_F_AFTER` to make ordering explicit. Inspect with `bpftool net show` to verify.
 
 ### Break 2 — Pin the link
 
@@ -186,11 +186,13 @@ Attach an XDP counter and a tcx counter to the same interface. Both run, in orde
 ### Break 4 — Replace a link
 
 ```c
-LIBBPF_OPTS(bpf_tcx_opts, opts, .flags = BPF_F_REPLACE, .replace_link = old_link);
+LIBBPF_OPTS(bpf_tcx_opts, opts,
+            .flags = BPF_F_REPLACE | BPF_F_ID,
+            .relative_id = old_prog_id);
 struct bpf_link *new = bpf_program__attach_tcx(skel->progs.new_prog, ifindex, &opts);
 ```
 
-Atomically swap one program for another. No window where the hook is empty.
+`struct bpf_tcx_opts` has no `replace_link` field — you name the program to swap with `relative_id` (an mprog ID, paired with `BPF_F_ID`) or `relative_fd`, and set `BPF_F_REPLACE`. Atomically swaps one program for another. No window where the hook is empty.
 
 ---
 

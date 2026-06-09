@@ -43,7 +43,7 @@ The `__kptr` annotation modifies the field: the verifier and the BPF runtime bot
 
 Two flavors:
 
-- **`__kptr`** (sometimes spelled `__kptr_ref`) — the slot owns a refcount. Inserting must consume an acquired reference; reading must take ownership atomically.
+- **`__kptr`** — the slot owns a refcount. Inserting must consume an acquired reference; reading must take ownership atomically. (Older code may use `__kptr_ref`, but that spelling was removed — current libbpf in `tools/lib/bpf/bpf_helpers.h` defines only `__kptr` and `__kptr_untrusted`.)
 - **`__kptr_untrusted`** — the slot holds an untrusted pointer (no refcount, no liveness guarantee). Useful for some niche cases. Read-only after store; can't be dereferenced safely.
 
 We focus on `__kptr` (refcounted).
@@ -85,13 +85,15 @@ Each is exchanged independently. The kernel knows about each via the value type'
 
 ## What you can store
 
-Any kernel object that has a registered destructor in `BTF_ID_LIST_GLOBAL(__bpf_global_kfuncs)` and corresponding `BTF_ID_FLAGS(...,KF_RELEASE)` mappings. As of 7.x:
+Any kernel object that has a **registered kptr destructor** — installed via `register_btf_id_dtor_kfuncs` (the table-building call lives in `kernel/bpf/btf.c`, and each subsystem registers its own pairs). As of 7.x the registered set is:
 
-- `struct task_struct __kptr *` — released by `bpf_task_release`.
-- `struct cgroup __kptr *` — released by `bpf_cgroup_release`.
-- `struct bpf_cpumask __kptr *` — released by `bpf_cpumask_release`.
-- `struct sock __kptr *` (some flavors) — released by `bpf_sk_release`.
-- `struct nf_conn __kptr *` — released by `bpf_ct_release`.
+- `struct task_struct __kptr *` — released by `bpf_task_release` (registered in `kernel/bpf/helpers.c`).
+- `struct cgroup __kptr *` — released by `bpf_cgroup_release` (`kernel/bpf/helpers.c`).
+- `struct bpf_cpumask __kptr *` — released by `bpf_cpumask_release` (`kernel/bpf/cpumask.c`).
+- `struct sk_buff __kptr *` — released by `bpf_kfree_skb_dtor` (`net/sched/bpf_qdisc.c`).
+- `struct bpf_crypto_ctx __kptr *` — released by the crypto dtor (`kernel/bpf/crypto.c`).
+
+Note: `struct sock` and `struct nf_conn` have acquire/release **kfuncs** (`bpf_sk_release`, `bpf_ct_release` — both `KF_RELEASE`), but those are *not* registered as kptr destructors, so you can't currently stash them in a `__kptr` map slot. Acquire/release within a single program works; cross-invocation map storage does not.
 
 The list grows with each kernel release. Check `Documentation/bpf/kfuncs.rst` for the current set.
 
@@ -120,7 +122,7 @@ struct {
     __type(value, struct val);
 } stash SEC(".maps");
 
-SEC("fentry/do_unlinkat")
+SEC("fentry/filename_unlinkat")
 int BPF_PROG(on_unlink)
 {
     struct task_struct *cur = bpf_get_current_task_btf();
@@ -148,10 +150,11 @@ int BPF_PROG(on_unlink)
     return 0;
 }
 
-SEC("fentry/do_unlinkat")
+SEC("fexit/filename_unlinkat")
 int BPF_PROG(on_unlink2)
 {
-    /* "Later" invocation that retrieves the saved task */
+    /* Genuinely "later": fexit fires on the function's *return*, after the
+     * fentry program above has already stashed the task on entry. */
     __u32 tid = bpf_get_current_pid_tgid() & 0xffffffff;
     struct val *vp = bpf_map_lookup_elem(&stash, &tid);
     if (!vp) return 0;
@@ -172,11 +175,11 @@ Build and run:
 ```bash
 make
 sudo ./task_assoc &
-touch /tmp/x && rm /tmp/x       # both programs fire
+touch /tmp/x && rm /tmp/x       # fentry stashes on entry, fexit retrieves on return
 sudo cat /sys/kernel/debug/tracing/trace_pipe
 ```
 
-You'll see one line per `do_unlinkat` showing the retrieved task and elapsed time.
+You'll see one line per `filename_unlinkat` showing the retrieved task and elapsed time.
 
 ## What to break
 
@@ -195,7 +198,7 @@ bpf_kptr_xchg(&vp->task, acq);
 /* discarded the return value */
 ```
 
-Verifier rejects with `unreleased reference`. The xchg returned a (possibly non-NULL) old value with its own ref id; discarding that id is a leak.
+Verifier rejects with `Unreleased reference id=N alloc_insn=M`. The xchg returned a (possibly non-NULL) old value with its own ref id; discarding that id is a leak.
 
 The pattern is always:
 
@@ -212,7 +215,7 @@ if (!t) return 0;
 return 0;     /* leak: t still holds a refcount */
 ```
 
-Rejected at exit: `unreleased reference id=N`.
+Rejected at exit: `Unreleased reference id=N alloc_insn=M`.
 
 ### Map deletion releases automatically
 
@@ -248,7 +251,7 @@ The kernel sees the kptr field, calls `bpf_task_release` automatically. No leak.
 - Map deletion **automatically releases** stored kptrs (registered destructor invoked).
 - Verifier statically tracks reference state across stores and lookups.
 - Multiple kptrs per value are independent — each released individually on map delete.
-- Supported types: task_struct, cgroup, sock, bpf_cpumask, nf_conn, more added each release.
+- Supported types (registered kptr destructors): task_struct, cgroup, bpf_cpumask, sk_buff, bpf_crypto_ctx; more added each release. (sock/nf_conn have release kfuncs but aren't registered kptr dtors.)
 
 ## Check question
 

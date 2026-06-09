@@ -6,7 +6,7 @@
 
 The Linux network stack is general-purpose. For most workloads that's fine — sockets, retransmits, congestion control, all done for you. But for packet-processing apps (DPI, custom load balancers, network testing, telemetry pipelines), the stack adds overhead you don't want: skb allocation, protocol parsing you'll redo anyway, syscalls per packet.
 
-**AF_XDP** is the kernel's answer to DPDK: packet receive directly into userspace-managed rings, with no syscalls in the steady-state receive loop. On NICs and drivers with zero-copy support, packets DMA directly into UMEM; otherwise AF_XDP still works in copy mode with lower throughput.
+**AF_XDP** is the kernel's answer to DPDK: packet receive directly into userspace-managed rings, with no syscalls in the steady-state receive loop (with the `XDP_USE_NEED_WAKEUP` flag the driver may ask you to `poll()`/`recvfrom()` to wake it — see below). On NICs and drivers with zero-copy support, packets DMA directly into UMEM; otherwise AF_XDP still works in copy mode with lower throughput.
 
 ![AF_XDP architecture](diagrams/day18_afxdp.png)
 
@@ -136,10 +136,11 @@ int main(int argc, char **argv) {
 
     /* 5. Pre-fill the FILL ring */
     __u32 idx;
-    xsk_ring_prod__reserve(&umem.fq, UMEM_NUM_FRAMES, &idx);
-    for (int i = 0; i < UMEM_NUM_FRAMES; i++)
+    __u32 got = xsk_ring_prod__reserve(&umem.fq, UMEM_NUM_FRAMES, &idx);
+    if (got != UMEM_NUM_FRAMES) { /* ring full / no space — handle it */ }
+    for (__u32 i = 0; i < got; i++)
         *xsk_ring_prod__fill_addr(&umem.fq, idx + i) = i * FRAME_SIZE;
-    xsk_ring_prod__submit(&umem.fq, UMEM_NUM_FRAMES);
+    xsk_ring_prod__submit(&umem.fq, got);
 
     /* 6. Poll loop */
     while (!exiting) {
@@ -149,9 +150,11 @@ int main(int argc, char **argv) {
             usleep(10);
             continue;
         }
+        __u64 addrs[64];
         for (__u32 i = 0; i < n; i++) {
             __u64 addr = xsk_ring_cons__rx_desc(&rx, idx_rx + i)->addr;
             __u32 len  = xsk_ring_cons__rx_desc(&rx, idx_rx + i)->len;
+            addrs[i]   = addr;           /* remember it so we can recycle below */
             void *pkt  = xsk_umem__get_data(buffer, addr);
             /* process pkt directly — zero copy */
             printf("got %u bytes: %02x:%02x:%02x:%02x:%02x:%02x ...\n",
@@ -160,11 +163,15 @@ int main(int argc, char **argv) {
         }
         xsk_ring_cons__release(&rx, n);
 
-        /* recycle: refill the FILL ring */
+        /* recycle: hand the same frames back to the driver via the FILL ring */
         __u32 idx_fq;
-        xsk_ring_prod__reserve(&umem.fq, n, &idx_fq);
-        /* ...mark these addrs available... */
-        xsk_ring_prod__submit(&umem.fq, n);
+        __u32 reserved = xsk_ring_prod__reserve(&umem.fq, n, &idx_fq);
+        if (reserved < n) {
+            /* FILL ring full — driver hasn't drained yet; drop these or retry later */
+        }
+        for (__u32 i = 0; i < reserved; i++)
+            *xsk_ring_prod__fill_addr(&umem.fq, idx_fq + i) = addrs[i];
+        xsk_ring_prod__submit(&umem.fq, reserved);
     }
 
     bpf_map_delete_elem(xsks_map_fd, &qid);
@@ -215,7 +222,7 @@ Real NICs have multiple RX queues. Spawn one userspace thread per queue, one AF_
 
 ## Bullet Points
 
-- **AF_XDP** is kernel-bypass for packet processing — polled rings and no syscalls in the steady-state receive loop; zero-copy requires driver/NIC support.
+- **AF_XDP** is kernel-bypass for packet processing — polled rings and no syscalls in the steady-state receive loop (with `XDP_USE_NEED_WAKEUP`, poll the driver when it sets the need-wakeup flag); zero-copy requires driver/NIC support.
 - Architecture: UMEM (user memory) + 4 rings (FILL, RX, TX, COMP) + XDP redirect.
 - BPF side is one line: `bpf_redirect_map(&xsks_map, ctx->rx_queue_index, 0)`.
 - Throughput: **30+ Mpps per core** is a supported-NIC zero-copy result; veth/copy mode is for functional learning.

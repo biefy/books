@@ -106,7 +106,8 @@ int BPF_PROG(on_read)
     __s64 kid = bpf_get_stackid(ctx, &stacks, 0);
     __s64 uid = bpf_get_stackid(ctx, &stacks, BPF_F_USER_STACK);
 
-    /* Negative return = failure to capture (e.g., user stack with no frame ptrs). */
+    /* Negative return = failure to capture (returns a negative errno:
+       -EFAULT/-EEXIST/-ENOMEM, e.g., user stack with no frame ptrs). */
     if (kid < 0 && uid < 0)
         return 0;
 
@@ -125,7 +126,7 @@ int BPF_PROG(on_read)
 ### What's new
 
 - **Two `bpf_get_stackid` calls** — one kernel, one user.
-- **Negative return checks.** The helpers return -EFAULT on failure (e.g., user-stack walk hit a missing frame pointer).
+- **Negative return checks.** The helpers return a negative errno (-EFAULT/-EEXIST/-ENOMEM) on failure (e.g., user-stack walk hit a missing frame pointer, or the stack map slot was already taken).
 - **Composite key**: pack both stackids into a u64 so identical (kernel, user) pairs share a counter.
 - **Stack map sizing**: `MAX_STACK_DEPTH * sizeof(__u64)` is the per-stack value size; max_entries caps unique stacks.
 
@@ -214,7 +215,7 @@ This copies frames *directly into* a buffer you provide instead of going through
 
 ### Break 4 — Increase stack rate, fill the map
 
-Trace a high-rate event like `tcp_recvmsg` on a busy server. With many unique stacks, you'll fill `max_entries=16384`. Subsequent unique stacks fail to insert; their counts collide on existing stackids that happen to hash collide.
+Trace a high-rate event like `tcp_recvmsg` on a busy server. With many unique stacks, you'll fill `max_entries=16384`. When a new stack hashes to a slot already holding a *different* stack, `bpf_get_stackid` returns `-EEXIST` and the new stack is dropped — so genuinely new stacks are silently lost. Pass `BPF_F_REUSE_STACKID` and the behavior flips: the occupied slot is overwritten instead, so you keep the newest stack but lose the old one (and any counts keyed on the old stackid now point at the wrong frames).
 
 Lesson: size `stacks` and `counts` to expected unique-stack cardinality. For most production servers, 16K–64K is fine. Profilers often go to 1M.
 
@@ -222,7 +223,7 @@ Lesson: size `stacks` and `counts` to expected unique-stack cardinality. For mos
 
 ## What to read in the kernel
 
-- **`kernel/bpf/stackmap.c`** — the implementation. `htab_map_alloc` for the underlying hash, `bpf_get_stackid` is the helper. Read the file once; ~500 lines.
+- **`kernel/bpf/stackmap.c`** — the implementation. `stack_map_alloc` builds the map's own structure (a `buckets[]` array plus a per-CPU freelist of stack buffers — *not* the generic `htab_map_alloc`), and `bpf_get_stackid` is the helper. Read the file once; ~500 lines.
 - **`arch/x86/kernel/unwind_orc.c`** — the ORC unwinder x86_64 uses. Don't read deeply; just know it exists and is faster/more reliable than frame pointers.
 - **`kernel/bpf/helpers.c`** — search `bpf_get_stack`. The non-stackid version that copies frames directly.
 - **`tools/lib/bpf/btf.c` and `tools/perf/util/symbol.c`** — for inspiration on symbolization. The selftests don't have a clean example.

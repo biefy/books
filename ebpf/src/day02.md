@@ -60,7 +60,7 @@ You'll deepen this on Day 4. For today: **always check the lookup result against
 >
 > **Q: How does the kernel pick a hash function?**
 >
-> A: For arbitrary key sizes it uses `jhash` (Jenkins hash) via `bpf_jhash`. The hash is fixed; you don't get to choose. For very large keys this matters; for the 4-byte PIDs we're using today it doesn't.
+> A: For arbitrary key sizes the hash map computes the bucket index in `htab_map_hash` (`kernel/bpf/hashtab.c`), which calls `jhash2` for 4-byte-aligned keys and `jhash` (Jenkins hash) otherwise. The hash is fixed; you don't get to choose. For very large keys this matters; for the 4-byte PIDs we're using today it doesn't.
 
 ### `BPF_ANY` / `BPF_NOEXIST` / `BPF_EXIST` — update flags
 
@@ -98,7 +98,7 @@ struct {
     __type(value, __u64);
 } counts SEC(".maps");
 
-SEC("fentry/do_unlinkat")
+SEC("fentry/filename_unlinkat")
 int BPF_PROG(on_unlink)
 {
     __u32 pid = bpf_get_current_pid_tgid() >> 32;

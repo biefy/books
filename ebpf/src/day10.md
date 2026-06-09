@@ -73,7 +73,7 @@ char buf[64];
 bpf_probe_read_user_str(buf, sizeof(buf), (void *)PT_REGS_PARM1(ctx));
 ```
 
-The "_user" variant tells the kernel "this address is in *userspace*; use `copy_from_user` semantics, not direct deref." Misusing `_kernel` on a user pointer doesn't crash but reads garbage.
+The "_user" variant tells the kernel "this address is in *userspace*; use `copy_from_user` semantics, not direct deref." Misusing `_kernel` on a user pointer doesn't crash: the kernel-side read faults, the helper returns `-EFAULT`, and the destination buffer is zeroed.
 
 ## USDT: probes built into binaries
 
@@ -230,7 +230,7 @@ SEC("uprobe//bin/bash:0x123456")
 bpf_probe_read_kernel_str(&e->line, sizeof(e->line), line);  /* WRONG */
 ```
 
-You'll get garbage or zeros (`-EFAULT` from the helper). The kernel address space doesn't have user pages mapped at the same address. Always `_user` for uprobe-derived pointers.
+The helper returns `-EFAULT` and the destination is zeroed. The kernel address space doesn't have user pages mapped at the same address, so the kernel-side read faults. Always `_user` for uprobe-derived pointers.
 
 ### Break 4 — Convert uretprobe to uprobe
 

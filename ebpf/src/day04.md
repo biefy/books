@@ -23,7 +23,7 @@ The Verifier starts at instruction 0 with default register state. For each instr
 5. If it hits the complexity budget (1M instructions explored across all paths), it gives up: `BPF program is too large`.
 6. Every path must reach a `return`/exit instruction safely.
 
-Source: `kernel/bpf/verifier.c`. The function `do_check` is the main loop; `is_state_visited` is the pruning check; `mark_ptr_or_null_regs` is what we'll focus on today.
+Source: `kernel/bpf/verifier.c`. The function `do_check` is the main loop; `bpf_is_state_visited` (in `kernel/bpf/states.c`, split out of verifier.c in the 2025 refactor) is the pruning check; `mark_ptr_or_null_regs` is what we'll focus on today.
 
 ## The state machine for `bpf_map_lookup_elem`'s return value
 
@@ -76,7 +76,7 @@ struct {
     __type(value, __u64);
 } m SEC(".maps");
 
-SEC("fentry/do_unlinkat")
+SEC("fentry/filename_unlinkat")
 int BPF_PROG(rej)
 {
     __u32 key = 0;
@@ -160,6 +160,8 @@ if (key == 0) {
 }
 *v += 1;       // is v guaranteed non-NULL here?
 ```
+
+(For this to demonstrate anything, `key` must be runtime-unknown — change the base to `__u32 key = bpf_get_current_pid_tgid();`. If `key` were the compile-time `0` from the setup, Clang would constant-fold `if (key == 0)` to always-true and the program could actually load.)
 
 Verifier rejects. Why? Inside `if (key == 0)`, you proved `v` non-NULL. But the Verifier explores both branches:
 - `key == 0` branch: `v` is checked, then `*v += 1` runs with `v` proven non-NULL. OK.

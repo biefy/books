@@ -37,7 +37,7 @@ You can read the actual macro at `tools/lib/bpf/bpf_tracing.h`. It's about 30 li
 >
 > A: Because the BPF program's *real* signature must be `int (*)(unsigned long long *)` — that's what the trampoline calls. Without the macro, you'd write that signature and unpack `ctx[]` manually. The macro pretends you wrote a normal C function but generates the unpacking glue.
 
-## Argument access by program type — four flavors
+## Argument access by program type — five flavors
 
 Different program types access arguments five different ways. This is the chart you'll come back to whenever you're confused about a "wrong type" verifier rejection.
 
@@ -129,7 +129,7 @@ This is the modern typed interface to the same tracepoint event. The kernel hand
 
 ## Helpers vs kfuncs — the two extension mechanisms
 
-Yesterday you used `bpf_get_current_pid_tgid`, `bpf_ktime_get_ns`, `bpf_map_lookup_elem`. Those are **helpers** — a frozen UAPI list of functions BPF programs can call. You declared them via `bpf_helpers.h`, the linker resolves them to enum values (`BPF_FUNC_get_current_pid_tgid` = 14, etc.), and at runtime the BPF interpreter dispatches them through a per-program-type proto table.
+Yesterday you used `bpf_get_current_pid_tgid`, `bpf_ktime_get_ns`, `bpf_map_lookup_elem`. Those are **helpers** — a frozen UAPI list of functions BPF programs can call. You declared them via `bpf_helpers.h`, the linker resolves them to enum values (`BPF_FUNC_get_current_pid_tgid` = 14, etc.), and at load time the verifier/JIT resolves the call against a per-program-type proto table.
 
 But there's a second, newer mechanism: **kfuncs**. Functions declared in any kernel C file, registered via `BTF_KFUNCS_START`, that BPF programs can call by name (matched against kernel BTF at load time).
 
