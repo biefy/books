@@ -117,7 +117,7 @@ fentry:fib_table_lookup {
 ping -c 1 8.8.8.8
 ```
 
-You'll see one fib_table_lookup per packet — for ICMP roundtrip, four lookups (request out, reply in for forwarding decision, etc.).
+You'll see at least one fib_table_lookup per originated packet; exact counts vary with dst caching.
 
 ### Add a route
 

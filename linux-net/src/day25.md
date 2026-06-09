@@ -125,7 +125,7 @@ fentry:do_tls_setsockopt {
 }'
 ```
 
-Run the openssl client; you'll see TX_KEY and RX_KEY pushes.
+Run the openssl client; you'll see TX_KEY and RX_KEY pushes. (`do_tls_setsockopt` is `static`, so on some builds it may be inlined and the `fentry` probe won't attach — if so, trace the exported `tls_setsockopt` instead.)
 
 ### Watch hardware-offload status
 
@@ -176,7 +176,7 @@ Why doesn't Linux just do the TLS handshake in the kernel too? Wouldn't that sim
 
 **(1) Attack surface.** TLS handshake involves certificate validation, X.509 parsing (a notoriously bug-prone format), complex state machines, and the negotiation logic for ciphers, extensions, and protocol versions. Every CVE in OpenSSL is one your attackers would now see in the kernel. The kernel community is unwilling to take that maintenance burden.
 
-**(2) Velocity.** TLS evolves: new ciphers (every few years), protocol revisions (TLS 1.3 changed the handshake fundamentally; 1.4 in draft), extensions (PSK, 0-RTT, ECH, DC). Userspace libraries iterate on these; kernel kernel-versions iterate every 2–3 months but you can't roll out kernel updates as quickly as you can update OpenSSL.
+**(2) Velocity.** TLS evolves: new ciphers (every few years), protocol revisions (TLS 1.3 changed the handshake fundamentally), extensions (PSK, 0-RTT, ECH, DC). Userspace libraries iterate on these; kernel kernel-versions iterate every 2–3 months but you can't roll out kernel updates as quickly as you can update OpenSSL.
 
 **(3) The win is in the data path, not the handshake.** A handshake is ~milliseconds, once per connection. Bulk encryption is microseconds, *millions* of times per connection. kTLS targets the bulk: AES-GCM streaming. The handshake stays in userspace where it's well-tested and easy to update.
 

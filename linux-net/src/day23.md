@@ -38,11 +38,11 @@ The pump is invoked from two places:
 
 The de-facto default on most Linux distros (systemd sets `net.core.default_qdisc=fq_codel`; the upstream kernel default is still `pfifo_fast`, `sch_generic.c:37`), and a sensible default for almost all workloads. `net/sched/sch_fq_codel.c`. Combines two ideas:
 
-### SFQ — Stochastic Fair Queueing
+### FQ — Fair Queueing (DRR-based)
 
-Hash each flow's 5-tuple into one of N buckets (default 1024). Each bucket has its own FIFO. Dequeue rotates round-robin between non-empty buckets.
+Hash each flow's 5-tuple into one of N buckets (default 1024), each with its own FIFO. But unlike classic SFQ's plain round-robin, `fq_codel` schedules buckets with **DRR (deficit round-robin)** and keeps *two* lists: `new_flows` and `old_flows` (`sch_fq_codel.c`). A flow that just became active is appended to `new_flows` and gets priority on dequeue, so sparse/interactive flows (DNS, SYNs, a single request) jump ahead of bulk transfers. Each flow carries a `deficit` credit (`flow->deficit`, topped up by `quantum` each round); when it goes non-positive the flow is moved to `old_flows` and round-robins there.
 
-Result: no flow can starve others. A single greedy bulk transfer can't push out everyone else; each gets ~1/N of the bandwidth.
+Result: no flow can starve others, and latency-sensitive new flows aren't stuck behind a greedy bulk transfer. Each backlogged flow still gets ~1/N of the bandwidth over time.
 
 ### CoDel — Controlled Delay (RFC 8289)
 
@@ -52,11 +52,11 @@ Why drop early? **Bufferbloat.** Big buffers + drop-tail = packets queue forever
 
 ### Combined
 
-`fq_codel` runs SFQ as the per-flow scheduling, with CoDel as the AQM inside each bucket. You get fairness *and* latency control. Inspect:
+`fq_codel` runs DRR-based fair queueing (the "FQ") as the per-flow scheduling — with new/old-flow prioritization for latency — and CoDel as the AQM inside each bucket. You get fairness *and* latency control. Inspect:
 
 ```bash
 tc qdisc show dev eth0
-# qdisc fq_codel 0: root refcnt 2 limit 10240p flows 1024 quantum 1518 target 5ms
+# qdisc fq_codel 0: root refcnt 2 limit 10240p flows 1024 quantum 1514 target 5ms
 ```
 
 `limit` = max packets across all flows; `flows` = number of buckets; `quantum` = round-robin credit; `target` = CoDel latency target.
@@ -181,9 +181,9 @@ sudo tc qdisc replace dev lo root noqueue    # restore
 
 - **`net/sched/sch_generic.c:344`** — `sch_direct_xmit`. The "actually push to driver" call. Handles the requeue case when the driver returns BUSY.
 
-- **`net/sched/sch_fq_codel.c:185`** — `fq_codel_enqueue`. Hash the flow, find the bucket, append. Good warm-up: simple SFQ logic.
+- **`net/sched/sch_fq_codel.c:185`** — `fq_codel_enqueue`. Hash the flow, find the bucket, append (and link the flow into `new_flows` if it just became active). Good warm-up before the DRR dequeue logic.
 
-- **`net/sched/sch_fq_codel.c:282`** — `fq_codel_dequeue`. The interesting one — runs CoDel AQM logic in the dequeue path. Walk through to see how the latency-target check decides drops.
+- **`net/sched/sch_fq_codel.c:283`** — `fq_codel_dequeue`. The interesting one — runs CoDel AQM logic in the dequeue path. Walk through to see how the latency-target check decides drops.
 
 - **`net/sched/sch_fq.c`** — `fq` for BBR. Read the per-flow pacing logic. Notice `f->time_next_packet` (`sch_fq.c:94`) per flow tracks "earliest send time" to honor the pacing rate; the qdisc-wide field is `q->time_next_delayed_flow`.
 

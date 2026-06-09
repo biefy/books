@@ -121,7 +121,7 @@ The hash function is configurable via `net.ipv4.fib_multipath_hash_policy`:
 - **0** — L3 only: hash `(src_ip, dst_ip)`. **Same source-destination pair always uses one nexthop**, even if it's many connections. Poor balance for client-server workloads with few clients.
 - **1** — L4: hash `(src_ip, dst_ip, src_port, dst_port, proto)`. Different connections from the same client spread across nexthops. Useful when a few client/server pairs carry many connections, but it is an opt-in sysctl setting, not the kernel default.
 - **2** — Inner L3: for tunneled traffic, hash on the *inner* IPs, not the outer. Used when a single tunnel carries many flows that should spread across paths.
-- **3** — Custom: hash on a bitmask of fields you select via `net.ipv4.fib_multipath_hash_fields` (the sysctl accepts 0–3, `extra2 = SYSCTL_THREE`). Lets you cherry-pick exactly which L3/L4 fields enter the hash.
+- **3** — Custom: hash on a bitmask of fields you select via `net.ipv4.fib_multipath_hash_fields`. The mode itself is selected by `fib_multipath_hash_policy` (which accepts 0–3, `extra2 = SYSCTL_THREE`); when mode 3 is chosen, the field bitmask comes from `fib_multipath_hash_fields` (a mask, validated against `fib_multipath_hash_fields_all_mask`). Lets you cherry-pick exactly which L3/L4 fields enter the hash.
 
 The kernel default is mode 0. Pick mode 1 when you want better balancing across many L4 flows between the same endpoints. Mode 2 is for overlay networks (VXLAN, GRE) where outer addresses are the same for many inner flows.
 
@@ -131,12 +131,12 @@ ECMP guarantees a connection's packets stay on the same path **as long as the ne
 
 ### Resilient nexthop groups (kernel 5.13+)
 
-The fix: **resilient hashing**. Instead of `hash % N`, the kernel maintains a 65536-bucket table mapping buckets to nexthops. Removing a nexthop only re-maps the buckets that pointed at it; everything else is undisturbed.
+The fix: **resilient hashing**. Instead of `hash % N`, the kernel maintains an up-to-65535-bucket table mapping buckets to nexthops. Removing a nexthop only re-maps the buckets that pointed at it; everything else is undisturbed.
 
 ```bash
 sudo ip nexthop add id 10 via 192.168.1.1 dev eth0
 sudo ip nexthop add id 20 via 192.168.2.1 dev eth0
-sudo ip nexthop add id 100 group 10/20 type resilient buckets 65536 idle_timer 120
+sudo ip nexthop add id 100 group 10/20 type resilient buckets 65535 idle_timer 120
 sudo ip route add default nhid 100
 ```
 
@@ -179,7 +179,7 @@ You'll see `table_id=99` for the first ping and `table_id=254` (main) for the se
 
 ## What to read in the kernel
 
-- **`net/core/fib_rules.c:313`** — `fib_rules_lookup`. The rule-walking dispatcher used by all protocols (IPv4, IPv6, DECnet). Read top to bottom (~50 lines for the function itself). Notice how it iterates `ops->rules_list` in priority order, calls `ops->match` for each rule's predicate, and `ops->action` once a match is found. The protocol-specific rule type plugs into this generic engine.
+- **`net/core/fib_rules.c:313`** — `fib_rules_lookup`. The rule-walking dispatcher used by all protocols (IPv4, IPv6). Read top to bottom (~50 lines for the function itself). Notice how it iterates `ops->rules_list` in priority order, calls `ops->match` for each rule's predicate, and `ops->action` once a match is found. The protocol-specific rule type plugs into this generic engine.
 
 - **`net/ipv4/fib_rules.c`** — IPv4 specialization. The `match` callback `fib4_rule_match` checks src, dst, tos, fwmark, ipproto. Read it to see what each rule selector compiles to at runtime — it's just a chain of compares against `flowi4` fields.
 

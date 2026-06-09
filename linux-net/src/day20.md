@@ -52,8 +52,8 @@ Each `(net, protocol_family, hook_id)` triple has its own list of registered cal
 Priority determines order. Constants in `enum nf_ip_hook_priorities` (`include/uapi/linux/netfilter_ipv4.h`):
 
 ```c
-NF_IP_PRI_RAW              = -300,    // raw table (early)
-NF_IP_PRI_CONNTRACK_DEFRAG = -400,    // conntrack defrag
+NF_IP_PRI_CONNTRACK_DEFRAG = -400,    // conntrack defrag (earliest)
+NF_IP_PRI_RAW              = -300,    // raw table
 NF_IP_PRI_CONNTRACK        = -200,    // conntrack itself
 NF_IP_PRI_MANGLE           = -150,    // mangle table
 NF_IP_PRI_NAT_DST          = -100,    // dnat
@@ -183,7 +183,7 @@ sudo nft delete table inet test
 
 ## What to read in the kernel
 
-- **`net/netfilter/core.c:612`** — `nf_hook_slow`. The dispatcher. Read it end to end (~80 lines). Notice how it walks the per-hook list, dispatches each hook, and handles each verdict (especially `NF_QUEUE`'s userspace round-trip).
+- **`net/netfilter/core.c:612`** — `nf_hook_slow`. The dispatcher. Read it end to end (~33 lines). Notice how it walks the per-hook list, dispatches each hook, and handles each verdict. Its `switch` only handles `NF_ACCEPT`/`NF_DROP`/`NF_QUEUE`/`NF_STOLEN`; anything else (including `NF_REPEAT`/`NF_STOP`) falls to a `default: WARN_ON_ONCE(1)`. So if you go looking for `NF_REPEAT` handling here you won't find it — repeat is implemented inside the *consumers* (e.g. conntrack returns `-NF_REPEAT` to re-run itself), not in the dispatcher.
 
 - **`net/netfilter/core.c:550`** — `nf_register_net_hook`. The registration function. How a module (nftables, conntrack, IPVS) plants its hook callback. Note the per-priority insertion (sorted insertion).
 

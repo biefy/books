@@ -28,7 +28,7 @@ n = list_first_entry(&list, struct napi_struct, poll_list);
 budget -= napi_poll(n, &repoll);
 ```
 
-`napi_poll` is the driver's poll function (e.g., `e1000_clean_rx_irq`, `mlx5e_poll_rx_cq`). The budget caps how many packets one softirq run can process — default 300 from `net.core.netdev_budget`.
+The core `napi_poll` wrapper (`net/core/dev.c`) invokes the driver's registered `->poll` (e.g. `e1000_clean`, `mlx5e_napi_poll`), which in turn call RX helpers like `e1000_clean_rx_irq` / `mlx5e_poll_rx_cq`. The budget caps how many packets one softirq run can process — default 300 from `net.core.netdev_budget`.
 
 ## Stage 2: Driver → native XDP → skb → GRO
 
@@ -38,9 +38,9 @@ Inside the driver's poll, for each completed RX descriptor:
 2. **Call XDP** if attached. `XDP_DROP`, `XDP_TX`, and `XDP_REDIRECT` consume the packet at the driver/XDP layer. Only `XDP_PASS` says, "turn this into a normal kernel packet."
 3. **Wrap the DMA buffer in an skb.** Modern drivers use `build_skb` or `napi_build_skb` after `XDP_PASS` (zero-copy of payload — the driver already DMAed bytes into a page; the skb's `head/data/tail` point at it). Generic XDP is the exception: it runs later on an already-created skb in `net/core/dev.c`.
 4. **Set `skb->protocol`** via `eth_type_trans` (strips the Ethernet header from `data`, advances `mac_header`).
-5. **Pass to GRO**: `napi_gro_receive(napi, skb)` (or in modern drivers via `napi->gro` accumulator).
+5. **Pass to GRO**: the driver calls `napi_gro_receive(napi, skb)`, a `static inline` in `include/linux/netdevice.h` that funnels into `gro_receive_skb` (and `dev_gro_receive`) on the `napi->gro` accumulator.
 
-GRO (Generic Receive Offload) tries to merge consecutive segments of the same flow into one big skb before the stack sees it. A 64KB GRO superpacket means one trip up the stack instead of 40-something. Code: `net/core/gro.c`. Look at `napi_gro_receive` and the per-protocol callbacks (`tcp4_gro_receive`).
+GRO (Generic Receive Offload) tries to merge consecutive segments of the same flow into one big skb before the stack sees it. A 64KB GRO superpacket means one trip up the stack instead of 40-something. Code: `net/core/gro.c`. Look at `dev_gro_receive` (the workhorse), the exported `gro_receive_skb`, and the per-protocol callbacks (`tcp4_gro_receive`). Note `napi_gro_receive` itself is a `static inline` in `include/linux/netdevice.h`, so it is not fentry-traceable — attach to `gro_receive_skb` instead.
 
 ## Stage 3: GRO → `netif_receive_skb` → `__netif_receive_skb_core`
 
@@ -153,7 +153,7 @@ Watch `softnet_stat` shift, then restore the original budget so the host is not 
   - `__napi_poll` (line 7719) — softirq's per-NAPI poll loop.
   - `__netif_receive_skb_core` (line 5972) — the workhorse.
   - `netif_receive_skb` (line 6454) — entry from drivers/GRO.
-- **`net/core/gro.c`** — GRO machinery. Read `napi_gro_receive`, `gro_list_prepare`, `gro_complete`.
+- **`net/core/gro.c`** — GRO machinery. Read `dev_gro_receive`, `gro_receive_skb`, `gro_list_prepare`, `gro_complete`. (`napi_gro_receive` is a `static inline` in `netdevice.h`, not here.)
 - **`net/ipv4/ip_input.c`** — IPv4 receive.
   - `ip_rcv` (line 603), `ip_rcv_core` (line 499), `ip_rcv_finish` (line 478), `ip_local_deliver` (line 250).
 - **`net/ipv4/af_inet.c`** — search `ip_packet_type`, see how `ip_rcv` is registered.

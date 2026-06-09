@@ -32,7 +32,7 @@ Each worker now has its own listening socket and its own accept queue. No shared
 
 ### How the kernel picks one
 
-When a SYN arrives, the kernel does a lookup in **`__inet_lookup_listener`** (`net/ipv4/inet_hashtables.c:467`). It finds the bind hash bucket for `(addr, port)`. If multiple sockets share that slot via `SO_REUSEPORT`, the kernel calls **`reuseport_select_sock`** (`net/core/sock_reuseport.c:568`).
+When a SYN arrives, the kernel does a lookup in **`__inet_lookup_listener`** (`net/ipv4/inet_hashtables.c:467`). It finds the `lhash2` listener bucket for `(addr, port)` (via `inet_lhash2_lookup`). If multiple sockets share that slot via `SO_REUSEPORT`, the kernel calls **`reuseport_select_sock`** (`net/core/sock_reuseport.c:568`).
 
 The default selector hashes the 4-tuple (`(saddr, sport, daddr, dport)`) modulo N. Same client always lands on the same worker — connection affinity, useful for per-worker caches.
 

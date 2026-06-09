@@ -205,7 +205,7 @@ Always restore the timeout. It is global state, and lowering it can break legiti
 ## Bullet Points
 
 - **Conntrack** tracks per-connection state in a hash keyed by 5-tuple, per-netns.
-- States: **NEW, ESTABLISHED, RELATED, INVALID**, plus reply-direction variants.
+- States: **NEW, ESTABLISHED, RELATED**, plus reply-direction variants — and **INVALID** (a matcher classification via `NF_CT_STATE_INVALID_BIT`, not an `ip_conntrack_info` enum value).
 - Hooked at **PRE_ROUTING** (priority -200) and **LOCAL_OUT** to capture both received and locally-generated traffic.
 - **Two-phase commit:** entry created on first packet, confirmed only on `NF_ACCEPT`. Bogus packets don't fill the table.
 - **`nf_conntrack_max`** caps total entries; **`nf_conntrack_buckets`** sizes the hash.

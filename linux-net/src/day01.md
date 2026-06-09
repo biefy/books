@@ -55,11 +55,11 @@ struct skb_shared_info {
 >
 > **Q: What's the cb[48] for?**
 >
-> A: It's a per-packet scratchpad. Each protocol layer can stash state there. TCP uses `TCP_SKB_CB(skb)` to keep sequence numbers, flags, and SACK info. The kernel zeroes it across `skb_clone` if you don't explicitly preserve it. 48 bytes is generous — most layers use a fraction.
+> A: It's a per-packet scratchpad. Each protocol layer can stash state there. TCP uses `TCP_SKB_CB(skb)` to keep sequence numbers, flags, and SACK info. Across `skb_clone` the `cb` contents are *copied* verbatim into the clone — `__copy_skb_header` (`net/core/skbuff.c:1552`) does `memcpy(new->cb, old->cb, sizeof(old->cb))` — so the clone starts with the same control data. Layers that need clone-independent state must reset `cb` themselves. 48 bytes is generous — most layers use a fraction.
 >
 > **Q: How big is a fresh sk_buff descriptor?**
 >
-> A: Around 256 bytes on x86_64 (verify: `pahole sk_buff` in your build directory after compiling). The structure has been carefully cache-line-aligned and the fields ordered for hot/cold separation. Read the comments around the field declarations to see what's "RX hot" vs "TX hot."
+> A: Around 230 bytes on x86_64 (verify: `pahole sk_buff` in your build directory after compiling — exact size is config-dependent). The structure has been carefully cache-line-aligned and the fields ordered for hot/cold separation. Read the comments around the field declarations to see what's "RX hot" vs "TX hot."
 
 ## sk_buff lifecycle: cradle to grave
 
@@ -182,7 +182,7 @@ sudo perf trace --no-syscalls -e skb:kfree_skb 2>&1 | awk '{print $NF}' | sort |
 - Allocate via **`__alloc_skb`** / **`napi_alloc_skb`** / **`build_skb`**; free via **`kfree_skb_reason`**.
 - **`skb_clone`** shares data; **`skb_copy`** duplicates everything.
 - **`enum skb_drop_reason`** is the new-and-required way to attribute drops.
-- The structure is large (~256 bytes); fields are cache-line ordered; read the comments.
+- The structure is large (~230 bytes; verify with pahole, config-dependent); fields are cache-line ordered; read the comments.
 
 ---
 

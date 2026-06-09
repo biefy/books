@@ -21,7 +21,7 @@ sys_sendto / sys_write
       → sk->sk_prot->sendmsg     // dispatch by protocol
 ```
 
-For TCP that's **`tcp_sendmsg`** at `net/ipv4/tcp.c:1450`. The function locks the socket, then calls `tcp_sendmsg_locked` (line 1120) which is where the real work happens.
+For TCP that's **`tcp_sendmsg`** at `net/ipv4/tcp.c:1447`. The function locks the socket, then calls `tcp_sendmsg_locked` (line 1117) which is where the real work happens.
 
 ## Stage 2: copy and queue
 
@@ -154,7 +154,7 @@ sudo tc qdisc replace dev eth0 root fq_codel
 
 ## What to read in the kernel
 
-- **`net/ipv4/tcp.c`** — `tcp_sendmsg` (line 1450), `tcp_sendmsg_locked` (line 1120). The core of TCP user-side semantics.
+- **`net/ipv4/tcp.c`** — `tcp_sendmsg` (line 1447), `tcp_sendmsg_locked` (line 1117). The core of TCP user-side semantics.
 - **`net/ipv4/tcp_output.c`** — `tcp_write_xmit` (line 2962), `tcp_transmit_skb`. Decides what to send when.
 - **`net/ipv4/ip_output.c`** — `ip_queue_xmit` (line 546), `ip_local_out` (line 125), `ip_finish_output2`.
 - **`net/core/dev.c`** — `__dev_queue_xmit` (line 4766), the qdisc dance.

@@ -66,7 +66,7 @@ sk_state             // TCP_ESTABLISHED, TCP_LISTEN, ... (TCP-specific
 sk_receive_queue     // skb_queue: incoming packets waiting to be read
 sk_write_queue       // skb_queue: outgoing skbs not yet ACKed (TCP)
 sk_rcvbuf, sk_sndbuf // per-socket buffer limits
-sk_filter            // BPF socket filter (sk_filter_attach)
+sk_filter            // BPF socket filter (sk_attach_filter)
 sk_lock              // per-socket lock (lock_sock / release_sock)
 sk_prot              // the proto vtable
 sk_dst_cache         // refcounted route entry — see Day 8
@@ -93,12 +93,12 @@ Walk through a TCP server's lifecycle, kernel-side:
 
 1. Looks up `struct socket` from FD.
 2. Calls `sock->ops->bind` — for AF_INET TCP that's **`inet_bind`** (`net/ipv4/af_inet.c:472`).
-3. `inet_bind` calls `sk->sk_prot->bind` if defined, else **`inet_csk_get_port`** (`net/ipv4/inet_connection_sock.c:500`) — reserves the port in the per-netns bind hash table (`tcp_hashinfo.bhash`).
+3. `__inet_bind` calls **`sk->sk_prot->get_port(sk, snum)`** (`net/ipv4/af_inet.c:543`) — for TCP that's **`inet_csk_get_port`** (`net/ipv4/inet_connection_sock.c:500`), which reserves the port in the per-netns bind hash table (`tcp_hashinfo.bhash`). (A separate `sk_prot->bind` hook exists too, but only RAW sockets define it.)
 4. The bind table is keyed by `(netns, port)` — that's why two netns can both bind `:80`.
 
 ### `listen(fd, backlog)`
 
-Marks the sock as `TCP_LISTEN`. Allocates the **accept queue** (a hash of incomplete handshakes — half-open SYN_RCVD — and a list of completed connections waiting for `accept()`).
+Marks the sock as `TCP_LISTEN`. Allocates the **accept queue**: a FIFO list of *completed* connections waiting for `accept()` (`request_sock_queue.rskq_accept_head`). Half-open handshakes (SYN_RECV) don't live here — they sit in the established hash as `TCP_NEW_SYN_RECV` request socks until the handshake finishes.
 
 ### `connect(fd, ...)` — client side
 
@@ -118,7 +118,7 @@ The original listening socket stays — accept just hands you a *new* socket for
 
 ## The two hash tables: `bhash` and `ehash`
 
-`struct inet_hashinfo` (used by both TCP and UDP) holds two key data structures:
+`struct inet_hashinfo` (used by TCP — UDP has its own `struct udp_table`, see Day 14) holds two key data structures:
 
 - **`bhash`** — the bind hash. Keyed by port number; each bucket holds a list of bound sockets (multiple if `SO_REUSEPORT`). Lookup on `bind()` and on incoming SYN to find listener.
 - **`ehash`** — the established hash. Keyed by the 4-tuple `(saddr, sport, daddr, dport)`. Lookup on every incoming TCP packet to find the existing connection.

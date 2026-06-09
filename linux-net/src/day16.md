@@ -28,8 +28,14 @@ struct tcp_congestion_ops {
     /* Compute slow-start threshold (used after loss). */
     u32 (*ssthresh)(struct sock *sk);
 
-    /* The big one: called per ACK to update cwnd. */
+    /* The big one: called per ACK to update cwnd (classic CCs like CUBIC/Reno). */
     void (*cong_avoid)(struct sock *sk, u32 ack, u32 acked);
+
+    /* Alternative to cong_avoid: full per-ACK control with a rate_sample.
+     * A CC defines cong_avoid XOR cong_control. BBR uses this one
+     * (.cong_control = bbr_main) to drive pacing + cwnd from its model. */
+    void (*cong_control)(struct sock *sk, u32 ack, int flag,
+                         const struct rate_sample *rs);
 
     /* Cleanup before/after congestion event. */
     void (*set_state)(struct sock *sk, u8 new_state);
@@ -123,9 +129,9 @@ Some algorithms are kernel modules (`tcp_bbr.ko`, `tcp_dctcp.ko`); load with `mo
 
 For each TCP connection:
 
-1. **At connect/accept**: `tcp_init_sock` calls `tcp_assign_congestion_control` which picks the algorithm (per-route, per-default, per-app sockopt).
+1. **At socket creation**: `tcp_init_sock` calls `tcp_assign_congestion_control` which picks the algorithm (per-route, per-default, per-app sockopt).
 2. **`init` callback** runs once. Allocates per-sock private state (in `icsk_ca_priv` — 104 bytes of scratch space inside the inet_connection_sock).
-3. **Per ACK**: `tcp_ack` (`tcp_input.c`) calls `cong_avoid(sk, ack, acked)`. The algorithm updates `tp->snd_cwnd` based on its model.
+3. **Per ACK**: `tcp_ack` (`tcp_input.c`) calls `cong_avoid(sk, ack, acked)` for classic CCs (CUBIC/Reno). Algorithms that define `cong_control` instead (BBR, DCTCP) get `cong_control(sk, ack, flag, rs)` with a full `rate_sample`. Either way the algorithm updates `tp->snd_cwnd` based on its model.
 4. **On loss/RTO**: kernel calls `set_state(sk, CA_Loss)` and `ssthresh(sk)`. The algorithm computes the new threshold and sets cwnd accordingly.
 5. **On RTT sample**: kernel calls `pkts_acked(sk, sample)` with the latest RTT measurement. Pure feedback for the algorithm.
 

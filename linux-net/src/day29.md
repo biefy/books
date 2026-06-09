@@ -6,7 +6,7 @@
 
 A datacenter-scale L4 encryption protocol developed by Google, contributed to Linux in 2025 (in-tree by 7.x).
 
-- **What:** symmetric authenticated encryption applied to L4 packets (UDP or TCP). Per-flow keys, designed for hardware offload (NICs with PSP-aware crypto).
+- **What:** symmetric authenticated encryption applied to L4 payloads inside a UDP encapsulation (`PSP_DEFAULT_UDP_PORT` 1000); the in-tree Linux socket integration upgrades TCP connections. Per-flow keys, designed for hardware offload (NICs with PSP-aware crypto).
 - **Why:** datacenter operators want confidentiality and integrity on internal traffic without IPsec's complexity (IKE, SA database, kernel SADB) or TLS's per-connection handshake. PSP is lightweight: per-flow shared secret negotiated out of band, then plain symmetric crypto on every packet.
 - **When:** datacenter East-West traffic between trusted hosts running compatible PSP stacks. Not for internet-facing.
 - **Where:** **`net/psp/`** — `psp_main.c` (registration), `psp_sock.c` (socket integration), `psp_nl.c` (netlink config interface), `psp.h` (UAPI).
@@ -27,7 +27,7 @@ kfree_skb_reason(skb, SKB_DROP_REASON_TCP_INVALID_SEQUENCE);
 Replaces the older `kfree_skb(skb)`. The reason is one of ~125 categories defined in `include/net/dropreason-core.h`:
 
 ```c
-enum skb_drop_reason {
+enum skb_drop_reason {     /* names real; order/values abridged for illustration */
     SKB_DROP_REASON_NOT_SPECIFIED,        // legacy callers
     SKB_DROP_REASON_NO_SOCKET,             // no listener
     SKB_DROP_REASON_PKT_TOO_SMALL,         // truncated
@@ -131,7 +131,7 @@ Modern tc-bpf attach with `bpf_link` lifecycle and link-based multi-program orde
 
 ### bigtcp
 
-TCP segments larger than 64 KB on the local stack (up to 4 MB). Useful for very fast NICs (200/400 Gbps) where the per-segment overhead becomes the bottleneck. Configurable via `ip link set <dev> gso_max_size <bytes>` and matching `gro_max_size`.
+TCP segments larger than 64 KB on the local stack (up to ~512 KB, `GSO_MAX_SIZE`). Useful for very fast NICs (200/400 Gbps) where the per-segment overhead becomes the bottleneck. Configurable via `ip link set <dev> gso_max_size <bytes>` and matching `gro_max_size`.
 
 ### Page Pool memory provider
 

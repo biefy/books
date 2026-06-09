@@ -16,9 +16,9 @@ Understanding UDP gives you the *baseline* L4 path. TCP (Days 15–17) is "UDP p
 sendmsg(fd, msg, flags)
   → sock_sendmsg
     → udp_sendmsg                       // net/ipv4/udp.c:1233
-      → ip_make_skb / ip_append_data    // net/ipv4/ip_output.c:1551, 1357
+      → ip_make_skb / ip_append_data    // net/ipv4/ip_output.c:1553, 1359
       → udp_send_skb
-        → ip_send_skb                    // net/ipv4/ip_output.c:1504
+        → ip_send_skb                    // net/ipv4/ip_output.c:1506
           → ip_local_out → ip_output → ... (Day 3's TX path)
 ```
 
@@ -37,10 +37,10 @@ Unlike TCP, UDP doesn't keep an `sk_write_queue` of unsent skbs. As soon as `udp
 
 ```c
 ip_rcv → ip_local_deliver → ip_local_deliver_finish
-  → udp_rcv(skb)                         // net/ipv4/udp.c:2580
+  → udp_rcv(skb)                         // net/ipv4/udp.c:2588
     → __udp4_lib_lookup                   // net/ipv4/udp.c:667 — find sock by 4-tuple
-    → udp_queue_rcv_skb                  // net/ipv4/udp.c:2414
-      → __udp_queue_rcv_skb               // net/ipv4/udp.c:2299
+    → udp_queue_rcv_skb                  // net/ipv4/udp.c:2422
+      → __udp_queue_rcv_skb               // net/ipv4/udp.c:2307
         → sock_queue_rcv_skb_reason       // append to sk->sk_receive_queue
         → sk->sk_data_ready(sk)           // wake any recvmsg waiters
 ```
@@ -52,7 +52,7 @@ Given an incoming datagram with `(saddr, sport, daddr, dport)`, find the listeni
 - **Unconnected** (default): bound to `(local_addr, local_port)`. Receives datagrams addressed to that port regardless of source.
 - **Connected** (after `connect()` on a SOCK_DGRAM): bound to a specific 4-tuple. Receives only from the matching peer.
 
-The lookup walks the bind hash and prefers more-specific matches (4-tuple beats 2-tuple). Per-netns, of course. With SO_REUSEPORT, multiple sockets share the bind slot; the kernel hashes the 4-tuple to pick one (Day 24).
+The lookup walks the UDP hash table (`udp_table`, with its addr+port `hslot2` buckets — not the TCP/`inet_hashinfo` bind hash) and prefers more-specific matches (4-tuple beats 2-tuple). Per-netns, of course. With SO_REUSEPORT, multiple sockets share the bind slot; the kernel hashes the 4-tuple to pick one (Day 24).
 
 ### Queueing
 
@@ -65,7 +65,7 @@ If the queue is full (>= `sk_rcvbuf`), the packet is dropped — UDP doesn't pus
 ```c
 recvmsg(fd, msg, flags)
   → sock_recvmsg
-    → udp_recvmsg                         // net/ipv4/udp.c:2023
+    → udp_recvmsg                         // net/ipv4/udp.c:2031
       → __skb_recv_udp                    // dequeue from sk_receive_queue
       → skb_copy_datagram_msg              // copy into user buffer
       → skb_consume_udp                    // free the skb (UDP-specific wrapper)
@@ -122,15 +122,15 @@ sudo sysctl -w net.core.rmem_max=33554432
 
 - **`net/ipv4/udp.c:1233`** — `udp_sendmsg`. The TX side. Read top to bottom (~274 lines). Notice three sections: control-message parsing (cmsg loop), route lookup, and skb construction (the `ip_make_skb` vs `ip_append_data` branch). If you ever wonder "what does MSG_CONFIRM do?" — search this file.
 
-- **`net/ipv4/udp.c:2580`** — `udp_rcv`. The RX entry. Short (~107 lines). Performs the basic checks (length, checksum), looks up the destination socket via `__udp4_lib_lookup`, dispatches to multicast/unicast paths.
+- **`net/ipv4/udp.c:2588`** — `udp_rcv`. The RX entry. Short (~107 lines). Performs the basic checks (length, checksum), looks up the destination socket via `__udp4_lib_lookup`, dispatches to multicast/unicast paths.
 
 - **`net/ipv4/udp.c:667`** — `__udp4_lib_lookup`. The 4-tuple → socket lookup. Note the two-pass strategy: first check the 4-tuple-keyed (connected) hash, then fall back to the 2-tuple (port-only) hash. Reading this clarifies what "connected UDP" actually means kernel-side.
 
-- **`net/ipv4/udp.c:2414`** — `udp_queue_rcv_skb`. The queueing path. It's a thin (~21-line) wrapper; the work — the SO_FILTER / sk_filter check (BPF socket filters), the multicast membership check, and the back-pressure handling — lives in the call chain it heads (`udp_queue_rcv_one_skb` → `__udp_queue_rcv_skb` → `__udp_enqueue_schedule_skb`), which runs ~200 lines total including that slow path.
+- **`net/ipv4/udp.c:2422`** — `udp_queue_rcv_skb`. The queueing path. It's a thin (~21-line) wrapper; the work — the SO_FILTER / sk_filter check (BPF socket filters), the multicast membership check, and the back-pressure handling — lives in the call chain it heads (`udp_queue_rcv_one_skb` → `__udp_queue_rcv_skb` → `__udp_enqueue_schedule_skb`), which runs ~200 lines total including that slow path.
 
-- **`net/ipv4/udp.c:2023`** — `udp_recvmsg`. The dequeue side. Read the MSG_PEEK handling — it's surprisingly subtle (locks the socket, walks the queue without removing).
+- **`net/ipv4/udp.c:2031`** — `udp_recvmsg`. The dequeue side. Read the MSG_PEEK handling — it's surprisingly subtle (locks the socket, walks the queue without removing).
 
-- **`net/ipv4/ip_output.c:1551`** — `ip_make_skb`. How a single-shot UDP packet is built. Compare against the corked `ip_append_data` to understand the trade-off.
+- **`net/ipv4/ip_output.c:1553`** — `ip_make_skb`. How a single-shot UDP packet is built. Compare against the corked `ip_append_data` to understand the trade-off.
 
 - **`net/ipv4/udp_offload.c`** — UDP GSO/GRO. Search `udp4_ufo_fragment` for the segmentation function and `udp_gro_receive` for the receive-side coalescing. Read this if you're pushing high-rate UDP (QUIC) and want to understand why GSO matters.
 

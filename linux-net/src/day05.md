@@ -119,11 +119,15 @@ cat /proc/sys/net/ipv4/tcp_congestion_control
 sudo ip netns exec green cat /proc/sys/net/ipv4/tcp_congestion_control
 # bbr (a new ns inherits init_net's congestion control, here bbr)
 
-# Set independently:
-sudo ip netns exec green sysctl -w net.ipv4.tcp_congestion_control=bbr
+# Set independently — pick a DIFFERENT algorithm so the change is visible:
+sudo ip netns exec green sysctl -w net.ipv4.tcp_congestion_control=cubic
+
+# Confirm green changed but init_net did NOT:
+sudo ip netns exec green cat /proc/sys/net/ipv4/tcp_congestion_control   # cubic
+cat /proc/sys/net/ipv4/tcp_congestion_control                            # still bbr
 ```
 
-Different values per ns — the per-ns sysctl table is at `net->sysctls`.
+Different values per ns — green now reads `cubic` while init_net stays `bbr`, proving the tables are independent. The per-ns sysctl table is at `net->sysctls`.
 
 ### Per-ns routing
 
@@ -151,6 +155,8 @@ fentry:cleanup_net { printf("cleanup_net work %p\n", (void *)args->work); }
 sudo ip netns add demo
 sudo ip netns delete demo
 ```
+
+> **Caveat:** `setup_net` is `static __net_init` (`net/core/net_namespace.c`), so it may be inlined or freed after boot and `fentry:setup_net` may not reliably attach. If it doesn't fire, trace the creation path via `copy_net_ns` (its caller, which has a `struct net *` once `setup_net` returns) instead. `cleanup_net` is a work-queue function and attaches reliably.
 
 You'll see the ns being created and torn down.
 

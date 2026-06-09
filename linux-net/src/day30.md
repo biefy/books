@@ -62,7 +62,7 @@ Let's pre-walk what your trace might look like.
 ### Step 3: TCP handshake completion (SYN-ACK + ACK)
 
 Inbound SYN-ACK:
-- NIC → NAPI → driver → skb → GRO (probably no coalesce for 1 packet) → `ip_rcv` → `NF_INET_PRE_ROUTING` → conntrack matches → `ip_rcv_finish` → routing → `ip_local_deliver` → `NF_INET_LOCAL_IN` hook → `tcp_v4_rcv` (`net/ipv4/tcp_ipv4.c:2072`) → ehash lookup finds our sock in SYN_SENT → `tcp_rcv_state_process` (`net/ipv4/tcp_input.c:7119`) sees SYN+ACK → calls `tcp_set_state(sk, TCP_ESTABLISHED)` and queues outgoing ACK.
+- NIC → NAPI → driver → skb → GRO (probably no coalesce for 1 packet) → `ip_rcv` → `NF_INET_PRE_ROUTING` → conntrack matches → `ip_rcv_finish` → routing → `ip_local_deliver` → `NF_INET_LOCAL_IN` hook → `tcp_v4_rcv` (`net/ipv4/tcp_ipv4.c:2068`) → ehash lookup finds our sock in SYN_SENT → `tcp_rcv_state_process` (`net/ipv4/tcp_input.c:7119`) sees SYN+ACK → calls `tcp_set_state(sk, TCP_ESTABLISHED)` and queues outgoing ACK.
 
 Outbound ACK: same path as the SYN, just smaller and through a now-EST sock.
 
@@ -70,7 +70,7 @@ Outbound ACK: same path as the SYN, just smaller and through a now-EST sock.
 
 `curl` calls `send(fd, "GET / HTTP/1.1\r\n...", n, 0)`.
 
-- `tcp_sendmsg` (`net/ipv4/tcp.c:1450`) → `tcp_sendmsg_locked` → copy to skb → append to `sk_write_queue` → `tcp_push` → `tcp_write_xmit` decides to send (cwnd open, snd_wnd open, Nagle satisfied) → `tcp_transmit_skb` → IP → ... → wire.
+- `tcp_sendmsg` (`net/ipv4/tcp.c:1447`) → `tcp_sendmsg_locked` → copy to skb → append to `sk_write_queue` → `tcp_push` → `tcp_write_xmit` decides to send (cwnd open, snd_wnd open, Nagle satisfied) → `tcp_transmit_skb` → IP → ... → wire.
 
 ### Step 5: HTTP response (TCP recv)
 
@@ -82,7 +82,7 @@ Inbound packets arrive: NIC → NAPI → driver → skb → GRO (coalesce up to 
 
 ### Step 6: TCP close
 
-`curl` finishes, calls `close(fd)`. `tcp_close` (`net/ipv4/tcp.c:3313`) builds FIN, sends it, transitions to `TCP_FIN_WAIT_1`, waits for peer's ACK, transitions to `TCP_FIN_WAIT_2`, waits for peer's FIN, transitions to `TCP_TIME_WAIT`. ~60s later: state CLOSED, sock freed.
+`curl` finishes, calls `close(fd)`. `tcp_close` (`net/ipv4/tcp.c:3310`) builds FIN, sends it, transitions to `TCP_FIN_WAIT_1`, waits for peer's ACK, transitions to `TCP_FIN_WAIT_2`, waits for peer's FIN, transitions to `TCP_TIME_WAIT`. ~60s later: state CLOSED, sock freed.
 
 ### What you saw
 
@@ -145,7 +145,7 @@ In 30 days you skipped:
 - **CAN bus** (`net/can/`) — automotive networking.
 - **NFC** (`net/nfc/`).
 - **L2TP, PPP, X.25** — legacy/specialized protocols.
-- **Phonet, Sigma**, etc. — single-application stacks.
+- **Phonet, QRTR**, etc. — single-application stacks.
 
 If your work touches one of these, apply the same methodology — read source, trace with tools, observe — to learn it. The patterns repeat.
 

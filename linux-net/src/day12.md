@@ -12,7 +12,7 @@ In Linux, every tunnel is a **netdev** (`vxlan0`, `gre0`, `wg0`). You configure 
 
 ![tunnel types](diagrams/day12_tunnels.png)
 
-### IPIP — IP-in-IP (RFC 1853)
+### IPIP — IP-in-IP (RFC 2003)
 
 The simplest tunnel: outer IPv4 header + inner IP packet. 20 bytes overhead. No extra metadata.
 

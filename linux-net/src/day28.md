@@ -83,13 +83,13 @@ For high-rate receivers, this eliminates the per-recv submission cost entirely.
 
 ### Provided buffers (5.19+)
 
-Instead of providing a buffer with each recv, register a pool of buffers:
+Instead of providing a buffer with each recv, register a provided buffer ring the kernel draws from:
 
 ```c
-io_uring_register_buffers(&ring, iovs, n);
+io_uring_register_buf_ring(&ring, &reg, 0);   /* IORING_REGISTER_PBUF_RING */
 ```
 
-When you submit recv with `IOSQE_BUFFER_SELECT`, the kernel picks a buffer from the pool when data is actually available — not at submit time. Saves buffer allocation churn.
+When you submit recv with `IOSQE_BUFFER_SELECT`, the kernel picks a buffer from the ring when data is actually available — not at submit time. Saves buffer allocation churn.
 
 ### Zero-copy send (6.0+)
 
@@ -118,7 +118,7 @@ For large transfers (> ~4 KB), zero-copy send approaches the limits of what the 
 
 ### Zero-copy receive (experimental 6.x)
 
-Day 29 mentions **io_iov** and **page pool memory provider** — the infrastructure to extend zero-copy semantics to RX. Not as mature as ZC send; check kernel notes.
+Day 29 mentions **net_iov** and **page pool memory provider** — the infrastructure to extend zero-copy semantics to RX. Not as mature as ZC send; check kernel notes.
 
 ## When to choose which
 
@@ -195,17 +195,17 @@ Watch the kernel side:
 
 ```bash
 sudo bpftrace -e '
-fentry:io_send_setup { @send = count(); }
-fentry:io_recvmsg_prep { @recv = count(); }
+fentry:io_send { @send = count(); }
+fentry:io_recvmsg { @recv = count(); }
 interval:s:5 { print(@send); print(@recv) }'
 ```
 
 ## What to read in the kernel
 
 - **`io_uring/net.c`** — networking ops. ~1900 lines. Key entries:
-  - `io_send_setup` (line 349), `io_send` and friends — the send paths.
-  - `io_sendmsg_setup` (line 395), `io_recvmsg`.
-  - `io_send_zc`, `io_sendmsg_zc` — zero-copy paths.
+  - `io_send_setup` (line 350), `io_send` and friends — the send paths.
+  - `io_sendmsg_setup` (line 396), `io_recvmsg`.
+  - `io_send_zc_prep` / `io_sendmsg_zc` — zero-copy paths (both `IORING_OP_SEND_ZC` and `SENDMSG_ZC` issue through `io_sendmsg_zc`).
   - The `io_kiocb` struct holds per-op state.
 
 - **`io_uring/io_uring.c`** — main entry points: `io_uring_setup`, `io_uring_register`, `io_uring_enter`. Read `io_submit_sqes` for the submission walk and `io_iopoll_check` for the polled-IO completion path (the general completion wait is `io_cqring_wait`, now in `io_uring/wait.c`).
