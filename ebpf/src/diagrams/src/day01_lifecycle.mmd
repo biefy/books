@@ -6,7 +6,7 @@ sequenceDiagram
     participant SC as bpf() syscall
     participant VER as Verifier
     participant JIT as JIT
-    participant ATT as Attach point<br/>(do_unlinkat)
+    participant ATT as Attach point<br/>(filename_unlinkat)
 
     DEV->>CC: hello.bpf.c
     CC-->>DEV: hello.bpf.o<br/>(BPF bytecode + BTF)
@@ -21,7 +21,7 @@ sequenceDiagram
         SC-->>LB: prog_fd
         LB->>SC: BPF_LINK_CREATE
         SC->>ATT: install trampoline
-        Note over ATT: now every call to<br/>do_unlinkat invokes<br/>your program
+        Note over ATT: now every call to<br/>filename_unlinkat invokes<br/>your program
     else program is unsafe
         VER-->>SC: reject + log
         SC-->>LB: -EACCES

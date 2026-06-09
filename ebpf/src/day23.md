@@ -14,11 +14,13 @@ This pattern — instrument an existing struct_ops module without changing its p
 
 Open `tools/testing/selftests/bpf/progs/bpf_dctcp.c`. Take a minute to skim. Key callbacks DCTCP overrides:
 
-- **`init`** — set up per-socket DCTCP state (`alpha`, EWMA params).
-- **`ssthresh`** — slow-start threshold computation (uses ECN ratio).
-- **`pkts_acked`** — called when ACKs come in; updates ECN counters.
-- **`cwnd_event`** — handle congestion-window events.
-- **`in_ack_event`** — fires per ACK; *this is where we'll add our telemetry*.
+- **`init`** (`bpf_dctcp_init`) — set up per-socket DCTCP state (`alpha`, EWMA params).
+- **`ssthresh`** (`bpf_dctcp_ssthresh`) — slow-start threshold computation (uses ECN ratio).
+- **`in_ack_event`** (`bpf_dctcp_update_alpha`) — fires per ACK; updates the ECN/alpha EWMA. *This is where we'll add our telemetry.*
+- **`cwnd_event`** (`bpf_dctcp_cwnd_event`) — handle congestion-window events.
+- **`cong_avoid` / `undo_cwnd` / `set_state`** — Reno-style cwnd growth, loss recovery, and CA-state transitions.
+
+(Note: DCTCP does **not** implement `pkts_acked`. Its per-ACK accounting lives entirely in `in_ack_event` / `bpf_dctcp_update_alpha`.)
 
 The full vtable is in `SEC(".struct_ops") struct tcp_congestion_ops dctcp = { ... }` near the bottom.
 
@@ -47,11 +49,11 @@ struct {
 
 ### Step 2: add telemetry without replacing the policy
 
-Do **not** replace `.in_ack_event` with a logging-only callback. DCTCP's alpha update depends on that callback. Instead, insert the telemetry at the top of the existing `dctcp_in_ack_event` function and leave the original logic below it unchanged:
+Do **not** replace `.in_ack_event` with a logging-only callback. DCTCP's alpha update depends on that callback. Instead, insert the telemetry at the top of the existing `bpf_dctcp_update_alpha` function (the BPF program bound to the `.in_ack_event` slot) and leave the original logic below it unchanged:
 
 ```c
-SEC("struct_ops/dctcp_in_ack_event")
-void BPF_PROG(dctcp_in_ack_event, struct sock *sk, __u32 flags)
+SEC("struct_ops/bpf_dctcp_update_alpha")
+void BPF_PROG(bpf_dctcp_update_alpha, struct sock *sk, __u32 flags)
 {
     struct tcp_sock *tp = (void *)sk;
 
@@ -59,8 +61,8 @@ void BPF_PROG(dctcp_in_ack_event, struct sock *sk, __u32 flags)
     if (e) {
         e->ts_ns     = bpf_ktime_get_ns();
         e->srtt_us   = tp->srtt_us >> 3;          /* srtt is stored in eighths of a us */
-        e->cwnd      = tp->snd_cwnd;
-        e->in_flight = tp->packets_out - (tp->sacked_out + tp->lost_out);
+        e->cwnd      = tp->snd_cwnd;              /* see note: kernel C uses tcp_snd_cwnd(tp) */
+        e->in_flight = tp->packets_out - (tp->sacked_out + tp->lost_out) + tp->retrans_out;
         e->sk_cookie = bpf_get_socket_cookie(sk);
         bpf_ringbuf_submit(e, 0);
     }
@@ -79,10 +81,12 @@ Find the `SEC(".struct_ops") struct tcp_congestion_ops dctcp = { ... }` block. K
 SEC(".struct_ops")
 struct tcp_congestion_ops dctcp = {
     /* existing entries... */
-    .in_ack_event = (void *)dctcp_in_ack_event,
+    .in_ack_event = (void *)bpf_dctcp_update_alpha,
     .name = "bpf_dctcp_logged",
 };
 ```
+
+> **Two field-access notes.** (1) We read `tp->snd_cwnd` directly, which works in BPF (the real `bpf_dctcp.c` does the same). Kernel C convention, however, is the `tcp_snd_cwnd(tp)` accessor (`include/net/tcp.h`) — don't be surprised when the C source uses the helper instead of the bare field. (2) The full kernel formula is `tcp_packets_in_flight(tp) = packets_out - (sacked_out + lost_out) + retrans_out`; we include `retrans_out` above. Omitting it (as a simplification) undercounts in-flight bytes during loss recovery.
 
 ## Userspace consumer
 
@@ -146,7 +150,7 @@ e->ts_ns = ...;
 return;
 ```
 
-Verifier rejects: `unreleased reference id=N`. The ringbuf-reserve return is a refcounted resource, exactly like a kfunc acquire. Same rules: every path must submit or discard.
+Verifier rejects: `Unreleased reference id=N alloc_insn=M`. The ringbuf-reserve return is a refcounted resource, exactly like a kfunc acquire. Same rules: every path must submit or discard.
 
 ### Run with high concurrency
 
@@ -158,21 +162,21 @@ Run `100` parallel iperf3 streams. Watch ringbuf drops via the percpu drop count
 
 ### Add another callback
 
-Override `pkts_acked` to capture ECN counters per ACK:
+DCTCP itself doesn't use `pkts_acked`, but `tcp_congestion_ops` has the slot — so you can add it as a *new* callback in your module to capture per-ACK packet/ECN accounting:
 
 ```c
 SEC("struct_ops/dctcp_pkts_acked_logged")
 void BPF_PROG(my_pkts_acked, struct sock *sk, const struct ack_sample *sample)
 {
-    /* emit ECN data, packet count, etc. */
+    /* emit packet count, RTT sample, etc. */
 }
 ```
 
-Add `.pkts_acked = (void *)my_pkts_acked` to the vtable. Now you have two BPF programs in the same struct_ops module, both fed real-time data.
+Add `.pkts_acked = (void *)my_pkts_acked` to the vtable. Now you have two BPF programs in the same struct_ops module, both fed real-time data. (This is a *new* slot you're populating, not a DCTCP callback you're overriding — the upstream DCTCP leaves `pkts_acked` NULL.)
 
 ## What to read in the kernel
 
-- **`net/ipv4/tcp_input.c`** — search `in_ack_event`. The C call site that invokes your BPF callback per incoming ACK. Trace the call path from `tcp_v4_rcv` down to `in_ack_event` invocation. Notice how the kernel calls *every* registered callback: yours runs alongside any other CC's `in_ack_event`.
+- **`net/ipv4/tcp_input.c`** — search `in_ack_event`. The C call site that invokes your BPF callback per incoming ACK. Trace the call path from `tcp_v4_rcv` down to the `in_ack_event` invocation. Note that the kernel calls *only the socket's selected* CC's callback — a single indirect call through `icsk->icsk_ca_ops->in_ack_event` — so your callback runs only for connections actually using your algorithm, not for every registered CC.
 
 - **`include/uapi/linux/tcp.h`** — `struct tcp_info`. The fields available via `bpf_get_socket_cookie` and similar are also in this struct (used by `getsockopt(TCP_INFO)`). When you wonder "what other state can I expose?" — this is the catalog.
 

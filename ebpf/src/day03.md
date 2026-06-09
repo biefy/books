@@ -115,7 +115,7 @@ struct {
     __uint(max_entries, 256 * 1024);
 } rb SEC(".maps");
 
-SEC("fentry/do_unlinkat")
+SEC("fentry/filename_unlinkat")
 int BPF_PROG(on_unlink)
 {
     struct task_struct *task = (struct task_struct *)bpf_get_current_task_btf();
@@ -138,7 +138,7 @@ int BPF_PROG(on_unlink)
 
 What's new:
 
-- `bpf_get_current_task_btf()` returns a typed `struct task_struct *`. The Verifier marks it `PTR_TO_BTF_ID | PTR_TO_BTF_ID_OR_NULL` (it's never NULL inside a process context, but the type system accepts both forms).
+- `bpf_get_current_task_btf()` returns a typed `struct task_struct *`. Its proto's return type is `RET_PTR_TO_BTF_ID_TRUSTED`, so the Verifier marks the register a trusted, non-NULL `PTR_TO_BTF_ID` — you can deref its fields directly with no NULL check.
 - `BPF_CORE_READ(task, real_parent, tgid)` — three-arg form. Walks `task → real_parent → tgid`. Each hop is a CO-RE-relocated read.
 - `BPF_CORE_READ_STR_INTO(&e->comm, task, comm)` — reads `task->comm` (a 16-byte char array, not a pointer). Note `comm` is the last arg; for non-pointer fields you don't need a final `*` deref hop.
 
@@ -249,9 +249,9 @@ For Day 3, both forms work. Internalize: **direct deref for kernel-handed-to-you
 
 ## What to read in the kernel
 
-- **`tools/lib/bpf/relo_core.c`** — the CO-RE engine in userspace. The function `bpf_core_apply_relo_insn` is the one that patches an instruction's offset based on target-kernel BTF. ~300 lines, accessible if you know what to look for.
+- **`tools/lib/bpf/relo_core.c`** — the CO-RE engine in userspace. `bpf_core_calc_relo_insn` computes the relocation value from target-kernel BTF, and `bpf_core_patch_insn` writes it into the instruction's offset/immediate. ~300 lines, accessible if you know what to look for.
 - **`tools/lib/bpf/btf.c`** — read `btf__find_by_name_kind`. This is how libbpf finds types in BTF by name. CO-RE is built on top of it.
-- **`tools/lib/bpf/libbpf.h`** — search `BPF_CORE_READ`. The macros expand to a chain of `bpf_core_read` (kernel-side) calls; reading them once eliminates magic.
+- **`tools/lib/bpf/bpf_core_read.h`** — search `BPF_CORE_READ`. The macros expand to a chain of `bpf_core_read` (kernel-side) calls; reading them once eliminates magic.
 - **`include/linux/btf.h`** — see `struct btf_type` and the `BTF_KIND_*` enums. BTF has only ~12 kinds (int, ptr, array, struct, union, enum, fwd, typedef, volatile, const, restrict, func, ...). Skim.
 
 ---

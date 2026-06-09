@@ -13,7 +13,7 @@ Days 14–18 worked at the packet layer. Today goes higher: the **socket** and *
 - **`sk_msg`** — fires on `sendmsg` for sockets in a sockmap; used for L7 load balancing (Cilium service mesh).
 - **`cgroup_sock_addr`** — fires on `connect()`, `bind()`, `sendmsg()` to UDP, etc. Modify sockaddr (do socket-level NAT).
 
-These programs run in **process context** with full kernel scheduling, so they can use sleepable variants and call helpers like `bpf_setsockopt`.
+These programs run in **process context** with full kernel scheduling, so they have the full non-sleepable helper set and can call helpers like `bpf_setsockopt`. (They are *not* sleepable, though — `can_be_sleepable()` in the verifier only permits fentry/fexit/fsession/fmod_ret, LSM, iter, uprobe, and struct_ops.)
 
 ## Why cgroups
 
@@ -70,7 +70,7 @@ int block_udp(struct __sk_buff *skb)
 }
 ```
 
-Note: `cgroup_skb` returns **1 = allow, 0 = drop** (different from tc).
+Note: `cgroup_skb/ingress` returns **1 = allow, 0 = drop**. `cgroup_skb/egress` is wider — the verifier enforces a return range of **0-3**: `0`=drop, `1`=keep, `2`=drop and notify TCP of congestion (cn), `3`=keep and cn. Returning anything outside that range is rejected at load time.
 
 Userspace attach:
 ```c
@@ -121,9 +121,9 @@ ss -ti | grep bbr   # connections from this cgroup show 'bbr'
 
 ## What to break, in order
 
-### Break 1 — Wrong return convention
+### Break 1 — Out-of-range return
 
-Return `TC_ACT_SHOT` (which is 2) from cgroup_skb. The kernel reads any nonzero as "allow" — packet flows through. You need 0 to drop. Each program type has its own return convention; don't mix them.
+Return `5` (or any value > 3) from a `cgroup_skb/egress` program. The verifier rejects it at load: egress return values must fall in `retval_range(0, 3)` (`kernel/bpf/verifier.c`). The defined values are `0`=drop, `1`=keep, `2`=drop+cn, `3`=keep+cn — so returning `TC_ACT_SHOT` (which is `2`) actually *loads and runs*, but it means "drop and signal congestion," not "allow." It's a **defined egress value**, not a coincidental pass. On ingress the range is just `0`/`1`. Don't borrow tc's `TC_ACT_*` constants here — the conventions only overlap by accident.
 
 ### Break 2 — Forget the IPPROTO check
 
@@ -163,11 +163,11 @@ Now connections from this cgroup to port 8080 are silently redirected to port 80
 
 ## Bullet Points
 
-- **`cgroup_skb`** runs per-packet for sockets in a cgroup. Return 1=allow, 0=drop.
+- **`cgroup_skb`** runs per-packet for sockets in a cgroup. Ingress returns 1=allow/0=drop; egress allows 0-3 (0=drop, 1=keep, 2=drop+cn, 3=keep+cn), verifier-enforced.
 - **`sock_ops`** runs at TCP state events; can call `bpf_setsockopt` to tune the connection.
 - **`sk_msg`** runs on send for sockets in a sockmap; used for L7 routing.
 - **`cgroup_sock_addr`** lets you rewrite sockaddrs at `connect`/`bind` — socket-level NAT.
-- These hooks run in **process context** — sleepable variants exist, full helpers available.
+- These hooks run in **process context** — full non-sleepable helper set, can call `bpf_setsockopt`.
 - Used heavily in production: Cilium, systemd, Kubernetes service meshes.
 
 ---

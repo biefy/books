@@ -4,21 +4,21 @@
 
 ## So you want to spy on a kernel function
 
-You'd think this would be hard. The kernel is busy. It runs thousands of functions per second across dozens of CPUs. It does not know you exist. How do you get it to tap you on the shoulder every time something calls `do_unlinkat`?
+You'd think this would be hard. The kernel is busy. It runs thousands of functions per second across dozens of CPUs. It does not know you exist. How do you get it to tap you on the shoulder every time something calls `filename_unlinkat`?
 
 **You install a doorbell.** That's `fentry`.
 
 Here's the secret on x86_64 builds with function tracing enabled. Traceable kernel functions reserve an entry patch site, often shown as a 5-byte NOP slot. It sits there doing nothing until ftrace/BPF turns it into an entry call path.
 
 ```
-do_unlinkat:
+filename_unlinkat:
     nop   nop   nop   nop   nop      ← these 5 bytes are reserved for you
     push  %rbp                       ← the actual function body starts here
     mov   %rsp, %rbp
     ...
 ```
 
-When you attach an fentry program, the kernel atomically patches that reserved site into the architecture's ftrace/BPF entry path. That path reaches a generated **trampoline**. The trampoline saves arguments, calls *your* BPF program with them, restores everything, and then lets `do_unlinkat` run as if nothing happened. The exact instruction is architecture- and config-dependent; the important model is patch site → trampoline → original function body.
+When you attach an fentry program, the kernel atomically patches that reserved site into the architecture's ftrace/BPF entry path. That path reaches a generated **trampoline**. The trampoline saves arguments, calls *your* BPF program with them, restores everything, and then lets `filename_unlinkat` run as if nothing happened. The exact instruction is architecture- and config-dependent; the important model is patch site → trampoline → original function body.
 
 ![fentry trampoline flow](diagrams/day01_trampoline_flow.png)
 
@@ -30,11 +30,11 @@ When you attach an fentry program, the kernel atomically patches that reserved s
 >
 > **Q: Why not use kprobe? I keep seeing kprobe in old tutorials.**
 >
-> A: kprobe predates fentry and works differently. It overwrites the function's first instruction with a software breakpoint (`int3` on x86). The CPU traps, a handler runs your code, then it emulates the original instruction and continues. Works on **any** function. Costs **~50 ns** per call because traps are expensive. fentry's direct entry path costs **~10 ns**. Five times faster. Use fentry whenever it's available; kprobe only for the rare functions that lack BTF.
+> A: kprobe predates fentry and works differently. It overwrites the function's first instruction with a software breakpoint (`int3` on x86). The CPU traps, a handler runs your code, then it emulates the original instruction and continues. Works on **any** function. The trap is expensive; fentry's direct entry path is typically several times cheaper than a kprobe trap, though exact numbers vary by CPU and kernel config. Use fentry whenever it's available; kprobe only for the rare functions that lack BTF.
 >
 > **Q: What does "BTF" mean, and why do you keep mentioning it?**
 >
-> A: Hold that thought — we'll meet BTF properly in a moment. For Day 1: trust that BTF is what tells fentry the argument types of `do_unlinkat`, so your program can declare `int dfd, struct filename *name` and have the kernel hand them over correctly typed.
+> A: Hold that thought — we'll meet BTF properly in a moment. For Day 1: trust that BTF is what tells fentry the argument types of `filename_unlinkat`, so your program can declare `int dfd, struct filename *name` and have the kernel hand them over correctly typed.
 
 > ### Sharpen your pencil
 >
@@ -69,7 +69,7 @@ You'll meet the Verifier on Day 4. For now, write code that pleases it without t
 Every BPF program belongs to a section in the compiled object. The section name tells **libbpf** how to load and attach the program. The prefix is the program type; the suffix is the attach target:
 
 ```c
-SEC("fentry/do_unlinkat")    // type=fentry, attach to kernel symbol do_unlinkat
+SEC("fentry/filename_unlinkat")    // type=fentry, attach to kernel symbol filename_unlinkat
 SEC("xdp")                    // type=xdp, attach point provided by userspace
 SEC("tp/sched/sched_switch")  // type=tracepoint, on the sched_switch tracepoint
 ```
@@ -113,7 +113,7 @@ An auto-generated header produced by `bpftool gen skeleton hello.bpf.o > hello.s
 
 ### ringbuf — the event channel you'll use today
 
-A kernel→userspace event channel. **Multi-producer (any CPU), single-consumer (one userspace reader), preserves cross-CPU ordering, lock-free.**
+A kernel→userspace event channel. **Multi-producer (any CPU), single-consumer (one userspace reader), preserves cross-CPU ordering.** Producers don't run fully lock-free: inside `__bpf_ringbuf_reserve` they serialize briefly via an internal per-ringbuf spinlock (`raw_res_spin_lock_irqsave`) while advancing the producer position, then each caller writes into its own disjoint slice.
 
 ![ringbuf MPSC](diagrams/day01_ringbuf.png)
 
@@ -165,7 +165,7 @@ struct {
     __uint(max_entries, 256 * 1024);
 } rb SEC(".maps");
 
-SEC("fentry/do_unlinkat")
+SEC("fentry/filename_unlinkat")
 int BPF_PROG(on_unlink, int dfd, struct filename *name)
 {
     struct event *e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
@@ -184,7 +184,7 @@ Walkthrough of every line that's new:
 - `char LICENSE[] SEC("license") = "GPL";` — the kernel rejects loading any non-GPL BPF program that uses GPL-only helpers (most of them). This is *not* legal advice; it's a load-time gate.
 - `struct event` — the type we'll send through ringbuf. Both kernel and userspace include this same definition; ringbuf transports raw bytes.
 - The `SEC(".maps")` block — modern map declaration syntax. The `__uint(...)` macros from `bpf_helpers.h` produce BTF the loader uses to know it's a 256-KiB ringbuf.
-- `SEC("fentry/do_unlinkat")` — attach point. `do_unlinkat` is in `fs/namei.c`, called on every `unlink()` and `unlinkat()` syscall.
+- `SEC("fentry/filename_unlinkat")` — attach point. `filename_unlinkat` is in `fs/namei.c`, called on every `unlink()` and `unlinkat()` syscall.
 - `BPF_PROG(on_unlink, int dfd, struct filename *name)` — macro from `bpf_tracing.h` that unpacks the trampoline's argument array into typed parameters.
 - `bpf_ringbuf_reserve` returns either a valid pointer or NULL (when the ringbuf is full). The Verifier requires the null check.
 - `bpf_get_current_pid_tgid()` — packed `(tgid << 32) | pid`; Linux's userspace "PID" is the kernel's TGID. `>> 32` extracts the user-visible PID.
@@ -332,7 +332,7 @@ It prints the same `hello.skel.h` your Makefile generated. Read it once. You'll 
 ## Bullet Points
 
 - BPF programs are C compiled to a verified-then-JITed instruction set; they cannot crash the kernel.
-- **fentry** patches the 5-byte NOP slot at the start of a kernel function with a `jmp` to a generated trampoline that calls your program. ~10 ns overhead.
+- **fentry** patches the 5-byte NOP slot at the start of a kernel function with a `jmp` to a generated trampoline that calls your program. Typically several times cheaper than a kprobe trap.
 - Use **fentry** wherever possible. Use **kprobe** only for functions without BTF.
 - **`SEC()`** is the section-name convention libbpf uses to load and attach. The prefix names the program type and tells libbpf where to attach.
 - **vmlinux.h** is generated from kernel BTF and gives you every kernel type by name.
@@ -350,7 +350,7 @@ If two CPUs concurrently call `bpf_ringbuf_reserve(&rb, 64, 0)`, can the records
 <details>
 <summary>Click to reveal answer</summary>
 
-**Answer:** No. Reserve atomically advances the producer position with `cmpxchg`; each caller gets a disjoint slice. Submit/discard order may differ from reserve order, which the consumer handles via the `BUSY` bit on each record header. The consumer does not see a record until `BUSY` is cleared by `submit`/`discard`.
+**Answer:** No. Inside `__bpf_ringbuf_reserve` the producers serialize briefly via an internal per-ringbuf spinlock while advancing the producer position, so each caller gets a disjoint slice. Submit/discard order may differ from reserve order, which the consumer handles via the `BUSY` bit on each record header. The consumer does not see a record until `BUSY` is cleared by `submit`/`discard`.
 
 </details>
 

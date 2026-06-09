@@ -32,6 +32,8 @@ This sounds like a bottleneck — and it is — but the central architecture tra
 
 Open `tools/sched_ext/scx_central.bpf.c`. ~350 lines. Walk through it in this order:
 
+> **Heads-up: the code blocks below are *simplified pseudocode*, not literal quotes from the file.** They capture the central-dispatch *shape* so you can follow the logic, but the real `scx_central.bpf.c` is more involved. When you open the actual file you'll see it uses a `BPF_MAP_TYPE_QUEUE` of pids (`central_q`) rather than a fallback DSQ for the hand-off, calls `bpf_task_from_pid()` to turn a dequeued pid back into a `task_struct`, dispatches with `scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL_ON | cpu, ...)` to target a specific CPU's local queue, and drives tickless preemption from a `bpf_timer` (`central_timerfn`). Read the simplified versions for intuition, then read the real file for the details.
+
 ### 1. Globals
 
 Look near the top:
@@ -57,19 +59,17 @@ struct {
 ### 2. The `init` callback
 
 ```c
-SEC("struct_ops/central_init")
-s32 BPF_STRUCT_OPS(central_init)
+s32 BPF_STRUCT_OPS_SLEEPABLE(central_init)
 {
     return scx_bpf_create_dsq(FALLBACK_DSQ_ID, -1);
 }
 ```
 
-Just creates a fallback DSQ. The interesting work happens in dispatch.
+Just creates a fallback DSQ. Because `scx_bpf_create_dsq` is a sleepable kfunc, the callback uses `BPF_STRUCT_OPS_SLEEPABLE` (not plain `BPF_STRUCT_OPS`) — a plain version won't load. The interesting work happens in dispatch.
 
 ### 3. The `select_cpu` callback
 
 ```c
-SEC("struct_ops/central_select_cpu")
 s32 BPF_STRUCT_OPS(central_select_cpu, struct task_struct *p, ...)
 {
     /* Always pick central_cpu. */
@@ -82,23 +82,21 @@ When a task wakes, route it to the central CPU. The central CPU will then enqueu
 ### 4. The `enqueue` callback
 
 ```c
-SEC("struct_ops/central_enqueue")
 void BPF_STRUCT_OPS(central_enqueue, struct task_struct *p, u64 enq_flags)
 {
     /* Push into the fallback DSQ; central CPU will pick it up. */
     scx_bpf_dsq_insert(p, FALLBACK_DSQ_ID, SCX_SLICE_INF, enq_flags);
 
     /* Make sure central CPU is awake to handle this */
-    bpf_kick_cpu(central_cpu, 0);
+    scx_bpf_kick_cpu(central_cpu, SCX_KICK_PREEMPT);
 }
 ```
 
-`bpf_kick_cpu` is a kfunc that triggers an IPI to the named CPU, ensuring it wakes up to run dispatch logic. This is how you ensure the central CPU dispatches when work appears, even if the central CPU is currently idle.
+`scx_bpf_kick_cpu(cpu, flags)` is a kfunc that triggers an IPI to the named CPU, ensuring it wakes up to run dispatch logic. This is how you ensure the central CPU dispatches when work appears, even if the central CPU is currently idle. The real `scx_central` passes `SCX_KICK_PREEMPT` here (preempt whatever's running so dispatch runs promptly); other call sites use `SCX_KICK_IDLE` or plain `0`.
 
 ### 5. The `dispatch` callback
 
 ```c
-SEC("struct_ops/central_dispatch")
 void BPF_STRUCT_OPS(central_dispatch, s32 cpu, struct task_struct *prev)
 {
     if (cpu != central_cpu)
@@ -107,7 +105,8 @@ void BPF_STRUCT_OPS(central_dispatch, s32 cpu, struct task_struct *prev)
     bpf_for(i, 0, nr_cpu_ids) {
         if (!scx_bpf_dsq_move_to_local(FALLBACK_DSQ_ID, 0))
             break;
-        /* richer versions insert tasks into SCX_DSQ_LOCAL_ON | cpu */
+        /* the real file dispatches to a specific CPU's local queue with
+         * scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL_ON | cpu, ...) */
     }
 }
 ```
@@ -128,6 +127,8 @@ struct sched_ext_ops central_ops = {
 ```
 
 `SEC(".struct_ops.link")` is the modern variant that creates a link FD (lifecycle bound to userspace process; closes when userspace exits).
+
+In-tree schedulers don't hand-write this struct. They use the `SCX_OPS_DEFINE(central_ops, ...)` macro (from `tools/sched_ext/include/scx/compat.bpf.h`), which expands to exactly the `SEC(".struct_ops.link") struct sched_ext_ops central_ops = { ... }` shown above. The real `scx_central` also sets `.flags = SCX_OPS_ENQ_LAST` inside that macro, plus `.running`, `.stopping`, and `.exit` callbacks omitted here for brevity.
 
 ## Why central architecture works
 

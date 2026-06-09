@@ -4,7 +4,7 @@
 
 ## Why tracepoints when fentry exists?
 
-Fentry attaches to *function entries*. That's perfect when there's a function whose name describes the event you care about (`vfs_read`, `do_unlinkat`). But many interesting events don't map to a single function — or they're emitted from inside a function that does many things.
+Fentry attaches to *function entries*. That's perfect when there's a function whose name describes the event you care about (`vfs_read`, `filename_unlinkat`). But many interesting events don't map to a single function — or they're emitted from inside a function that does many things.
 
 **Tracepoints are explicit instrumentation points** added by kernel developers via `TRACE_EVENT(...)` macros. They name the event, specify the data fields, and live forever as part of the kernel's API contract.
 
@@ -93,7 +93,8 @@ Look in `include/trace/events/sched.h`:
 TRACE_EVENT(sched_switch,
     TP_PROTO(bool preempt,
              struct task_struct *prev,
-             struct task_struct *next),
+             struct task_struct *next,
+             unsigned int prev_state),
     ...
 );
 ```
@@ -102,10 +103,10 @@ So your tp_btf program is:
 
 ```c
 SEC("tp_btf/sched_switch")
-int BPF_PROG(on_switch, bool preempt, struct task_struct *prev, struct task_struct *next)
+int BPF_PROG(on_switch, bool preempt, struct task_struct *prev, struct task_struct *next, unsigned int prev_state)
 ```
 
-Three args matching the `TP_PROTO`.
+Four args matching the `TP_PROTO` (the trailing `prev_state` was added in 5.14).
 
 For tracepoints whose `TP_PROTO` you don't know offhand, `bpftool btf dump file /sys/kernel/btf/vmlinux | grep btf_trace_sched_switch` will show you the typedef.
 
@@ -144,7 +145,7 @@ struct {
 } rb SEC(".maps");
 
 SEC("tp_btf/sched_switch")
-int BPF_PROG(on_switch, bool preempt, struct task_struct *prev, struct task_struct *next)
+int BPF_PROG(on_switch, bool preempt, struct task_struct *prev, struct task_struct *next, unsigned int prev_state)
 {
     __u64 now = bpf_ktime_get_ns();
     __u32 prev_tid = prev->pid;   /* live ptr deref! */
@@ -225,7 +226,7 @@ int on_switch(struct trace_event_raw_sched_switch *ctx)
 }
 ```
 
-This compiles and works for `prev_pid`, `next_pid`, `prev_comm`, `next_comm` (all in the copied struct). But there's no way to reach `prev->real_parent`, `prev->cgroup`, `prev->mm`, etc. — those would be in the live `task_struct`, which raw tracepoint doesn't give you.
+This compiles and works for `prev_pid`, `next_pid`, `prev_comm`, `next_comm` (all in the copied struct). But there's no way to reach `prev->real_parent`, `prev->cgroup`, `prev->mm`, etc. — those live in the `task_struct`, and a regular tracepoint only hands you the copied event fields, not the live pointer.
 
 For most tracers, tp_btf is more ergonomic. Reach for regular `tracepoint/...` only when:
 - You explicitly want stability (the raw struct format won't change).
@@ -275,7 +276,7 @@ But: if `next` could be NULL or invalid, `BPF_CORE_READ` returns 0 instead of cr
 - **`include/trace/events/sched.h`** — definitions of all sched/* tracepoints. Search `TRACE_EVENT(sched_switch`. The macro expands into a *lot* of code, but the `TP_PROTO` is the contract.
 - **`include/linux/tracepoint.h`** — the macro machinery. Skim. Note `DECLARE_TRACE` and `__DECLARE_TRACE`.
 - **`kernel/tracepoint.c`** — what happens when a tracepoint fires. The function `__DO_TRACE` walks the registered probe list.
-- **`kernel/trace/bpf_trace.c`** — search `bpf_get_raw_tracepoint`. This is how BPF programs attach to raw tracepoints. For tp_btf, see `bpf_kprobe_multi_link_attach` and friends.
+- **`kernel/trace/bpf_trace.c`** — search `bpf_get_raw_tracepoint`. This is how BPF programs attach to raw tracepoints. `tp_btf` goes through the same raw-tracepoint path (`BPF_TRACE_RAW_TP`): the link is set up via `bpf_raw_tracepoint_open` / `bpf_get_raw_tracepoint`, just with BTF-typed arguments.
 - **`tools/testing/selftests/bpf/progs/test_tp_btf.c`** — official examples using tp_btf.
 
 ---

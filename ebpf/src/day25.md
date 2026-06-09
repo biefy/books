@@ -20,8 +20,8 @@ The motivation: scheduling policy isn't one-size-fits-all. Cloud workloads want 
 
 A faulty BPF scheduler that fails to dispatch tasks could freeze the system. The kernel catches this:
 
-- **30-second dispatch watchdog.** If any task waits > 30 seconds without being dispatched, the kernel concludes the BPF scheduler is broken, ejects it, and re-enables CFS.
-- **Fallback to CFS.** Recovery is automatic — worst case, a 30-second freeze, then back to normal CFS.
+- **Dispatch stall watchdog.** If any task stays runnable but undispatched past the stall timeout, the kernel concludes the BPF scheduler is broken, ejects it, and re-enables CFS. The timeout defaults to 30 seconds (`SCX_WATCHDOG_MAX_TIMEOUT = 30 * HZ`) and can be tightened via `ops.timeout_ms` — but never lengthened past 30 seconds (the kernel caps it).
+- **Fallback to CFS.** Recovery is automatic — worst case, up to a 30-second freeze, then back to normal CFS.
 
 This safety net is what makes sched_ext shippable. Without it, no one would risk loading user code into the scheduler hot path.
 
@@ -45,7 +45,7 @@ When a task wakes up, this callback decides **which CPU to wake it on**. Optiona
 
 ### Other callbacks
 
-`init`, `exit`, `running`, `stopping`, `update_idle`, `cpu_release`, `set_cpumask` — all defined in `struct sched_ext_ops` (`kernel/sched/ext.c:6715` and around). The full vtable has ~30 callbacks; most BPF schedulers implement only 4–8 of them and let CFS-equivalent defaults handle the rest.
+`init`, `exit`, `running`, `stopping`, `update_idle`, `cpu_release`, `set_cpumask` — all defined in `struct sched_ext_ops` (`kernel/sched/ext_internal.h:292`). The full vtable has ~37 callbacks; most BPF schedulers implement only 4–8 of them and let CFS-equivalent defaults handle the rest.
 
 ## DSQs (Dispatch Queues)
 
@@ -83,7 +83,7 @@ sudo ./scx_simple
 
 Output:
 ```
-local=12345 global=0 ...
+local=12345 global=0
 ```
 
 That's it. **Your system is now scheduled by BPF.**
@@ -102,7 +102,6 @@ Watch system responsiveness. With `scx_simple`, basic responsiveness is preserve
 `tools/sched_ext/scx_simple.bpf.c`. The whole scheduler is ~30 lines of BPF:
 
 ```c
-SEC("struct_ops/simple_enqueue")
 void BPF_STRUCT_OPS(simple_enqueue, struct task_struct *p, u64 enq_flags)
 {
     /* Place in global DSQ with default slice */
@@ -110,12 +109,13 @@ void BPF_STRUCT_OPS(simple_enqueue, struct task_struct *p, u64 enq_flags)
     scx_bpf_dsq_insert_vtime(p, SHARED_DSQ, SCX_SLICE_DFL, vtime, enq_flags);
 }
 
-SEC("struct_ops/simple_dispatch")
 void BPF_STRUCT_OPS(simple_dispatch, s32 cpu, struct task_struct *prev)
 {
     scx_bpf_dsq_move_to_local(SHARED_DSQ, 0);
 }
 ```
+
+(`BPF_STRUCT_OPS` already expands to `SEC("struct_ops/"#name)` internally — you never write the `SEC()` line yourself, and doing so would cause a section conflict.)
 
 Plus `init`, `exit`, and the vtable instance. That's the whole scheduler.
 
@@ -136,7 +136,8 @@ Ctrl-C in the `scx_simple` terminal. The watchdog's not needed — scx_simple ex
 Comment out `scx_bpf_dsq_move_to_local(SHARED_DSQ, 0)` in `simple_dispatch`. Run; CPUs have nothing to run; tasks pile up in the queue. After ~30s, watchdog ejects:
 
 ```
-sched_ext: BPF scheduler "simple" disabled by watchdog: stall_us=...
+sched_ext: BPF scheduler "simple" errored, disabling
+   stress-ng[12345] failed to run for 30.000s
 ```
 
 Check `dmesg`. The system recovers automatically. **Don't break dispatch in production. Production sched_ext schedulers all have safety paths to fall back if their custom logic can't dispatch.**
@@ -162,11 +163,11 @@ You're now observing every scheduler decision in real time. Throughput considera
 
 ## What to read in the kernel
 
-- **`kernel/sched/ext.c`** — the framework. ~7000 lines. **Read the file's top comment** for the design overview. Don't try to read everything today; just orient.
+- **`kernel/sched/ext.c`** — the framework. ~10,000 lines. **Read the file's top comment** for the design overview. Don't try to read everything today; just orient.
 
-- **`kernel/sched/ext.c:6715`** and around — `struct sched_ext_ops` definition. The vtable shape: every callback your BPF scheduler can implement.
+- **`kernel/sched/ext_internal.h:292`** — `struct sched_ext_ops` definition. The vtable shape: every callback your BPF scheduler can implement.
 
-- **`kernel/sched/ext.c:7279`** — `scx_enable`. The function called when a struct_ops scheduler is loaded; activates it as the system scheduler.
+- **`kernel/sched/ext.c:7447`** — `scx_enable(struct sched_ext_ops *ops, struct bpf_link *link)`. The function called when a struct_ops scheduler is loaded; activates it as the system scheduler.
 
 - **`kernel/sched/ext_idle.c`** — idle CPU integration. How sched_ext schedulers handle the case "no task to run; CPU should idle."
 
@@ -181,10 +182,10 @@ You're now observing every scheduler decision in real time. Throughput considera
 - **sched_ext** lets BPF programs implement Linux schedulers via `struct sched_ext_ops` (struct_ops).
 - Two main callbacks: **`enqueue`** (task becomes runnable) and **`dispatch`** (CPU needs a task).
 - **DSQs** are kernel-managed dispatch queues. Built-in: `SCX_DSQ_GLOBAL`, `SCX_DSQ_LOCAL`. Custom via `scx_bpf_create_dsq`.
-- **30-second watchdog** ejects stalled BPF schedulers and falls back to CFS.
+- **Dispatch stall watchdog** ejects stalled BPF schedulers and falls back to CFS. Default and max timeout is 30 seconds (`SCX_WATCHDOG_MAX_TIMEOUT`), tunable shorter via `ops.timeout_ms`.
 - `scx_simple` is the minimal example; `scx_central`, `scx_flatcg`, `scx_lavd` are progressively richer.
 - Loading a BPF scheduler is a **system-wide** operation — every task on the system schedules through it.
-- Source: `kernel/sched/ext.c` (~7000 lines) + `tools/sched_ext/`.
+- Source: `kernel/sched/ext.c` (~10,000 lines) + `kernel/sched/ext_internal.h` (struct definitions) + `tools/sched_ext/`.
 
 ## Check question
 
@@ -193,9 +194,9 @@ What guarantees that loading a BPF scheduler doesn't permanently freeze your mac
 <details>
 <summary>Click to reveal answer</summary>
 
-**Answer:** The 30-second dispatch watchdog. The kernel monitors task wait times across all CPUs; if any task has been runnable but not dispatched for 30 seconds, the framework concludes the BPF scheduler is broken, ejects it, and re-enables CFS. Recovery is automatic.
+**Answer:** The dispatch stall watchdog. The kernel monitors task wait times across all CPUs; if any task has been runnable but not dispatched past the stall timeout, the framework concludes the BPF scheduler is broken, ejects it, and re-enables CFS. Recovery is automatic.
 
-The watchdog is hardcoded in `kernel/sched/ext.c`'s safety logic and is not bypassable from BPF. The threshold (30 seconds) is conservative — long enough that no legitimate scheduling delay would trigger it, short enough that a fully-stalled BPF scheduler doesn't make the system hang for minutes.
+The watchdog timeout defaults to 30 seconds (`SCX_WATCHDOG_MAX_TIMEOUT = 30 * HZ` in `kernel/sched/ext_internal.h`). A scheduler can request a *shorter* timeout via `ops.timeout_ms`, but the kernel caps it at 30 seconds — you can never disable or lengthen it past that. The default threshold is conservative — long enough that no legitimate scheduling delay would trigger it, short enough that a fully-stalled BPF scheduler doesn't make the system hang for minutes.
 
 This is the design that makes BPF scheduling practical. Without it, an infinite loop in dispatch (or a logic error that fails to consume any DSQ) would deadlock the system requiring a power cycle. With it, the worst case is a 30-second pause, then full recovery and CFS-managed normalcy. The barrier to "let me try this scheduler" drops from "are you sure" to "sure, why not — worst case, 30 seconds."
 

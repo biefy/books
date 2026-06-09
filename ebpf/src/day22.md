@@ -13,19 +13,21 @@ Around 2022, the pattern flipped. BPF programs can now **provide implementations
 The classic example is **TCP congestion control**. The kernel has a vtable:
 
 ```c
-/* include/net/tcp.h:1315 */
+/* include/net/tcp.h:1316 — fields reordered/trimmed for readability;
+ * the real layout puts fast-path callbacks first and init/release LAST */
 struct tcp_congestion_ops {
-    void  (*init)(struct sock *sk);
-    void  (*release)(struct sock *sk);
     u32   (*ssthresh)(struct sock *sk);
     void  (*cong_avoid)(struct sock *sk, u32 ack, u32 acked);
     void  (*set_state)(struct sock *sk, u8 new_state);
     void  (*cwnd_event)(struct sock *sk, enum tcp_ca_event ev);
-    u32   (*undo_cwnd)(struct sock *sk);
+    void  (*in_ack_event)(struct sock *sk, u32 flags);
     void  (*pkts_acked)(struct sock *sk, const struct ack_sample *sample);
+    u32   (*undo_cwnd)(struct sock *sk);
     /* ... ~10 callbacks ... */
     char name[TCP_CA_NAME_MAX];
     /* ... */
+    void  (*init)(struct sock *sk);     /* private-data setup, called last */
+    void  (*release)(struct sock *sk);  /* private-data teardown */
 };
 ```
 
@@ -60,6 +62,8 @@ struct tcp_congestion_ops my_dctcp = {
 ```
 
 Notice the `.cong_avoid = tcp_reno_cong_avoid` line — **you can mix BPF callbacks with the kernel's existing C callbacks** by assigning them explicitly. Required and optional slots are subsystem-specific. For TCP congestion control, the kernel requires `ssthresh`, `undo_cwnd`, and either `cong_avoid` or `cong_control`; other callbacks may be left NULL only if the TCP CC framework defines that as optional.
+
+> **A note on the `SEC` suffix.** We write `SEC("struct_ops/dctcp_init")` with a named suffix, but the suffix is **optional** — the kernel's own `bpf_dctcp.c` selftest uses a bare `SEC("struct_ops")` on every callback and lets the assignment in the `.struct_ops` vtable bind each program to its slot. Both work; libbpf resolves the binding from the vtable struct, not the section name. Don't be confused if the source you're comparing against omits the suffix.
 
 ## The lifecycle
 
@@ -145,7 +149,7 @@ Shows the vtable bound and which BPF prog FD serves each callback.
   - `bpf_struct_ops_link_create` (line 1360) — for `SEC(".struct_ops.link")`, creates a bpf_link.
   - `bpf_struct_ops_test_run` — used by selftests to invoke a callback in a controlled environment.
 
-- **`include/net/tcp.h:1315`** — `struct tcp_congestion_ops`. The vtable shape that BPF DCTCP implements. Read each callback's docstring; that's what your BPF program is expected to do.
+- **`include/net/tcp.h:1316`** — `struct tcp_congestion_ops`. The vtable shape that BPF DCTCP implements. Read each callback's docstring; that's what your BPF program is expected to do.
 
 - **`net/ipv4/tcp_dctcp.c`** — the **C** reference implementation of DCTCP. Compare against `tools/testing/selftests/bpf/progs/bpf_dctcp.c` field-by-field. The BPF version is a near-mechanical port; reading both side-by-side teaches the conversion idiom.
 

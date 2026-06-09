@@ -8,7 +8,7 @@ Every BPF program you've written so far runs in **atomic context**. The kernel c
 
 A consequence: any helper that *might page-fault* is forbidden. Hitting an unmapped userspace page would require resolving the fault — which requires scheduling, which the context can't do.
 
-Helpers in the forbidden list: `bpf_copy_from_user`, `bpf_d_path` (resolves a `struct path` to a string — may fault on dentries), several crypto helpers. Until 5.10, the answer was "you can't do that from BPF."
+Helpers in the forbidden list: `bpf_copy_from_user`, several crypto helpers. Until 5.10, the answer was "you can't do that from BPF."
 
 **Sleepable BPF programs** lift the restriction.
 
@@ -123,9 +123,7 @@ What's new:
 - **`SEC("fentry.s/__x64_sys_openat")`** — the `.s/` makes it sleepable.
 - **`__x64_sys_openat`** is the kernel's system call entry on x86_64. It receives `struct pt_regs *` (the wrapper unpacks args from the trap frame). On other arches the prefix differs (`__arm64_sys_openat`).
 - **`PT_REGS_PARM2_CORE_SYSCALL(regs)`** — a CO-RE-aware macro that reads the second syscall argument across architectures. The path string is the second argument to `openat(dirfd, path, flags, mode)` (after dirfd).
-- **`bpf_copy_from_user`** — the helper that may fault. Returns 0 on success, negative errno on failure. **Only callable from sleepable programs** — try it from a non-sleepable program and the Verifier rejects with "helper call is not allowed in sleepable function."
-
-Wait, that last sentence is backwards. Try it from non-sleepable and the Verifier rejects with **"helper not allowed in non-sleepable program."** The error wording matters when debugging.
+- **`bpf_copy_from_user`** — the helper that may fault. Returns 0 on success, negative errno on failure. **Only callable from sleepable programs** — try it from a non-sleepable program and the Verifier rejects with `sleepable helper bpf_copy_from_user#148 in <context>`, where `<context>` names the non-sleepable context it found.
 
 ### `openat_path.c` — userspace
 
@@ -163,10 +161,10 @@ SEC("fentry/__x64_sys_openat")
 Verifier rejects:
 
 ```
-program of this type cannot use helper bpf_copy_from_user#114
+sleepable helper bpf_copy_from_user#148 in <context>
 ```
 
-Lesson: `.s/` is what unlocks the sleepable helpers. Without it, the call is forbidden at verification time.
+(`<context>` is filled in with the non-sleepable context the Verifier found — e.g., the program type or attach point.) Lesson: `.s/` is what unlocks the sleepable helpers. Without it, the call is forbidden at verification time.
 
 ### Break 2 — Try `bpf_copy_from_user` in an XDP program
 
@@ -199,7 +197,9 @@ bpf_probe_read_user_str(e->path, sizeof(e->path), upath);
 
 This works in *non-sleepable* programs too. It doesn't fault — it returns `-EFAULT` if the page isn't resident. For tracing, the silent miss is usually acceptable; you trade a few dropped events for not needing sleepable.
 
-When do you actually need sleepable? When dropping the event isn't acceptable (security policy, audit logs), or when you need a helper that *only* exists in sleepable form (e.g., `bpf_d_path`).
+When do you actually need sleepable? When dropping the event isn't acceptable (security policy, audit logs), or when you need a helper that *only* exists in sleepable form (`bpf_copy_from_user` and the crypto helpers).
+
+A helper worth distinguishing from these: `bpf_d_path` (resolves a `struct path` to a string). It is *not* sleepable-only — its proto carries no `.might_sleep` flag. Instead it's gated by a **BTF allowlist**: the `.allowed` callback (`bpf_d_path_allowed` in `kernel/trace/bpf_trace.c`) only permits it when you're attached to one of a fixed set of functions (`security_file_open`, `vfs_getattr`, `filp_close`, `dentry_open`, …), or from a BPF iterator. `bpf_ima_inode_hash` is gated the same way (`bpf_ima_inode_hash_allowed`). So if `bpf_d_path` is rejected, the fix isn't `.s/` — it's attaching to an allowlisted function.
 
 ---
 
@@ -217,7 +217,7 @@ When do you actually need sleepable? When dropping the event isn't acceptable (s
 
 - **Sleepable BPF programs** can run in faultable contexts and call helpers that page-fault or schedule.
 - Opt in via the **`.s/` suffix** on the SEC name (`SEC("fentry.s/...")`, `SEC("lsm.s/...")`).
-- Sleepable programs can use: `bpf_copy_from_user`, `bpf_d_path`, `bpf_ima_inode_hash`, and other helpers marked sleepable-only.
+- Sleepable programs can use: `bpf_copy_from_user`, the crypto helpers, and other helpers marked sleepable-only. (`bpf_d_path` and `bpf_ima_inode_hash` are *not* sleepable-only — they're gated by a BTF allowlist of attach targets instead.)
 - **Cost:** SRCU read-side instead of RCU, slightly more expensive but bounded.
 - **Limit:** only attach types that run in faultable contexts can be sleepable — fentry on syscalls, LSM hooks, iterators. **Not** XDP, NAPI softirq, or IRQ handlers.
 - For tracing reads where occasional misses are OK, prefer **`bpf_probe_read_user_str`** in a non-sleepable program — cheaper and doesn't require sleepable plumbing.

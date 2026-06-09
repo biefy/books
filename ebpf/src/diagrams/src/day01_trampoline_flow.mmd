@@ -3,11 +3,11 @@ flowchart LR
 
     Tramp["<b>2. BPF trampoline</b><br/>saves argument registers and builds the BPF calling convention<br/><b>handoff:</b> verifier-approved program expects typed args/ctx<br/><b>state:</b> BPF-visible arguments are ready"]
 
-    Prog["<b>3. fentry program</b><br/>observes do_unlinkat arguments before unlink logic runs<br/><b>handoff:</b> return 0 continues kernel execution<br/><b>state:</b> optional event data is prepared"]
+    Prog["<b>3. fentry program</b><br/>observes filename_unlinkat arguments before unlink logic runs<br/><b>handoff:</b> return 0 continues kernel execution<br/><b>state:</b> optional event data is prepared"]
 
     Event["<b>4. tracing side effect</b><br/>ringbuf or map update exposes observation to userspace<br/><b>handoff:</b> trampoline can restore normal execution<br/><b>state:</b> event is recorded without changing syscall behavior"]
 
-    Body["<b>5. original function body</b><br/>registers restored, do_unlinkat performs lookup, permission checks, unlink<br/><b>state:</b> caller sees the normal kernel return value"]
+    Body["<b>5. original function body</b><br/>registers restored, filename_unlinkat performs lookup, permission checks, unlink<br/><b>state:</b> caller sees the normal kernel return value"]
 
     Patch --> Tramp --> Prog --> Event --> Body
 

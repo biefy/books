@@ -50,7 +50,7 @@ Returns the IP of the function the trampoline jumped from. You typically use it 
 >
 > **Q: Does multi-probe exist for fentry?**
 >
-> A: Yes. `SEC("fentry.multi/...")` uses the same mechanism with trampolines instead of kprobe-style hooks. Even cheaper per-call than multi-kprobe, but only works on functions with BTF.
+> A: No — there's no `fentry.multi`/`fexit.multi`. fentry/fexit build one trampoline per attach target, with no batched multi-attach variant in libbpf or the kernel. If you need to hook many functions at once with low per-call overhead, use `kprobe.multi` (which is fprobe-backed and very cheap) and read the return value via the kprobe ctx.
 >
 > **Q: Multi-uprobe?**
 >
@@ -139,7 +139,6 @@ You attached to ~50 functions in one syscall, watched all of them for 2 seconds,
 ### Break 1 — Specific list instead of glob
 
 ```c
-#include <linux/filter.h>
 SEC("kprobe.multi")
 int BPF_KPROBE(p) { ... }
 ```
@@ -194,8 +193,8 @@ Glob expands to zero matches. libbpf fails attach with `-ENOENT`. Friendly: sile
 - **Multi-probe** attaches one BPF program to many functions in a single syscall (~10ms for 1000 vs seconds for one-by-one).
 - `SEC("kprobe.multi/glob")` for glob attach; or pass an explicit list via `bpf_kprobe_multi_opts`.
 - **`bpf_get_func_ip(ctx)`** lets the program know which function fired this invocation.
-- Variants: `kprobe.multi`, `kretprobe.multi`, `fentry.multi`, `fexit.multi`, `uprobe.multi` (6.6+).
-- **`fentry.multi`** is the cheapest at runtime — combines trampoline efficiency with multi-attach scale.
+- Variants: `kprobe.multi`, `kretprobe.multi`, `uprobe.multi` (6.6+). There is **no** `fentry.multi`/`fexit.multi` — fentry/fexit have no batched multi-attach variant.
+- **`kprobe.multi`** is fprobe-backed, so its batch install and per-call overhead are both very low — it's the tool to reach for when hooking many functions at once.
 - The kernel-side install batches via ftrace; per-probe overhead at runtime is comparable to single-probe.
 
 ---
