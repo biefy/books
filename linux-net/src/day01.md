@@ -108,18 +108,18 @@ Output shows where in the kernel each dropped skb was disposed of, plus the drop
 
 ```bash
 cd ~/code/linux
-# After building once:
-pahole include/linux/skbuff.h | grep -A 50 "struct sk_buff "
+# After building vmlinux once (needs CONFIG_DEBUG_INFO_BTF=y or DWARF):
+pahole -C sk_buff vmlinux
 ```
 
-Reveals the size, padding, and field-by-field layout. Note how `next, prev, dev, sk` are at the top — that's the cache-hot section that the RX path touches first.
+`pahole` reads the struct layout from the compiled `vmlinux`'s debug info, not from the header source — a `.h` has no offsets or padding until the compiler lays the type out. `-C sk_buff` selects just that struct (no `grep` needed); it prints the field-by-field layout with a `/* size: N, ... */` footer. Reveals the size, padding, and field-by-field layout. Note how `next, prev, dev, sk` are at the top — that's the cache-hot section that the RX path touches first.
 
 ### Trace a packet's headroom journey
 
 ```bash
 sudo bpftrace -e '
-fentry:ip_rcv { @h[comm] = lhist(skb->data - skb->head, 0, 256, 16); }
-interval:s:5 { exit; }'
+fentry:ip_rcv { @h[comm] = lhist((uint64)args->skb->data - (uint64)args->skb->head, 0, 256, 16); }
+interval:s:5 { exit(); }'
 ```
 
 Histogram of headroom on packets entering `ip_rcv`. You'll see most packets have ~64 bytes of headroom (NET_SKB_PAD).
@@ -159,7 +159,7 @@ sudo tcpdump -i any -c 0 &
 Then trace `skb_clone`:
 
 ```bash
-sudo bpftrace -e 'fentry:skb_clone { @[kstack] = count(); } interval:s:5 { exit; }' | head -30
+sudo bpftrace -e 'fentry:skb_clone { @[kstack] = count(); } interval:s:5 { exit(); }' | head -30
 ```
 
 You'll see `skb_clone` fires on every packet because the packet capture path clones each one. This is why `tcpdump` adds measurable overhead at high rates.

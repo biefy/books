@@ -166,7 +166,7 @@ kprobe:tcp_write_xmit {
   $tp = (struct tcp_sock *)arg0;
   @cwnd = lhist($tp->snd_cwnd, 0, 1000, 50);
 }
-interval:s:10 { exit }'
+interval:s:10 { exit(); }'
 ```
 
 Histogram of cwnd values during a transfer. Compare distributions for CUBIC vs BBR.

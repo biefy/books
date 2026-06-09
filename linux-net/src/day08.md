@@ -108,8 +108,8 @@ ip rule show
 ```bash
 sudo bpftrace -e '
 fentry:fib_table_lookup {
-  printf("lookup daddr=%pI4 table_id=%d\n",
-         &args->flp->daddr,
+  printf("lookup daddr=%s table_id=%d\n",
+         ntop(args->flp->daddr),
          args->tb->tb_id);
 }'
 
@@ -134,7 +134,7 @@ sudo ip route del 10.99.0.0/16
 ```bash
 sudo bpftrace -e '
 fentry:ip_route_output_flow {
-  printf("out: daddr=%pI4 oif=%d\n", &args->flp4->daddr, args->flp4->flowi4_oif);
+  printf("out: daddr=%s oif=%d\n", ntop(args->flp4->daddr), args->flp4->__fl_common.flowic_oif);
 }'
 ```
 

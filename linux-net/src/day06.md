@@ -106,7 +106,7 @@ sudo bpftrace -e '
 fentry:eth_type_trans {
   @pkt_types[args->skb->pkt_type] = count();
 }
-interval:s:5 { exit }'
+interval:s:5 { exit(); }'
 ```
 
 PACKET_HOST=0, BROADCAST=1, MULTICAST=2, OTHERHOST=3.

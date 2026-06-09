@@ -118,10 +118,10 @@ You'll see the function-call tree: `netif_receive_skb` → `__netif_receive_skb_
 
 ```bash
 sudo bpftrace -e '
-fentry:ip_rcv { @[skb->dev->name] = count(); }
-fentry:tcp_v4_rcv { @tcp[skb->dev->name] = count(); }
-fentry:udp_rcv { @udp[skb->dev->name] = count(); }
-interval:s:5 { exit; }'
+fentry:ip_rcv { @[args->skb->dev->name] = count(); }
+fentry:tcp_v4_rcv { @tcp[args->skb->dev->name] = count(); }
+fentry:udp_rcv { @udp[args->skb->dev->name] = count(); }
+interval:s:5 { exit(); }'
 ```
 
 5 seconds of per-protocol receive counts per interface.
