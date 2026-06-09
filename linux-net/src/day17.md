@@ -1,4 +1,4 @@
-# Day 17 — TCP retransmission, RACK, FACK, recovery
+# Day 17 — TCP retransmission, RACK, recovery
 
 > **Today's mission:** understand how TCP detects packet loss and recovers without breaking ordering. Three detection mechanisms, one recovery state, lots of timers. Total time: ~75 minutes.
 
@@ -53,6 +53,8 @@ Specifically: if some segment with a *later* send time has been SACKed, and the 
 
 RACK is the current default (`net.ipv4.tcp_recovery=1`). If you ever set `tcp_recovery=0`, you fall back to legacy 3-dupack detection — slower and more conservative.
 
+> **Historical note — FACK.** You'll still see "FACK" (Forward Acknowledgment) mentioned in old docs and in kernel comments (`tcp_recovery.c`, `tcp_vegas.c`). FACK was an older SACK-based loss heuristic; it was **removed from the kernel around 4.11** in favor of RACK, which generalizes the same idea using ACK timing. Only the comments survive — there's no FACK code path to read anymore.
+
 ## SACK — Selective Acknowledgments (RFC 2018)
 
 By default, ACKs are cumulative: "I have everything up to seq N." This is enough for Reno but limits parallelism. With **SACK**, ACKs include up to 4 ranges: "I have up to N, and also blocks A-B, C-D, E-F." The sender uses this to avoid retransmitting segments the receiver already has.
@@ -64,7 +66,7 @@ SACK is on by default. The state structures: `tcp_sock->sacked_out`, `tp->lost_o
 When loss is detected (any of the three mechanisms above), the kernel calls **`tcp_enter_recovery`** (`net/ipv4/tcp_input.c:3177`):
 
 1. Sets `icsk->icsk_ca_state = TCP_CA_Recovery`.
-2. Halves `cwnd` (PRR — Proportional Rate Reduction; reduces gracefully across RTT).
+2. Reduces `cwnd` toward `ssthresh` (PRR — Proportional Rate Reduction; reduces gracefully across the RTT). How far depends on the CC: the default CUBIC drops to ≈70% (β = 717/1024), classic Reno halves to 50%.
 3. Calls the CC algorithm's `set_state(CA_Recovery)` — most algorithms record the loss event.
 
 While in Recovery, the kernel transmits new segments at the reduced rate and selectively retransmits the lost ones. Recovery ends when `snd_una` advances past where the loss was detected (the "recovery point") — the kernel calls `tcp_complete_cwr` and returns to CA_Open.
@@ -90,7 +92,7 @@ Each state has its own logic for what to send and how to count cwnd. ~114 lines;
 When the sender enters Recovery, the question is "how fast should I retransmit?"
 
 - Naïve answer: blast all the missing segments immediately. Bad — overshoots and causes more loss.
-- PRR answer: pace retransmits at exactly the rate of returning ACKs, gradually working cwnd down to half.
+- PRR answer: pace retransmits at exactly the rate of returning ACKs, gradually working cwnd down toward the new `ssthresh` (≈70% of cwnd for CUBIC, 50% for Reno).
 
 PRR (RFC 6937) is the kernel's recovery rate-control strategy. The `prr_out`, `prr_delivered` fields in `tcp_sock` track its state.
 
@@ -149,9 +151,9 @@ Where `RX` is total retransmits (cumulative) and `TX` is unacked retransmits in 
 
 - **`net/ipv4/tcp_timer.c:535`** — `tcp_retransmit_timer`. The RTO-fires entry. Read top to bottom (~150 lines). Notice the "user timeout" handling (gives up after `TCP_USER_TIMEOUT` even if RTO would keep retrying), and the explicit congestion exit if too many retries.
 
-- **`net/ipv4/tcp_output.c:3693`** — `tcp_retransmit_skb`. How a single skb gets resent. Notice the GSO/TSO splitting if the skb represents multiple segments — only the lost portion is retransmitted.
+- **`net/ipv4/tcp_output.c:3694`** — `tcp_retransmit_skb`. How a single skb gets resent. Notice the GSO/TSO splitting if the skb represents multiple segments — only the lost portion is retransmitted.
 
-- **`net/ipv4/tcp_output.c:3723`** — `tcp_xmit_retransmit_queue`. Drives retransmits during recovery: walks the queue, picks segments marked LOST, sends them at the PRR-paced rate.
+- **`net/ipv4/tcp_output.c:3724`** — `tcp_xmit_retransmit_queue`. Drives retransmits during recovery: walks the queue, picks segments marked LOST, sends them at the PRR-paced rate.
 
 - **`include/linux/tcp.h:197`** — `struct tcp_sock`. The retransmit-related fields are clustered: `packets_out`, `lost_out`, `sacked_out`, `retrans_out`, `prr_out`, `prr_delivered`, `rack`. Skim them once to know what each tracks.
 
@@ -163,7 +165,7 @@ Where `RX` is total retransmits (cumulative) and `TX` is unacked retransmits in 
 - **Three loss-detection mechanisms**: RTO (slow, backstop), 3 dupacks (Reno), RACK (modern default).
 - **`tcp_recovery=1`** enables RACK; the default since 4.4.
 - **SACK** lets ACKs include non-contiguous ranges; on by default.
-- **Recovery state**: cwnd halved (via PRR), retransmit lost segments at ACK-paced rate, exit when `snd_una` reaches the recovery point.
+- **Recovery state**: cwnd reduced toward ssthresh (≈70% for CUBIC, 50% for Reno) via PRR, retransmit lost segments at ACK-paced rate, exit when `snd_una` reaches the recovery point.
 - **`tcp_retransmit_timer`** at `net/ipv4/tcp_timer.c:535` is the RTO entry.
 - **`tcp_fastretrans_alert`** at `net/ipv4/tcp_input.c:3328` is the per-ACK recovery state machine.
 - Inspect: `ss -tin` (cwnd, retrans), `nstat` (TCPRetrans, TCPSackRecovery, etc.).
@@ -176,11 +178,11 @@ Why does losing 1% of packets on a 100 ms RTT path cause throughput to drop *muc
 <details>
 <summary>Click to reveal answer</summary>
 
-**Answer:** Because each loss causes the CC algorithm to halve cwnd. CUBIC needs many RTTs of growth to recover. The Mathis formula approximates achievable throughput:
+**Answer:** Because each loss causes the CC algorithm to cut cwnd (CUBIC to ≈70%, Reno to 50%), and recovering that lost window takes many RTTs of growth. The Mathis formula approximates achievable throughput:
 
 > throughput ≈ MSS / (RTT × √loss_rate)
 
-Plug in: MSS=1448, RTT=0.1s, loss=0.01 → ≈ 14.48 Mbps. Even on a 10 Gbps path, you cap at ~14 Mbps. CUBIC is loss-based — it interprets loss as congestion and backs off by ~50%. With one halving per ~100 packets, cwnd never reaches what the path could actually support.
+Plug in (in bits): MSS=1448 B = 11584 bits, RTT=0.1 s, √0.01 = 0.1 → 11584 / (0.1 × 0.1) ≈ **1.16 Mbps**. Even on a 10 Gbps path, you cap near ~1 Mbps. CUBIC is loss-based — it interprets every loss as congestion and backs off. With one back-off per ~100 packets, cwnd never reaches what the path could actually support.
 
 **BBR partially fixes this** because it doesn't use loss as the signal — it uses bandwidth and RTT directly. On the same lossy path, BBR can sustain throughput much closer to the path's actual capacity.
 

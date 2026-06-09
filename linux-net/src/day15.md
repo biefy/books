@@ -113,7 +113,7 @@ Each TIME_WAIT socket consumes a small amount of kernel memory and one entry in 
 Mitigations:
 
 - **`SO_REUSEADDR`** lets a new socket bind even if a recent connection's TIME_WAIT entry occupies the 4-tuple.
-- **`net.ipv4.tcp_max_tw_buckets`** caps the global TIME_WAIT count; older entries get RST'd. The default is `ehash_entries / 2`, so it scales with system memory (often tens to hundreds of thousands).
+- **`net.ipv4.tcp_max_tw_buckets`** caps the global TIME_WAIT count. When it's exceeded, the kernel doesn't evict older entries or send any RST — the connection simply skips TIME_WAIT and closes immediately via `tcp_done()`, and `TCPTimeWaitOverflow` increments. The default is `ehash_entries / 2`, so it scales with system memory (often tens to hundreds of thousands).
 - **`net.ipv4.tcp_tw_reuse=1`** lets the kernel reuse TIME_WAIT sockets for new outgoing connections (uses TCP timestamps to ensure no overlap). Safe for client-side; doesn't affect listening sockets.
 - (~~`tcp_tw_recycle`~~ was removed in 4.12 — was unsafe behind NAT.)
 
@@ -169,7 +169,7 @@ Observe: the closing side sits in TIME_WAIT for ~60s. The other side returns to 
 ## What to break
 
 - **Set `tcp_fin_timeout=5`**, then close a connection where the server doesn't reciprocate. You'll see the FIN_WAIT_2 expire after ~5s. Useful for diagnosing connection leaks.
-- **Hammer `tcp_max_tw_buckets`**: reduce it to 100 (`sudo sysctl -w net.ipv4.tcp_max_tw_buckets=100`), run a load test that opens many short connections. After 100 TIME_WAITs, new closes get RST'd; you'll see `TcpExt: TCPTimeWaitOverflow` (in `nstat` / `/proc/net/netstat`) increment.
+- **Hammer `tcp_max_tw_buckets`**: reduce it to 100 (`sudo sysctl -w net.ipv4.tcp_max_tw_buckets=100`), run a load test that opens many short connections. After 100 TIME_WAITs, new closes skip TIME_WAIT and close immediately (no RST is sent); you'll see `TcpExt: TCPTimeWaitOverflow` (in `nstat` / `/proc/net/netstat`) increment.
 - **Try `tcp_tw_reuse=1`** for outgoing-only workloads: relieves the bucket pressure for clients that connect frequently to the same servers (test client + benchmarking tools).
 
 ## What to read in the kernel
@@ -180,7 +180,7 @@ Observe: the closing side sits in TIME_WAIT for ~60s. The other side returns to 
 
 - **`net/ipv4/tcp.c:2961`** — `tcp_set_state`. The explicit state change function. Note the per-state SNMP counter increments (`TCP_INC_STATS`); this is how `nstat` reports `Tcp.CurrEstab`, etc. Also note the ehash insert/remove on transitions to/from ESTABLISHED.
 
-- **`net/ipv4/tcp.c:3310`** — `tcp_close`. What happens when the application calls `close()`. This is a thin wrapper; read the substantive ~170-line implementation in `__tcp_close` (`net/ipv4/tcp.c:3138`) end-to-end. Notice the LINGER handling, the multi-step state transitions (ESTABLISHED → FIN_WAIT_1, etc.), and the `tcp_close_pending_data` cleanup.
+- **`net/ipv4/tcp.c:3310`** — `tcp_close`. What happens when the application calls `close()`. This is a thin wrapper; read the substantive ~170-line implementation in `__tcp_close` (`net/ipv4/tcp.c:3138`) end-to-end. Notice the LINGER handling, the multi-step state transitions (ESTABLISHED → FIN_WAIT_1, etc.), and the inline receive-queue flush: it walks `skb_peek(&sk->sk_receive_queue)` freeing any unread skbs, and if data was still unread it sends an RST instead of a graceful FIN (`data_was_unread` → `tcp_send_active_reset`).
 
 - **`net/ipv4/tcp_ipv4.c:2068`** — `tcp_v4_rcv`. The IP-layer entry. Looks up the sock via the ehash (4-tuple match) and dispatches into the state machine. Read this to see how a packet arrives, gets associated with a sock, and proceeds.
 

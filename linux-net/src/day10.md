@@ -109,7 +109,7 @@ Extension-header parsers are length-prefixed-buffer parsers in C, deep in the ne
 
 - **2026 (kernel 7.1):** SRv6 RPL OOB write — `ipv6_rpl_srh_rcv` could push a recompressed SRH that exceeded headroom, causing `skb_mac_header_rebuild` to underflow `mac_header` to ~65530 and `memmove` to write 14 bytes ~64KiB past `skb->head`. Fix in commit `9e6bf146b559`.
 - **2018:** SegmentRoutingHeader processing flaw (CVE-2018-14633).
-- Various jumbogram bugs in `ipv6_hop_jumbo` (`net/ipv6/exthdrs.c:981`).
+- Various jumbogram bugs in `ipv6_hop_jumbo` (`net/ipv6/exthdrs.c:996`).
 
 The pattern: an attacker controls extension-header *lengths*, and a parser miscomputes how much memory to allocate or how many bytes are valid. If you write an extension header parser, treat it like a fuzzing target from day one.
 
@@ -161,7 +161,7 @@ sudo bpftrace -e 'fentry:ipv6_skip_exthdr { printf("skip nexthdr=%d start=%d\n",
 - **`net/ipv6/exthdrs.c`** — extension-header parsers.
   - `ipv6_rthdr_rcv` (line 654): Routing header. Read this to understand SRv6 — the most actively-developed extension. Also where most CVEs have been.
   - `ipv6_destopt_rcv` (line 295): Destination Options. Simpler; good warm-up.
-  - `ipv6_hop_jumbo` (line 981): the parser for the Jumbo Payload option in HOPOPT. Tiny but instructive.
+  - `ipv6_hop_jumbo` (line 996): the parser for the Jumbo Payload option in HOPOPT. Tiny but instructive.
 
 - **`include/uapi/linux/in6.h`** and **`include/net/ipv6.h`** — the canonical structs (`struct ipv6hdr`, `struct in6_addr`, the IPV6_NEXTHDR_* constants).
 
@@ -172,7 +172,7 @@ sudo bpftrace -e 'fentry:ipv6_skip_exthdr { printf("skip nexthdr=%d start=%d\n",
 ## Bullet Points
 
 - IPv6 hosts auto-configure: link-local (fe80::/64) immediately, global addresses from RAs.
-- **Address generation modes** (`addr_gen_mode`): EUI-64 (default, predictable), stable_secret (hashed per-iface), random.
+- **Address generation modes** (`addr_gen_mode`): EUI-64 (kernel default; many distros override to stable_privacy), stable_secret (hashed per-iface), random.
 - **DAD** is mandatory: send NS to your tentative address, wait, then commit.
 - **NDP** = ICMPv6 messages 133–137: RS, RA, NS, NA, Redirect. Replaces ARP.
 - The `neighbour` subsystem (`nd_tbl`) is structurally identical to IPv4's `arp_tbl`.

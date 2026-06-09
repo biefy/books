@@ -18,13 +18,12 @@ The single most important function in this layer is `eth_type_trans` — called 
 
 1. **`skb_reset_mac_header(skb)`** — record where the Ethernet header is by storing the offset of `skb->data` within the buffer (`skb->data - skb->head`); it's at `skb->data` right now.
 2. **Read `eth = (struct ethhdr *)skb->data`**.
-3. **Set `skb->pkt_type`** based on destination MAC:
+3. **Set `skb->pkt_type`** (via `eth_skb_pkt_type`) based on destination MAC:
    - `PACKET_BROADCAST` if dst is `ff:ff:ff:ff:ff:ff`.
    - `PACKET_MULTICAST` if the multicast bit is set.
-   - `PACKET_HOST` if dst matches `dev->dev_addr` (us).
-   - `PACKET_OTHERHOST` if it doesn't (would be dropped on a normal NIC; promiscuous mode keeps these).
+   - `PACKET_OTHERHOST` if dst doesn't match `dev->dev_addr` (would be dropped on a normal NIC; promiscuous mode keeps these). Otherwise it leaves the default `PACKET_HOST` when dst matches `dev_addr` (us).
 4. **`skb_pull(skb, ETH_HLEN)`** — advance `skb->data` past the 14-byte header. Now `skb->data` points at the L3 payload.
-5. **Return `eth->h_proto`** — typically `ETH_P_IP` (0x0800), `ETH_P_IPV6` (0x86DD), or `ETH_P_8021Q` (0x8100, VLAN).
+5. **Return the protocol ID** — typically `eth->h_proto` (`ETH_P_IP` 0x0800, `ETH_P_IPV6` 0x86DD, or `ETH_P_8021Q` 0x8100, VLAN), but only `if (eth_proto_is_802_3(...))`. There are two short-circuits before that: if the device uses DSA tagging it returns `ETH_P_XDSA` without looking at the packet, and if `h_proto` is a length field (≤ 1500) it falls back to `ETH_P_802_3` (IPX magic) or `ETH_P_802_2` (802.2 LLC).
 
 The driver assigns the return value to `skb->protocol`, then passes the skb to GRO / `netif_receive_skb`. From here the L3 dispatcher uses `skb->protocol` to find the right handler (`ip_rcv` for IP).
 
@@ -103,13 +102,13 @@ sudo tcpdump -i eth0.100 -n &
 
 ```bash
 sudo bpftrace -e '
-fentry:eth_type_trans {
+fexit:eth_type_trans {
   @pkt_types[args->skb->pkt_type] = count();
 }
 interval:s:5 { exit(); }'
 ```
 
-PACKET_HOST=0, BROADCAST=1, MULTICAST=2, OTHERHOST=3.
+PACKET_HOST=0, BROADCAST=1, MULTICAST=2, OTHERHOST=3. We attach at `fexit` (function return), not `fentry`: `eth_type_trans` is the function that *sets* `pkt_type` (via `eth_skb_pkt_type`), so at entry the field still holds its prior value (usually 0). By the time the function returns, the assignment is complete. `fexit` exposes `args->` for the input arguments just like `fentry`.
 
 ## What to break
 
@@ -159,7 +158,7 @@ A frame arrives at eth0 with VLAN tag 100, but no `eth0.100` device exists. What
 <details>
 <summary>Click to reveal answer</summary>
 
-**Answer:** `vlan_do_receive()` looks up a registered VLAN device for (eth0, 100), finds none, and returns false. The frame isn't redirected to a VLAN netdev; `__netif_receive_skb_core` marks it `PACKET_OTHERHOST` and it's later dropped in `ip_rcv`, which bumps the `rx_otherhost_dropped` core stat (via `dev_core_stats_rx_otherhost_dropped_inc`). It doesn't bubble up to L3. To accept untagged "unknown VLAN" traffic, you'd configure the bridge with VLAN-aware filtering, or use `ip link set eth0 type bridge_slave vlan_tunnel on`.
+**Answer:** `vlan_do_receive()` looks up a registered VLAN device for (eth0, 100), finds none, and returns false. The frame isn't redirected to a VLAN netdev; `__netif_receive_skb_core` marks it `PACKET_OTHERHOST` and it's later dropped in `ip_rcv`, which bumps the `rx_otherhost_dropped` core stat (via `dev_core_stats_rx_otherhost_dropped_inc`). It doesn't bubble up to L3. To accept untagged "unknown VLAN" traffic, you'd configure a VLAN-aware bridge with the relevant VID on the port.
 
 </details>
 

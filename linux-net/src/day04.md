@@ -45,10 +45,10 @@ GSO is universal — works on any NIC. The CPU cost of segmentation is real but 
 
 ## GRO — Generic Receive Offload
 
-The receive-side counterpart. Inside NAPI's poll function:
+The receive-side counterpart. Inside NAPI's poll function the driver calls `napi_gro_receive(napi, skb)`, a `static inline` that funnels into the exported `gro_receive_skb` (and `dev_gro_receive`):
 
 ```c
-napi_gro_receive(napi, skb);
+gro_receive_skb(&napi->gro, skb);   // net/core/gro.c — the traceable entry
 ```
 
 The GRO engine (`net/core/gro.c`) compares the new skb against a list of "in flight" same-flow skbs. If it can merge (consecutive sequence numbers, same flow tuple, no flag changes), it appends payload to the existing one — extending the linear buffer or adding a page fragment. Result: one `ip_rcv` call for what was 40 wire packets.
@@ -107,7 +107,7 @@ tcp-segmentation-offload: on
 
 ```bash
 sudo bpftrace -e '
-fentry:napi_gro_receive {
+fentry:gro_receive_skb {
   @gro_lengths = lhist(args->skb->len, 0, 65536, 4096);
 }
 fentry:ip_rcv {
@@ -150,7 +150,7 @@ The driver counts wire packets, not skb count. So a `wire_pkts >> tx_packets_ker
 ## What to read in the kernel
 
 - **`net/core/gso.c`** — segmentation engine. ~300 lines. `__skb_gso_segment` is the entry; `skb_mac_gso_segment` does the L2 split.
-- **`net/core/gro.c`** — coalescing engine. ~800 lines. `napi_gro_receive` is the entry; per-protocol callbacks (`tcp4_gro_receive`) live in protocol files.
+- **`net/core/gro.c`** — coalescing engine. ~800 lines. `dev_gro_receive` is the workhorse (`gro_receive_skb` is the exported entry; `napi_gro_receive` itself is a `static inline` in `netdevice.h`); per-protocol callbacks (`tcp4_gro_receive`) live in protocol files.
 - **`net/ipv4/tcp_offload.c`** — TCP-specific GRO/GSO callbacks.
 - **`include/linux/netdev_features.h`** — `NETIF_F_GSO_*`, `NETIF_F_TSO_*`, `NETIF_F_GRO_*` flags.
 - **`include/linux/skbuff.h`** — search `gso_size`, `gso_segs`, `gso_type` in `skb_shared_info`.
@@ -162,7 +162,7 @@ The driver counts wire packets, not skb count. So a `wire_pkts >> tx_packets_ker
 
 - **TSO**: hardware segments large skbs into wire packets. Saves stack overhead 40x.
 - **GSO**: software segmentation late in TX (`net/core/gso.c:__skb_gso_segment`). Same stack savings as TSO; works on any NIC.
-- **GRO**: receive-side coalescing in NAPI poll (`net/core/gro.c:napi_gro_receive`). One stack pass per superpacket.
+- **GRO**: receive-side coalescing in NAPI poll (`net/core/gro.c:dev_gro_receive`). One stack pass per superpacket.
 - All three controlled with `ethtool -K`.
 - **Default ON** for all three on modern NICs.
 - Side effects: **per-packet observability is wrong unless you disable GRO** or multiply by gso_segs.
@@ -172,12 +172,12 @@ The driver counts wire packets, not skb count. So a `wire_pkts >> tx_packets_ker
 
 ## Check question
 
-You run `iperf3` and observe 30 Gbps throughput on a 25 Gbps NIC. Wait, that's higher than line rate. What's happening?
+You run `iperf3` and for the first instant of a transfer the reported throughput briefly reads *above* the NIC's line rate, then settles. What's happening?
 
 <details>
 <summary>Click to reveal answer</summary>
 
-**Answer:** TSO is making the kernel see more "throughput" than wire actually carries. iperf3 measures bytes through the userspace socket. With TSO, those bytes leave the kernel in 64 KB skbs and the NIC chops them. iperf3's bytes-per-second is correct for the *application*, but it's measuring socket throughput, not wire throughput. Wire is bounded at 25 Gbps. The 30 Gbps reading means about 5 Gbps of "stack-level throughput" exists only briefly as the kernel hands a 64 KB chunk over and TSO segments it out. (Unlikely scenario in practice — typically iperf3 throughput tracks wire — but illustrative.)
+**Answer:** iperf3 measures bytes through the userspace socket, not bytes on the wire. At the very start of a transfer the kernel's socket send buffer absorbs a burst of writes faster than the NIC can drain them — the application's bytes-per-second momentarily reflects how fast data entered the socket buffer, not how fast it left the wire. Once the buffer fills and TCP is paced by ACKs, the reading settles to the true wire rate (bounded by the NIC). TSO contributes to the illusion: those buffered bytes leave the kernel in 64 KB skbs that the NIC segments, so the "stack-level throughput" spikes briefly before flow control clamps it. Steady-state iperf3 throughput tracks wire rate.
 
 </details>
 

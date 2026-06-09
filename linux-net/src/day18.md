@@ -14,7 +14,7 @@ getsockopt(fd, level, optname, value, &valuelen);
 The **`level`** picks a namespace: `SOL_SOCKET` (generic), `SOL_IP` / `SOL_IPV6`, `SOL_TCP`, `SOL_UDP`, etc. The **`optname`** picks the specific knob. The kernel dispatches:
 
 1. The syscall lands in `do_sock_setsockopt` (`net/socket.c:2348`).
-2. For `level == SOL_SOCKET` (generic), the kernel calls `sock_setsockopt` (`net/core/sock.c:1680`) directly.
+2. For `level == SOL_SOCKET` (generic), the kernel calls `sock_setsockopt` (`net/core/sock.c:1680`) — a thin wrapper that immediately calls **`sk_setsockopt`** (`net/core/sock.c:1195`), where the actual ~600-line option switch lives.
 3. For other levels, it goes through `sk->sk_prot->setsockopt` (or, for AF_INET, `sock->ops->setsockopt`), which dispatches to per-protocol code: `tcp_setsockopt` (`net/ipv4/tcp.c:4175`), `udp_setsockopt`, `ip_setsockopt` (`net/ipv4/ip_sockglue.c:1409`), etc.
 
 Each option is a `case` in a giant switch statement. When you read `tcp_setsockopt`, you're reading the canonical "what does this knob change?" reference.
@@ -23,7 +23,7 @@ Each option is a `case` in a giant switch statement. When you read `tcp_setsocko
 
 ## SOL_SOCKET — generic options
 
-These work on any socket regardless of protocol family. Implementation: `sock_setsockopt` (`net/core/sock.c:1680`).
+These work on any socket regardless of protocol family. Implementation: `sk_setsockopt` (`net/core/sock.c:1195`), reached via the thin `sock_setsockopt` wrapper (`net/core/sock.c:1680`).
 
 ### `SO_RCVBUF` / `SO_SNDBUF` — buffer sizes
 
@@ -186,16 +186,17 @@ Implementation: `do_tcp_setsockopt` (`net/ipv4/tcp.c:3840`).
 - **When:** monitoring agents, performance debugging.
 - **Where:** `net/ipv4/tcp.c` — search `tcp_get_info` (line 4213). Read this function: it's the source of truth for what `ss -tin` shows.
 
-### `TCP_TX_DELAY` — BBR pacing delay
+### `TCP_TX_DELAY` — artificial outbound delay (test/emulation only)
 
-- **What:** explicit pacing delay (in microseconds) for outbound packets. BBR uses this to enforce its bandwidth estimate.
-- **Why:** without pacing, BBR's bursts cause queueing on the bottleneck, defeating its model. Pairs with `fq` qdisc.
-- **When:** BBR users on egress with no `fq` qdisc set up.
-- **Where:** search `TCP_TX_DELAY` in `tcp.c` (newer kernels).
+- **What:** delay outgoing packets by a fixed number of microseconds (optname 37). The kernel adds the delay to `skb->skb_mstamp_ns` and inflates the connection's `srtt_us`/`icsk_rto` so the rest of the stack behaves as if the path RTT were that much larger.
+- **Why:** network *emulation* for testing — let a test on localhost (or a short path) behave like a high-latency WAN link without real distance or `tc netem`. Added in commit a842fe1425cb.
+- **When:** test harnesses and benchmarks only. **Not** a production tuning knob.
+- **Gotcha:** this has nothing to do with BBR or pacing. BBR paces via `sk_pacing_rate` + the `fq` qdisc, not this option; `TCP_TX_DELAY` only *adds* artificial latency.
+- **Where:** search `TCP_TX_DELAY` in `tcp.c`.
 
 ## BPF can override most of these
 
-A `sock_ops` BPF program (eBPF Day 19) can call `bpf_setsockopt()` to set sockopts kernel-side. This lets per-cgroup or per-flow policies override application defaults — e.g., "all sockets from the high-priority cgroup use BBR with TX_DELAY=1000."
+A `sock_ops` BPF program (eBPF Day 19) can call `bpf_setsockopt()` to set sockopts kernel-side. This lets per-cgroup or per-flow policies override application defaults — e.g., "all sockets from the high-priority cgroup use BBR."
 
 ## Today's experiment
 
@@ -240,7 +241,7 @@ sudo sysctl -w net.ipv4.tcp_congestion_control=bbr
 
 - **`net/socket.c:2348`** — `do_sock_setsockopt`. The dispatcher. Read it to see how `(level, optname, value)` flows to the right protocol code. Notice the `sockptr_t` abstraction that lets BPF (kernel-space caller) and userspace use the same setsockopt path.
 
-- **`net/core/sock.c:1680`** — `sock_setsockopt`. The SOL_SOCKET handler. Long switch (~600 lines). Read the cases for the options you care about — each is its own micro-routine. Notice the consistent pattern: copy from user, validate, take socket lock, update field, release lock.
+- **`net/core/sock.c:1680`** — `sock_setsockopt`. The SOL_SOCKET entry — but it's just a thin wrapper. The real work is in **`sk_setsockopt`** (`net/core/sock.c:1195`): a long switch (~600 lines). Read the cases for the options you care about — each is its own micro-routine. Notice the consistent pattern: copy from user, validate, take socket lock, update field, release lock.
 
 - **`net/ipv4/tcp.c:4175`** — `tcp_setsockopt`. The TCP-specific dispatcher; passes through to `do_tcp_setsockopt` (line 3840). Read `do_tcp_setsockopt` end-to-end if you ever wonder "what does TCP_FOO actually do?" — every option has its case here.
 
