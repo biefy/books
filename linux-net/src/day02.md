@@ -98,6 +98,12 @@ Trace a real packet's path.
 
 ### Use ftrace to see the call chain
 
+`trace-cmd` is not installed by default — `sudo apt-get install -y trace-cmd` (it needs
+`CONFIG_FUNCTION_GRAPH_TRACER`, on by default in typical kernels). This needs **two terminals**: the
+recorder blocks for 5 seconds, and you must fire the packet *during* that window.
+
+In terminal 1, start recording:
+
 ```bash
 sudo trace-cmd record -p function_graph \
     -g netif_receive_skb \
@@ -105,26 +111,49 @@ sudo trace-cmd record -p function_graph \
     -O nofuncgraph-overhead \
     -O funcgraph-tail \
     sleep 5
+```
 
-# In another terminal, generate one packet:
+In terminal 2, within those 5 seconds, generate one packet:
+
+```bash
 ping -c 1 8.8.8.8
+```
 
+After the recorder exits, render the trace:
+
+```bash
 sudo trace-cmd report | head -100
 ```
 
-You'll see the function-call tree: `netif_receive_skb` → `__netif_receive_skb_one_core` → `__netif_receive_skb_core` → `deliver_skb` → `ip_rcv` → `ip_rcv_core` → `nf_hook_slow` → `ip_rcv_finish` → `ip_local_deliver` → `tcp_v4_rcv`.
+You'll see the function-call tree: `netif_receive_skb` → `__netif_receive_skb_one_core` → `__netif_receive_skb_core` → `deliver_skb` → `ip_rcv` → `ip_rcv_core` → `nf_hook_slow` → `ip_rcv_finish` → `ip_local_deliver` → `icmp_rcv`. The leaf is `icmp_rcv` because a `ping` echo reply is an ICMP packet — `icmp_rcv` then calls `icmp_echo`. (Trigger a TCP flow instead — e.g. `curl -s http://example.com >/dev/null` — and the leaf becomes `tcp_v4_rcv`.)
 
 ### Or use BPF for a custom view
 
 ```bash
 sudo bpftrace -e '
-fentry:ip_rcv { @[args->skb->dev->name] = count(); }
+fentry:ip_rcv { @ip[args->skb->dev->name] = count(); }
 fentry:tcp_v4_rcv { @tcp[args->skb->dev->name] = count(); }
 fentry:udp_rcv { @udp[args->skb->dev->name] = count(); }
-interval:s:5 { exit(); }'
+interval:s:6 { exit(); }' &
+
+# Generate receives during the window, then let it exit:
+ping -c 5 -i 0.3 8.8.8.8 >/dev/null; curl -s http://example.com >/dev/null
+wait
 ```
 
-5 seconds of per-protocol receive counts per interface.
+Per-protocol receive counts per interface. Typical output:
+
+```
+@ip[lo]: 4
+@tcp[eth0]: 21
+@udp[eth0]: 2
+@udp[lo]: 4
+```
+
+`@tcp`/`@udp` are the reliable signal. **Note the `@ip` map:** on many virtual NICs (cloud/virtio)
+`fentry:ip_rcv` attaches but never fires for the physical interface — you'll see only `@ip[lo]` (or
+nothing) even with `eth0` traffic flowing. That's a tracing-environment quirk, not a missing-packet
+problem; trust `@tcp[eth0]`/`@udp[eth0]` to confirm receives are happening.
 
 ### Inspect the per-CPU RX state
 
@@ -132,18 +161,32 @@ interval:s:5 { exit(); }'
 cat /proc/net/softnet_stat
 ```
 
-One line per CPU. Columns: total packets processed, dropped, time_squeeze (budget exhaustions), ..., received_rps. High `time_squeeze` means your `netdev_budget` is too small.
+One line per CPU. Every field is a 32-bit counter printed in **hexadecimal** (zero-padded `%08x`) with
+**no header line** — don't read the values as decimal. In order the columns are: packets processed,
+dropped, `time_squeeze` (budget exhaustions), then several zeros, with `cpu_collision`/`received_rps`
+near the end (exact trailing columns are kernel-version-dependent). Convert one to decimal with
+`printf '%d\n' 0x<value>`. High `time_squeeze` means your `netdev_budget` is too small.
 
-Adjust:
+Adjust the budget. **Set** it (in its own step, so you can observe the box running at the new value):
 
 ```bash
 old_budget=$(cat /proc/sys/net/core/netdev_budget)
 echo 600 | sudo tee /proc/sys/net/core/netdev_budget
-# restore when done
-echo "$old_budget" | sudo tee /proc/sys/net/core/netdev_budget
+cat /proc/sys/net/core/netdev_budget   # confirm it changed
 ```
 
-Watch `softnet_stat` shift, then restore the original budget so the host is not left with changed RX scheduling behavior.
+Then, under **sustained RX load** (e.g. `iperf3 -c <host> -P 16` from another box, or a packet flood),
+re-read `/proc/net/softnet_stat` repeatedly and watch the `time_squeeze` column. Be honest with
+yourself about what you'll see: **on an idle host `time_squeeze` never moves** — it only increments when
+a softirq actually exhausts its budget under heavy receive load, and even under load it can stay flat on
+fast CPUs / multi-queue NICs. A non-moving counter is normal, not a sign the change failed (you already
+confirmed the change with the `cat` above).
+
+**Restore** the original budget so the host isn't left with changed RX scheduling behavior:
+
+```bash
+echo "$old_budget" | sudo tee /proc/sys/net/core/netdev_budget
+```
 
 ---
 
