@@ -105,28 +105,41 @@ Return value:
 
 ### Trace a TCP send all the way through
 
+Run the trigger **inside** the recorded command so the send is guaranteed to fire during the capture window — no second terminal, no race against `sleep`:
+
 ```bash
 sudo trace-cmd record -p function_graph \
     -g tcp_sendmsg \
     -O nofuncgraph-overhead \
     -O funcgraph-tail \
-    sleep 5
-
-# In another terminal:
-echo "hello" | nc -q 1 8.8.8.8 80
+    bash -c 'echo hello | nc -q 1 example.com 80; sleep 1'
 
 sudo trace-cmd report | head -200
 ```
 
-You'll see the call tree from `tcp_sendmsg` down through `tcp_write_xmit`, `tcp_transmit_skb`, `ip_queue_xmit`, eventually `dev_hard_start_xmit`, then the driver's xmit.
+> **Prerequisite:** this needs outbound TCP reachability and a completed handshake during the capture — any host you can actually reach works. `example.com:80` reliably accepts the connection; `8.8.8.8:80` is filtered on many networks, so the handshake never completes and the payload `tcp_sendmsg` never fires. `-q 1` is a BSD/traditional `nc` flag — on nmap's `ncat`, drop it (use `nc example.com 80`).
+
+You'll see the call tree from `tcp_sendmsg` down through `tcp_write_xmit`, `tcp_transmit_skb`, `ip_queue_xmit`, eventually `dev_hard_start_xmit`, then the driver's xmit. `trace-cmd` is global, so unrelated sends (e.g. background sshd) may appear too — your `nc` send is the one that ends in the full `ip_queue_xmit → ... → dev_hard_start_xmit` chain.
 
 ### Watch socket buffer accounting
 
+On an idle box `ss -tim` shows only your SSH session, with the buffer/window counters static and near zero — the send-buffer accounting from Stage 2 is invisible until something is actively transmitting. So generate a sustained send first, then snapshot:
+
 ```bash
-ss -tim
+# Sustained upload so the send buffer actually has bytes in flight:
+curl -s -o /dev/null -T /dev/zero --max-time 4 https://speed.cloudflare.com/__up &
+ss -tim                      # watch the uploading socket while curl runs
 ```
 
-Per-socket: send buffer used, congestion window, RTO, retransmits. Look at `wmem_*` fields.
+Per-socket you get: send buffer used, congestion window, RTO, retransmits. `ss` does not print a field literally named `wmem_queued`; it surfaces send-buffer bytes as the `w` value inside `skmem:(...)` and in `Send-Q`. While `curl` runs, the **uploading** socket (to `:https`, not your idle SSH session) shows a large `Send-Q`/`skmem` `w`, plus `cwnd`, `unacked`, and `pacing_rate`:
+
+```
+ESTAB  0  2765014  10.0.0.4:36872  162.159.140.220:https
+  skmem:(r0,rb131072,t0,tb4194304,f2858,w2811094,o0,bl0,d0) cubic wscale:13,10
+  ... cwnd:1950 ... unacked:266 ... pacing_rate 1.42Gbps delivery_rate 120Mbps
+```
+
+`unacked` is segments sent but not yet ACKed (in flight); the `skmem` `w` value is bytes copied into `sk_write_queue` but not yet freed — directly the Stage 2 quantities the check question asks you to compare. If you have no internet egress, a local sink works but won't fully exercise the buffer cap (loopback has no bottleneck, so it drains as fast as it fills).
 
 ### Inspect qdisc statistics
 
@@ -134,20 +147,50 @@ Per-socket: send buffer used, congestion window, RTO, retransmits. Look at `wmem
 tc -s qdisc show dev eth0
 ```
 
-Drops, requeues, current backlog.
+Drops, requeues, current backlog. On an idle box every one of these reads 0 — that is expected, not a failure:
+
+```
+qdisc mq 0: root
+ Sent 1279377437 bytes 1467116 pkt (dropped 0, overlimits 0 requeues 0)
+ backlog 0b 0p requeues 0
+qdisc fq_codel 0: parent :1 limit 10240p flows 1024 quantum 1514 ...
+ Sent 895133146 bytes 775553 pkt (dropped 0, overlimits 0 requeues 0)
+ backlog 0b 0p requeues 0
+```
+
+(On a multi-queue NIC the root is `mq` with one `fq_codel` leaf per hardware TX queue, so you'll see several stanzas.) The next experiment forces `backlog` non-zero so you can actually watch it move.
 
 ### Force a backlog and watch
 
+> **Warning:** this throttles **all** egress on `eth0`. If you are connected over that interface, your SSH/management traffic competes with the test transfer for the same 1mbit and the session may stall — run this on a throwaway VM or a non-management NIC.
+
+First capture the qdisc that is actually there so you can restore it exactly (the live default here is `mq`, not `fq_codel`), then apply the rate limit:
+
 ```bash
+ORIG=$(tc qdisc show dev eth0 | awk 'NR==1{print $2}')   # remember the real default
 sudo tc qdisc replace dev eth0 root tbf rate 1mbit burst 32kbit latency 50ms
 # now egress is rate-limited; large transfers back up at the qdisc
-iperf3 -c some-target &
-tc -s qdisc show dev eth0    # backlog grows
 ```
 
-Restore default:
+Drive traffic that actually leaves `eth0`. The backlog only grows for traffic egressing this device — a `127.0.0.1` transfer goes through the `lo` qdisc and shows backlog `0b 0p`, so loopback is *not* a substitute. On a second machine run `iperf3 -s`, then here:
+
 ```bash
-sudo tc qdisc replace dev eth0 root fq_codel
+iperf3 -c <that-host-IP> -t 30 &
+watch -n1 'tc -s qdisc show dev eth0'   # the `backlog ...b ...p` line climbs
+```
+
+No second machine or `iperf3`? Any sustained upload over `eth0` backs up the qdisc the same way:
+
+```bash
+curl -s -o /dev/null -T /dev/zero --max-time 20 https://speed.cloudflare.com/__up &
+watch -n1 'tc -s qdisc show dev eth0'
+```
+
+Restore (drop back to whatever was really there, and stop the transfer):
+```bash
+kill %1 2>/dev/null                       # stop the backgrounded transfer
+sudo tc qdisc del dev eth0 root           # restores the kernel/runtime default
+# or, to put back exactly what you captured: sudo tc qdisc replace dev eth0 root "$ORIG"
 ```
 
 ---
