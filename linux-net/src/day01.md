@@ -153,8 +153,10 @@ Check `include/linux/skbuff.h` for `NET_SKB_PAD`. Some drivers reserve more for 
 Run something that takes a packet socket capture (`tcpdump`):
 
 ```bash
-sudo tcpdump -i any -c 0 &
+sudo tcpdump -i any -w /dev/null &
 ```
+
+(`-w /dev/null` discards the captured packets so `tcpdump` doesn't spam your terminal while the trace below runs.)
 
 Then trace `skb_clone`:
 
@@ -163,6 +165,12 @@ sudo bpftrace -e 'fentry:skb_clone { @[kstack] = count(); } interval:s:5 { exit(
 ```
 
 You'll see `skb_clone` fires on every packet because the packet capture path clones each one. This is why `tcpdump` adds measurable overhead at high rates.
+
+When you're done, stop the background capture:
+
+```bash
+sudo pkill tcpdump
+```
 
 ### Observation 3 — Drop reason histogram
 
