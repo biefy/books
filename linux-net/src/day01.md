@@ -174,11 +174,21 @@ sudo pkill tcpdump
 
 ### Observation 3 — Drop reason histogram
 
+An idle system drops almost nothing, so generate some drops first. In one terminal, hit a closed port a few times (each attempt is dropped with `NO_SOCKET`):
+
 ```bash
-sudo perf trace --no-syscalls -e skb:kfree_skb 2>&1 | awk '{print $NF}' | sort | uniq -c | sort -rn | head
+for i in $(seq 1 50); do curl -s --max-time 1 http://localhost:1 >/dev/null; done
 ```
 
-5 most common drop reasons on your idle system. Likely: `NOT_SPECIFIED` (legacy `kfree_skb` callers), `SOCKET_FILTER` (BPF socket filters dropping), `IP_INADDRERRORS` (ARP failures).
+While that runs, in another terminal collect drop reasons for 10 seconds:
+
+```bash
+sudo timeout 10 perf trace --no-syscalls -e skb:kfree_skb 2>&1 | awk '{print $NF}' | sort | uniq -c | sort -rn | head
+```
+
+The `timeout 10` matters: `perf trace` streams forever, and the `sort`/`uniq` stages buffer their input, so they only print *after* the input stream ends. If you stop `perf` with Ctrl-C instead, the SIGINT tears down the whole pipe and the buffered counts are lost — you see nothing. Letting `timeout` end `perf` cleanly lets EOF propagate down the pipe so the histogram actually prints.
+
+You'll see the provoked `SKB_DROP_REASON_NO_SOCKET` near the top, mixed with whatever background drops your system produces (e.g. `NOT_SPECIFIED` from legacy `kfree_skb` callers).
 
 ---
 
