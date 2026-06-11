@@ -25,10 +25,12 @@ Result: ~40 wire packets, **one** kernel call to `ndo_start_xmit`. Per-packet st
 Enable/check:
 
 ```bash
-ethtool -k eth0 | grep tso
+ethtool -k eth0 | grep tcp-segmentation-offload
 # tcp-segmentation-offload: on
 ethtool -K eth0 tso off
 ```
+
+(The feature is named `tcp-segmentation-offload`, not `tso` — grepping for `tso` matches nothing.)
 
 NIC must support it (most modern NICs do).
 
@@ -90,60 +92,136 @@ For BPF programs that hook into the stack (XDP runs *before* GRO; tc-bpf runs *a
 ### See offload state
 
 ```bash
-ethtool -k eth0 | grep -E "tso|gso|gro"
+ethtool -k eth0 | grep -E "segmentation-offload|receive-offload"
 ```
 
 Output (typical):
 ```
-rx-checksumming: on
-tx-checksumming: on
-tx-checksum-ipv4: on
-generic-receive-offload: on
-generic-segmentation-offload: on
 tcp-segmentation-offload: on
+generic-segmentation-offload: on
+generic-receive-offload: on
+large-receive-offload: on
 ```
 
+The feature *names* are `tcp-segmentation-offload` / `generic-*-offload` — they don't contain the
+substrings `tso`/`gso`/`gro`, so a `grep -E "tso|gso|gro"` would match only unrelated lines and never
+print these. Match the real names. (`large-receive-offload` is the hardware LRO cousin of GRO; it may
+read `off [fixed]` on NICs that don't support it.)
+
 ### Watch GRO in action
+
+GRO coalesces many wire packets into one superpacket, so the *entry* probe (`gro_receive_skb`) fires
+once per arriving segment, while the *post-GRO* probe fires far fewer times with much larger skbs. We
+watch both the lengths and the call counts:
 
 ```bash
 sudo bpftrace -e '
 fentry:gro_receive_skb {
-  @gro_lengths = lhist(args->skb->len, 0, 65536, 4096);
+  @gro_lengths = lhist(args->skb->len, 0, 65536, 8192);
+  @gro_calls = count();
 }
-fentry:ip_rcv {
-  @rcv_lengths = lhist(args->skb->len, 0, 65536, 4096);
+tracepoint:net:netif_receive_skb {
+  @postgro_lengths = lhist(args->len, 0, 65536, 8192);
+  @postgro_calls = count();
 }
-interval:s:5 { exit(); }'
+interval:s:8 { exit(); }' &
 
-# In another terminal: do a big TCP transfer
-iperf3 -c 8.8.8.8 -t 5
+# While that window is open, pull a real bulk download (server-less, follows redirects).
+curl -sL -o /dev/null --max-time 6 \
+  https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
+wait
 ```
 
-You'll see two histograms. `gro_lengths` shows what GRO received from the NIC (often 1500 each). `rcv_lengths` shows what entered `ip_rcv` (often much larger — coalesced).
+Run the download *inside* the bpftrace window, so background the tracer (`&`) and `wait`. Typical output
+(numbers scale with the transfer):
+
+```
+@gro_calls: 237409          <- once per arriving segment, mostly small
+@gro_lengths:
+[0, 8K)           219020 |@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@|
+[8K, 16K)          11732 |@@                                                |
+ ...
+@postgro_calls: 30527       <- ~8x fewer: GRO merged ~8 segments per superpacket
+@postgro_lengths:
+[0, 8K)            11056 |@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@|
+[8K, 16K)           7203 |@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@                  |
+[56K, 64K)          3260 |@@@@@@@@@@@@@@@                                    |
+```
+
+The story is in the two `*_calls`: `gro_calls` ≫ `postgro_calls` (here ~8:1) is the coalescing ratio,
+and `postgro_lengths` spreads into the big buckets — those are the merged superpackets the stack
+processes once instead of eight times.
+
+> **Why `netif_receive_skb` and not `ip_rcv`?** `tracepoint:net:netif_receive_skb` is the post-GRO entry
+> into the stack and fires on every NIC. `fentry:ip_rcv` works on bare-metal NICs but on many virtual
+> NICs (cloud/virtio) it attaches yet never fires — you'd see an empty histogram and wrongly conclude
+> GRO is off. Use the tracepoint; add `fentry:ip_rcv { @ip = lhist(args->skb->len,0,65536,8192); }` too
+> if you want to confirm it on bare metal.
 
 ### Disable GRO and re-measure
 
+Now turn GRO off and run the *same* observation. The contrast is the whole point:
+
 ```bash
 sudo ethtool -K eth0 gro off
-# Re-run the experiment
-sudo bpftrace -e 'fentry:ip_rcv { @lens = lhist(args->skb->len, 0, 65536, 1500); } interval:s:5 { exit(); }'
-```
 
-Now `ip_rcv` sees actual wire-sized packets. CPU usage during a high-rate transfer goes up — that's the cost GRO was hiding.
+sudo bpftrace -e '
+tracepoint:net:netif_receive_skb {
+  @postgro_lengths = lhist(args->len, 0, 65536, 8192);
+  @postgro_calls = count();
+} interval:s:8 { exit(); }' &
+sleep 1
+curl -sL -o /dev/null --max-time 6 \
+  https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
+wait
 
-Restore:
-```bash
+# Always restore — leaving GRO off slows every later experiment:
 sudo ethtool -K eth0 gro on
 ```
 
+With GRO off, `postgro_calls` jumps roughly back to the segment count (here ~233 000 vs ~30 000 with GRO
+on — an ~8x increase), and `postgro_lengths` collapses almost entirely into the `[0, 8K)` bucket: the
+stack now runs once per wire-sized packet instead of once per superpacket. That extra per-packet work is
+the CPU cost GRO was hiding.
+
 ### Per-segment counter
 
-For TX, check NIC stats:
+TSO is a *transmit* offload: the stack hands the NIC large skbs and the NIC segments them onto the wire.
+So you need an **upload** to see it (a download's TX side is just small ACKs). Watch the size of skbs
+entering the device queue while pushing data out:
+
 ```bash
-ethtool -S eth0 | grep -i tx_pkts
+sudo bpftrace -e 'fentry:__dev_queue_xmit {
+  @tx_skb_len = lhist(args->skb->len, 0, 65536, 8192);
+} interval:s:6 { exit(); }' &
+
+# Server-less upload sink; --max-time bounds it, the timeout exit is expected (|| true).
+curl -s -o /dev/null -T /dev/zero --max-time 4 https://speed.cloudflare.com/__up || true
+wait
 ```
 
-The driver counts wire packets, not skb count. So a `wire_pkts >> tx_packets_kernel` ratio means TSO is doing real work.
+Typical output — a strong spike in the top bucket, the 64 KB GSO/TSO skbs the stack handed down:
+
+```
+@tx_skb_len:
+[0, 8K)              206 |@@@@@@                                            |
+[8K, 16K)            120 |@@@                                               |
+ ...
+[56K, 64K)          1660 |@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@|
+```
+
+Each of those ~64 KB skbs becomes ~40+ MTU-sized wire packets, but the stack ran its TX path **once** per
+skb. You can see the multiplication in the NIC counters too — the wire-packet count climbs far faster
+than the skb count:
+
+```bash
+ethtool -S eth0 | grep -iE 'tx_packets|tx_queue.*packets'   # NIC's per-queue / aggregate wire packets
+cat /sys/class/net/eth0/statistics/tx_packets               # kernel-level tx_packets
+```
+
+The field is named `tx_packets` / `tx_queue_N_packets` — **not** `tx_pkts`, which matches nothing on any
+driver. Counter layout is driver-specific: on virtualized NICs (e.g. Azure/`mlx5` VF) the
+`tx_queue_N_packets` lines may read `0` and the real counts live in `vf_tx_packets` / `cpuN_tx_packets`.
 
 ---
 
