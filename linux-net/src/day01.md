@@ -186,7 +186,7 @@ While that runs, in another terminal collect drop reasons for 10 seconds:
 sudo timeout 10 perf trace --no-syscalls -e skb:kfree_skb 2>&1 | awk '{print $NF}' | sort | uniq -c | sort -rn | head
 ```
 
-The `timeout 10` matters: `perf trace` streams forever, and the `sort`/`uniq` stages buffer their input, so they only print *after* the input stream ends. If you stop `perf` with Ctrl-C instead, the SIGINT tears down the whole pipe and the buffered counts are lost — you see nothing. Letting `timeout` end `perf` cleanly lets EOF propagate down the pipe so the histogram actually prints.
+The `timeout 10` matters: `perf trace` streams forever, and the `sort`/`uniq` stages buffer their input, so they only print *after* the input stream ends — without a bound you'd wait indefinitely. Letting `timeout` end `perf` cleanly closes the pipe, so EOF propagates down to `sort`/`uniq` and the histogram actually prints. (Stopping with Ctrl-C also works on a modern kernel — `perf trace` installs its own SIGINT handler, exits gracefully, and closes stdout, so the buffered counts still flush — but `timeout 10` is cleaner and self-documents the measurement window.)
 
 You'll see the provoked `SKB_DROP_REASON_NO_SOCKET` near the top, mixed with whatever background drops your system produces (e.g. `NOT_SPECIFIED` from legacy `kfree_skb` callers).
 
