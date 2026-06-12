@@ -185,6 +185,10 @@ Expected:
 [bash 4001 (bash)] ls /tmp
 ```
 
+Don't worry if your run doesn't match this block line-for-line. The probe is **system-wide**, so you'll also see the `bash` line you typed to launch the inner shell (the outer shell's readline fired under a different PID), plus anything typed in any other interactive bash on the box. The PID will differ from `4001` — it's arbitrary. And only *interactive, readline-edited* lines appear: commands fed via a script or a pipe never touch readline, so they won't show up. Extra or missing lines here are normal, not a sign of a broken attach.
+
+When you're done, stop the spy and leave the test shell: run `sudo kill %1` (or `sudo pkill -f bashspy`) in the first terminal to detach the uprobe, and `exit` the bash you spawned in the second terminal. Leaving `bashspy` running keeps the `int3` breakpoint patched into every bash on the system — and an orphaned root daemon hanging around.
+
 You're now spying on every command typed into every bash on the system. **For your own systems, treat this as a powerful debugging tool. For other people's systems, this is the kind of thing that requires authorization.**
 
 ---
@@ -207,22 +211,28 @@ Fix: `which bash` and use the full path.
 
 ### Break 2 — Stripped binary, missing symbol
 
-Try a symbol that's been optimized out:
+Try a symbol that doesn't exist in the table:
 
 ```c
 SEC("uprobe//bin/bash:internal_static_helper")
 ```
 
-Resolution fails. Fall back to offset:
+Resolution fails — libbpf can't find `internal_static_helper` anywhere. The point libbpf normally does for you is: read the symbol table, look up the name, compute the file offset. When the name is gone (the binary is stripped, or the symbol is a private static), you supply the offset yourself.
+
+To see the fallback work, pick a symbol that *does* exist and grab its offset. `/bin/bash` is usually stripped of its `.symtab`, so `objdump -t` is empty — use the **dynamic** symbol table instead:
 
 ```bash
-objdump -d /bin/bash | grep -B1 'internal_static_helper>'
-# 0000000000123456 <internal_static_helper>:
+nm -D /bin/bash | grep -w readline
+# 0000000000105c30 T readline
 ```
 
+(`objdump -T /bin/bash | grep -w readline` shows the same thing.) Now attach by literal offset:
+
 ```c
-SEC("uprobe//bin/bash:0x123456")
+SEC("uprobe//bin/bash:0x105c30")
 ```
+
+libbpf could have resolved `readline` by name — the offset form is exactly what you fall back to when the name *isn't* available.
 
 ### Break 3 — Use kernel-side `_kernel_str` on a user pointer
 
@@ -257,7 +267,7 @@ int BPF_KPROBE(on_ssl_write, void *ssl, const void *buf, int num)
 }
 ```
 
-You're now reading plaintext that's about to be encrypted. (Don't deploy this on someone else's system.) Note: you need to attach to the actual loaded library, not the typical `/usr/lib/x86_64-linux-gnu/libssl.so.3`.
+You're now reading plaintext that's about to be encrypted. (Don't deploy this on someone else's system.) Note: the libssl path varies by distro and even by process. Find the library actually loaded by your target with `cat /proc/<pid>/maps | grep -i ssl` — commonly `/usr/lib/x86_64-linux-gnu/libssl.so.3` on Debian/Ubuntu, `/usr/lib/libssl.so.3` on Arch, `/usr/lib64/libssl.so.3` on Fedora/RHEL — since a process may also bundle its own OpenSSL. Update the SEC string to match the path you find.
 
 ---
 
