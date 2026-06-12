@@ -159,12 +159,16 @@ int main(void)
 ```bash
 make
 sudo ./count &
-# in another terminal, generate work:
-for i in $(seq 1 100); do touch /tmp/x$i && rm /tmp/x$i; done
+# in another terminal, generate work — let ONE rm process do all 100 unlinks
+# so the count aggregates under a single PID:
+for i in $(seq 1 100); do touch /tmp/x$i; done
+rm /tmp/x*
 # wait 2s for the next snapshot
 ```
 
-Expected:
+Note the two-step workload: if you `rm` *inside* the loop (`touch ... && rm ...`), the shell forks a brand-new `rm` process every iteration, so each `unlink` comes from a different PID and the map fills with ~100 entries of value 1 — the exact opposite of what we're demonstrating. Batching the deletes into a single `rm /tmp/x*` makes one process issue all 100 `unlinkat` calls, so they aggregate under one PID.
+
+Expected — the snapshot also lists other PIDs from unrelated background `unlink` activity (systemd, systemd-logind, etc.), so look for the line showing `100`:
 
 ```
 --- snapshot ---
@@ -176,6 +180,14 @@ You can also dump from `bpftool` without writing the userspace iterator:
 ```bash
 sudo bpftool map dump name counts
 ```
+
+When you're done, stop the backgrounded dumper — it runs an infinite `while(1)` snapshot loop and won't exit on its own:
+
+```bash
+sudo kill %1   # or: sudo pkill -f ./count
+```
+
+(The scratch files are already gone — `rm /tmp/x*` above removed them.)
 
 ---
 
@@ -193,8 +205,11 @@ __u64 *cnt = bpf_map_lookup_elem(&counts, &pid);
 Verifier rejects:
 
 ```
-R1 type=map_value_or_null expected=map_value
+; *cnt += 1;
+R1 invalid mem access 'map_value_or_null'
 ```
+
+The `*cnt += 1` is a *direct* store through a `PTR_TO_MAP_VALUE_OR_NULL` register, so the verifier's `check_mem_access` falls through to its catch-all and prints `invalid mem access 'map_value_or_null'` (`kernel/bpf/verifier.c`). The `type=... expected=...` format is a different message — it comes from the helper-argument type checker when you hand a possibly-NULL pointer to a *helper*, not when you dereference it yourself. The exact register number depends on how clang allocates the lookup result, so yours may read `R0` instead of `R1`.
 
 Same lesson as Day 1, now with a hash map. The Verifier's type system does not distinguish between "ringbuf reserve might fail" and "hash lookup might miss" — both produce `PTR_TO_MAP_VALUE_OR_NULL` (or `PTR_TO_MEM_OR_NULL`), both must be checked.
 
