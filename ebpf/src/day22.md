@@ -109,13 +109,35 @@ make -j$(nproc)
 sudo ./test_progs -t dctcp
 ```
 
-You should see `#NN/N dctcp:OK`. The test loaded the BPF struct_ops, registered it as `bpf_dctcp`, and verified that a connection using it behaves correctly.
-
-After the test completes, the algorithm stays registered if the test left it loaded. Verify:
+You should see `#NN/N dctcp:OK`. The test loaded the BPF struct_ops, attached it, ran a connection through it, and verified the behavior — but then **tore it down on exit**. `test_progs` only proves the module loads, verifies, and works; it does *not* leave `bpf_dctcp` registered. Check and you'll see no `bpf_dctcp`:
 
 ```bash
 cat /proc/sys/net/ipv4/tcp_available_congestion_control
-# Should include 'bpf_dctcp' alongside cubic, reno, etc.
+# reno cubic dctcp bbr htcp
+```
+
+The `dctcp` you see there is the kernel's **native C** implementation (`net/ipv4/tcp_dctcp.c`), not our BPF one — don't mistake it for proof the lab worked.
+
+To make the BPF version persist so the next steps have something to use, register the prebuilt object yourself and pin its links to bpffs. The pinned link directory is what keeps the struct_ops alive after `bpftool` exits:
+
+```bash
+# the selftest build above produced bpf_dctcp.bpf.o in this dir
+sudo mkdir -p /sys/fs/bpf/dctcp
+sudo bpftool struct_ops register bpf_dctcp.bpf.o /sys/fs/bpf/dctcp
+```
+
+`bpf_dctcp.bpf.o` carries **two** vtables (`dctcp` → name `bpf_dctcp`, and `dctcp_nouse` → name `bpf_dctcp_nouse`), so registering the object adds both names:
+
+```bash
+cat /proc/sys/net/ipv4/tcp_available_congestion_control
+# reno cubic dctcp bbr htcp bpf_dctcp bpf_dctcp_nouse
+# (exact set/order varies with kernel config)
+```
+
+When you're done with the whole lab, destroy the pinned links to unregister both algorithms:
+
+```bash
+sudo rm -rf /sys/fs/bpf/dctcp
 ```
 
 ### Use it on a connection
@@ -127,19 +149,40 @@ setsockopt(sock, IPPROTO_TCP, TCP_CONGESTION, "bpf_dctcp", 9);
 /* now this connection uses BPF-provided DCTCP */
 ```
 
-Or via iperf3:
+Or via iperf3 against a local loopback server (install iperf3 if it's missing). This needs `bpf_dctcp` registered from the step above. In terminal 1:
+
 ```bash
-iperf3 -c <server> -C bpf_dctcp
+iperf3 -s
 ```
+
+In terminal 2, run a transfer long enough to inspect mid-flight, asking for the BPF CC:
+
+```bash
+iperf3 -c 127.0.0.1 -C bpf_dctcp -t 30
+```
+
+In terminal 3, while the transfer runs, confirm the socket actually negotiated it. `ss -ti` prints the congestion-control name at the **start** of each connection's TCP-info line, so a substring match is enough:
+
+```bash
+ss -ti dst 127.0.0.1 | grep bpf_dctcp
+#	 bpf_dctcp wscale:7,7 rto:204 rtt:0.05/0.02 ... cwnd:10 ...
+```
+
+A hit proves this connection is running BPF-provided DCTCP. (Don't use `grep -A1` — the CC name is inline on the info line, not the line after.) If `iperf3 -c` fails with `unable to set TCP_CONGESTION: No such file or directory`, the algorithm isn't registered — go back and run the `bpftool struct_ops register` step.
 
 ### Inspect
 
+These need the struct_ops live, so run them only after the `bpftool struct_ops register` step above (after `test_progs` exits, nothing is loaded and `list` prints nothing while `dump` errors with `Can't find struct_ops`). Note the registered map is named **`bpf_dctcp`**, not `dctcp`:
+
 ```bash
 sudo bpftool struct_ops list
-sudo bpftool struct_ops dump name dctcp
+# <id>: bpf_dctcp        tcp_congestion_ops
+# <id>: bpf_dctcp_nouse  tcp_congestion_ops
+
+sudo bpftool struct_ops dump name bpf_dctcp
 ```
 
-Shows the vtable bound and which BPF prog FD serves each callback.
+`dump` shows the vtable field-by-field, with each implemented function-pointer slot (`ssthresh`, `cong_avoid`, `init`, `undo_cwnd`, ...) resolved to the BPF prog id that serves it. That's the payoff: a kernel function-pointer table whose entries are BPF programs.
 
 ## What to read in the kernel
 
