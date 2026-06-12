@@ -127,7 +127,15 @@ What's new:
 
 ### `openat_path.c` — userspace
 
-Standard ringbuf consumer, prints `e->path`.
+Reuses the exact ringbuf consumer skeleton from Day 01 (the `handle` callback plus the `ring_buffer__poll` loop in `main`). Only the print line changes — it pulls `pid`, `comm`, and `path` off the event so the output matches the Run section below:
+
+```c
+static int handle(void *ctx, void *data, size_t sz) {
+    struct event *e = data;
+    printf("PID %u (%s) opened %s\n", e->pid, e->comm, e->path);
+    return 0;
+}
+```
 
 ### Run
 
@@ -147,6 +155,8 @@ PID 4002 (cat) opened /etc/passwd
 ```
 
 You read userspace memory from the kernel, possibly faulting if the page wasn't resident, all without crashing.
+
+One honest caveat: on a normal box the path string the caller just constructed is already page-resident, so every `bpf_copy_from_user` returns 0 and **no sleep is actually taken here**. What sleepability buys you is the guarantee that *if* the page were missing, the helper would safely sleep and page it in — whereas a non-sleepable program could not call the helper at all. To actually witness the fault path you would have to evict the page (e.g. `madvise(MADV_DONTNEED)` on the buffer) before the syscall. Printing `ret` from the consumer makes success-vs-`-EFAULT` visible if you want to confirm.
 
 ---
 
@@ -181,13 +191,15 @@ Same rejection — helper not allowed. XDP can't be made sleepable; the design i
 
 ### Break 3 — Emit large amounts to ringbuf
 
-A sleepable fentry on `__x64_sys_openat` fires on every `open()`. On a busy system that's thousands per second. Run on a heavy workload (`find /usr | xargs cat > /dev/null`). Watch for ringbuf drops:
+A sleepable fentry on `__x64_sys_openat` fires on every `open()`. On a busy system that's thousands per second. Run on a heavy workload (`find /usr | xargs cat > /dev/null`) and the consumer can't keep up — some records get dropped.
+
+But you can't *see* those drops with the obvious command. A ringbuf is a stream, not a key/value store — it has no iteration and no built-in per-map drop counter — so `bpftool map dump` simply can't dump it:
 
 ```bash
-sudo bpftool map dump name rb   # not super informative
+sudo bpftool map dump name rb
 ```
 
-Better: instrument the BPF program with a drop counter (Day 13).
+It produces **no output and exits non-zero** (exit 255 on bpftool 7.x — older builds may print a `Found 0 elements` line instead; either way you learn nothing about drops). Real drop visibility needs an explicit counter you add yourself: a `__u64` in a separate `BPF_MAP_TYPE_ARRAY`, incremented whenever `bpf_ringbuf_reserve()` returns NULL, then read with `bpftool map dump name <counter_map>`. You build exactly that in Day 13.
 
 ### Break 4 — Use `bpf_probe_read_user_str` instead
 
