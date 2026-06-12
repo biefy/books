@@ -73,15 +73,25 @@ Now `eth0.100` is a fully-featured interface with its own routes, MTU, and IP. F
 sudo bpftrace -e '
 fentry:eth_type_trans {
   $eth = (struct ethhdr *)args->skb->data;
-  printf("dst=%02x:%02x... type=0x%04x\n",
-         $eth->h_dest[0], $eth->h_dest[1], $eth->h_proto);
+  printf("dst=%02x:%02x:%02x:%02x:%02x:%02x type=0x%04x\n",
+         $eth->h_dest[0], $eth->h_dest[1], $eth->h_dest[2],
+         $eth->h_dest[3], $eth->h_dest[4], $eth->h_dest[5], $eth->h_proto);
 }' &
-
-ping -c 1 8.8.8.8
+sleep 3                 # let the fentry BTF probe attach before we trigger traffic
+ping -c 5 8.8.8.8
+sleep 1                 # let the last frames drain through the probe
 sudo killall bpftrace
 ```
 
-You'll see actual MAC addresses and EtherTypes flying through. Note that `h_proto` is `__be16` (big-endian on the wire), so on a little-endian host the raw `%04x` print is byte-swapped — IP shows as `0x0008` rather than `0x0800`. Mentally swap the bytes, or wrap the field in `bswap()`.
+The `sleep 3` matters: a BTF `fentry` probe takes a second or two to attach, and a single `ping -c 1` completes in a few hundred milliseconds — without the delay the trigger (and the kill) happen before the probe is live and you see nothing. `eth_type_trans` fires on *every* received frame, so with the probe up for a few seconds you'll get output even apart from the ping:
+
+```
+dst=00:22:48:7c:ffffffb3:ffffffef type=0x0008
+dst=00:22:48:7c:ffffffb3:ffffffef type=0x0008
+dst=00:22:48:7c:ffffffb3:ffffffef type=0x0008
+```
+
+You'll see actual MAC addresses and EtherTypes flying through. (bpftrace prints `h_dest` octets as signed bytes, so values ≥ 0x80 show sign-extended as `ffffffb3` — read the low two hex digits.) Note that `h_proto` is `__be16` (big-endian on the wire), so on a little-endian host the raw `%04x` print is byte-swapped — IP shows as `0x0008` rather than `0x0800`. Mentally swap the bytes, or wrap the field in `bswap()`.
 
 ### Create a VLAN and watch traffic
 
@@ -96,6 +106,20 @@ ip -d link show eth0.100   # see vlan_id 100, vlan_protocol 802.1Q
 # capture both:
 sudo tcpdump -i eth0 -e -n vlan 100 &
 sudo tcpdump -i eth0.100 -n &
+sleep 1
+
+# trigger: no peer answers, but the ARP request for 10.100.0.2
+# egresses eth0 tagged with VID 100 (and untagged on eth0.100)
+ping -c 3 -W1 10.100.0.2
+sleep 1
+```
+
+You should see the *same* frame twice — on `eth0` carrying the 802.1Q tag that `-e` exposes (`vlan 100, p 0, ethertype ARP ...`) and on `eth0.100` already stripped/untagged. That side-by-side is the VLAN device doing tag insertion on egress and removal on ingress. The ping gets no replies (there's no host at 10.100.0.2) — that's fine; the tagged ARP requests are the point.
+
+```bash
+# cleanup
+sudo pkill tcpdump            # stop both backgrounded captures (and drop promisc mode)
+sudo ip link del eth0.100     # also removes the 10.100.0.1/24 address
 ```
 
 ### See pkt_type stats
@@ -116,17 +140,40 @@ PACKET_HOST=0, BROADCAST=1, MULTICAST=2, OTHERHOST=3. We attach at `fexit` (func
 
 ```bash
 sudo ip link set eth0 promisc on
+
+# re-run the "See pkt_type stats" trace above while generating traffic
+
+sudo ip link set eth0 promisc off   # restore
 ```
 
 Now the kernel processes packets that aren't addressed to your MAC (where `pkt_type == PACKET_OTHERHOST`). `tcpdump` enables this implicitly.
 
+> **Caveat:** on a mirrored/SPAN port, a hub, or a shared segment you'll now see `@pkt_types[3]` (PACKET_OTHERHOST) appear. On an ordinary switched link or a cloud vNIC the switch never delivers other hosts' unicast to your port, so key 3 may stay 0 even with promisc on — that's expected, not a bug. Always `promisc off` afterward so you don't leave the NIC in promiscuous mode.
+
 ### Set a non-default MAC
 
+> **WARNING:** do **not** change the MAC of the interface carrying your SSH session. `eth0` is usually the management interface on a cloud/test VM — changing its MAC (or bringing the link down to do so) drops your connection, and many drivers reject an address change while the link is up. Use a throwaway interface instead:
+
 ```bash
-sudo ip link set eth0 address 02:00:00:00:00:01
+# Option A (safe): a dummy interface, so you never touch the SSH link.
+sudo ip link add mac-test type dummy
+sudo ip link set mac-test address 02:00:00:00:00:01
+ip link show mac-test            # observe the new MAC
+sudo ip link delete mac-test     # cleanup
+
+# Option B: a real spare NIC (NOT the one carrying SSH).
+IF=eth1                          # NOT your SSH interface
+orig=$(cat /sys/class/net/$IF/address)
+sudo ip link set $IF down
+sudo ip link set $IF address 02:00:00:00:00:01
+sudo ip link set $IF up
+ip link show $IF                 # confirm; re-run the eth_type_trans trace
+sudo ip link set $IF down
+sudo ip link set $IF address "$orig"   # restore the original MAC
+sudo ip link set $IF up
 ```
 
-Now `eth_type_trans` sees this MAC as "us." Frames addressed here are PACKET_HOST. Useful for testing identity rules.
+Now `eth_type_trans` sees `02:00:00:00:00:01` as "us." Frames addressed there are PACKET_HOST. Useful for testing identity rules.
 
 ---
 
