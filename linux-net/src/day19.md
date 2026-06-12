@@ -78,18 +78,63 @@ For sustained request rates above ~100k/sec per thread that saving is real; belo
 
 ### epoll wakeup tracking
 
-```bash
-sudo bpftrace -e '
-tracepoint:syscalls:sys_enter_epoll_wait { @waits = count(); }
-tracepoint:syscalls:sys_exit_epoll_wait  { @returns = hist(args->ret); }
-interval:s:5 { print(@waits); print(@returns); clear(@waits); clear(@returns) }'
+**Setup.** We need an epoll-based server and a load generator. nginx fits (it uses the readiness model on every connection), and `ab` (ApacheBench) drives it. Install both, then start nginx — binding port 80 needs root, and nginx daemonizes itself, so no `&`:
 
-# In another terminal: hammer a server
-nginx &
-ab -n 100000 -c 100 http://127.0.0.1/   # if you have apache-bench
+```bash
+sudo apt-get install -y nginx apache2-utils
+sudo nginx
 ```
 
-Watch how often epoll_wait returns and how many events per call. (For the io_uring side — an async accept loop plus tracing the kernel-side net ops — see Day 28's experiment.)
+(Any already-running epoll-based server works too — the probe below is system-wide, so it captures every `epoll_wait` on the box, not just nginx's.)
+
+**Terminal 1 — start the trace.** This runs in the foreground and blocks the terminal, so the load must come from a second terminal:
+
+```bash
+sudo bpftrace -e '
+tracepoint:syscalls:sys_enter_epoll_wait,
+tracepoint:syscalls:sys_enter_epoll_pwait,
+tracepoint:syscalls:sys_enter_epoll_pwait2 { @waits = count(); }
+tracepoint:syscalls:sys_exit_epoll_wait,
+tracepoint:syscalls:sys_exit_epoll_pwait,
+tracepoint:syscalls:sys_exit_epoll_pwait2 /args->ret >= 0/ { @returns = hist(args->ret); }
+interval:s:5 { print(@waits); print(@returns); clear(@waits); clear(@returns) }'
+```
+
+Why all three syscalls? nginx on x86_64 issues the bare `epoll_wait`, but Go and Node/libuv use `epoll_pwait`, and on arm64/riscv glibc routes `epoll_wait()` through `epoll_pwait` — so a single-syscall probe leaves `@waits` empty and looks broken. `epoll_pwait2` exists on 5.11+. The `/args->ret >= 0/` filter drops the `-1` (EINTR) returns, which `hist()` would otherwise bin into a confusing negative bucket.
+
+**Terminal 2 — generate load:**
+
+```bash
+ab -n 100000 -c 100 http://127.0.0.1/
+```
+
+**What you'll see.** Idle (nginx running but no traffic), `@returns` is dominated by the `[0]` bucket — every `epoll_wait` timed out with no FD ready, and `@waits` is small:
+
+```
+@waits: 8
+@returns:
+[0]    7 |@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@|
+```
+
+Once `ab` runs, `@waits` climbs into the thousands per interval and the histogram fills the low positive buckets — each `epoll_wait` now returns one or more ready sockets:
+
+```
+@waits: 438
+@returns:
+[0]     176 |@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@                |
+[1]     252 |@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@|
+[2, 4)    8 |@                                                 |
+```
+
+That batching of several ready FDs into one return is exactly the readiness-model payoff: one `epoll_wait` syscall amortized over N sockets. A `[1]`-heavy histogram is the low-concurrency case; the buckets shift right as more sockets become ready between calls.
+
+**Cleanup.** When you're done, stop the server:
+
+```bash
+sudo nginx -s stop
+```
+
+(For the io_uring side — an async accept loop plus tracing the kernel-side net ops — see Day 28's experiment.)
 
 ## What to read in the kernel
 
