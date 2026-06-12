@@ -141,16 +141,24 @@ int BPF_PROG(loop_const)
 {
     __u64 *s = get_sum();
     if (!s) return 0;
+    /* The per-iteration helper call keeps clang -O2 from constant-folding
+       the loop into a single `*s += 120`. Without it there is no loop left
+       for the Verifier to see — and the comparison below would be bogus. */
     for (int i = 0; i < 16; i++)
-        *s += i;
+        *s += bpf_get_prandom_u32();
     return 0;
 }
 
-/* shape 4: bpf_loop callback */
+/* shape 4: bpf_loop callback. bpf_loop's ctx argument is
+   ARG_PTR_TO_STACK_OR_NULL, so it must point at *stack* memory. Passing the
+   raw map-value pointer (a PTR_TO_MAP_VALUE) is rejected:
+       R3 type=map_value expected=fp
+   so we wrap the map pointer in a small stack struct and pass its address. */
+struct cb_ctx { __u64 *s; };
 static int cb(__u32 i, void *ctx)
 {
-    __u64 *s = ctx;
-    *s += i;
+    struct cb_ctx *c = ctx;
+    *c->s += i;
     return 0;
 }
 
@@ -159,7 +167,8 @@ int BPF_PROG(loop_helper)
 {
     __u64 *s = get_sum();
     if (!s) return 0;
-    bpf_loop(10000, cb, s, 0);
+    struct cb_ctx c = { .s = s };
+    bpf_loop(10000, cb, &c, 0);
     return 0;
 }
 ```
@@ -168,28 +177,38 @@ The two programs share a 1-element array map (a "global counter" pattern). Build
 
 ### Inspect the verifier's effort
 
+Both programs above *load* successfully — and that changes how you measure them. `bpftool prog load` only prints a verifier log when a program is **rejected**, so on a clean load it shows you nothing useful. To see the effort on a *successful* load, use one of these two paths.
+
+**Path 1 — `veristat` (the purpose-built tool).** It load-tests every program in an object file and prints a per-program stats table:
+
+```
+sudo veristat loops.bpf.o
+```
+
+The `Insns` and `States` columns are exactly the comparison we want — no attach needed. (`veristat` ships in the kernel tree under `tools/testing/selftests/bpf` and may need building/installing; it is not in `$PATH` by default.)
+
+**Path 2 — your own loader.** Set the verifier log level before load and read the bottom line of the printed log:
+
 ```c
 LIBBPF_OPTS(bpf_object_open_opts, opts, .kernel_log_level = 1);
 ```
 
-Look at the bottom of the verifier log for each program:
+The last line of `loop_helper`'s log looks like:
 
 ```
-processed 154 insns (limit 1000000) max_states_per_insn 1 total_states 9 peak_states 9 mark_read 5
+processed 24 insns (limit 1000000) ...
 ```
 
-`processed N insns` is the path-exploration cost. Compare:
+`processed N insns` is the path-exploration cost. The exact counts are **kernel- and compiler-version dependent**, so capture your own rather than trusting any number printed here — but the *relationship* is the lesson:
 
-| Program        | processed insns |
-|----------------|-----------------|
-| `loop_const` (16-iter inline) | ~150 |
-| `loop_helper` (10K bpf_loop)  | ~80 |
+- `loop_const` (16-iter inline) verifies every unrolled iteration, so its insn count scales with the iteration count.
+- `loop_helper` (10K `bpf_loop`) verifies the callback **once**, so its cost is tiny and independent of N — about 24 insns on this 7.0 kernel.
 
 `bpf_loop` is *cheaper* for the Verifier even though it does *more* work at runtime, because the callback verifies once.
 
 ### Stress test: when does inline break?
 
-Try replacing `loop_const` with:
+Try replacing `loop_const` with a branchy, bounded inline loop:
 
 ```c
 for (int i = 0; i < N; i++) {
@@ -199,11 +218,14 @@ for (int i = 0; i < N; i++) {
 }
 ```
 
-Increase `N`: 16, 64, 256, 1024. Watch `processed insns` grow non-linearly. At some point — depends on kernel version, around `N=1024` on older verifiers, well past `N=10000` on 6.6+ — you'll hit:
+Each `N` needs a fresh build, so: edit `N`, rebuild (`make`, or rerun your `clang` command), reload, repeat. Walk `N` up: 16, 64, 256, 1024, 10000, and watch `processed insns` grow non-linearly. `N=1024` still loads; around `N=10000` on a 7.x kernel it is rejected — but **not** with the "too large" message you might expect. A branchy body trips the jump-sequence cap (`BPF_COMPLEXITY_LIMIT_JMP_SEQ` = 8192) long before the 1,000,000-instruction ceiling:
 
 ```
-BPF program is too large. Processed 1000001 insn
+The sequence of 8193 jumps is too complex.
+processed 114705 insns (limit 1000000)
 ```
+
+Note it failed at ~114K insns — far below the 1M limit. (The flat `BPF program is too large. Processed 1000001 insn` message comes from a genuinely *unbounded* loop instead; see Break 1.)
 
 Replace the `for` with `bpf_loop`. Loads in milliseconds. **The branch in the body × 10000 iterations was 2¹⁰⁰⁰⁰ paths if the Verifier didn't prune — `bpf_loop` makes it just paths(callback).**
 
@@ -216,24 +238,32 @@ Replace the `for` with `bpf_loop`. Loads in milliseconds. **The branch in the bo
 ```c
 __u32 n = bpf_get_prandom_u32();
 for (__u32 i = 0; i < n; i++)
-    *s += i;
+    *s += bpf_get_prandom_u32();   /* per-iteration helper call: cannot be folded */
 ```
 
-Reject:
+> Note the body. If you write `*s += i;`, clang -O2 recognises the closed form
+> `n*(n-1)/2` and compiles it to straight-line arithmetic with **no back-edge** —
+> the program then loads fine and this break never fires. The per-iteration
+> `bpf_get_prandom_u32()` defeats that folding so a real unbounded loop survives
+> to the Verifier.
+
+Reject — `n` has no static upper bound, so the Verifier explores until it exhausts the complexity budget:
 
 ```
-back-edge from insn N to M
+BPF program is too large. Processed 1000001 insn
 ```
 
-`n` has no static upper bound. Add `&& i < 1024` to make it bounded.
+(Older kernels — pre-5.3, before bounded-loop support — reported this as `back-edge from insn N to M` from the `check_cfg` DAG check; that wording no longer fires for this case.) Add `&& i < 1024` to give the Verifier a static upper bound.
 
 ### Break 2 — Bound that isn't visible
 
 ```c
 __u32 n = bpf_get_prandom_u32() % 100;
 for (__u32 i = 0; i < n; i++)
-    *s += i;
+    *s += bpf_get_prandom_u32();   /* non-foldable body — keeps a real loop */
 ```
+
+(As in Break 1, the body must be something clang can't fold: with `*s += i;` the whole loop collapses to `n*(n-1)/2` and no loop reaches the Verifier, so there is no range to track and the lesson is lost.)
 
 The Verifier *might* accept this on modern kernels (it tracks `n` as having range [0, 99]). On older kernels it rejects because the modulo doesn't propagate the upper bound through scalar tracking. Lesson: even when modulo bounds something logically, the Verifier may not infer it. Be explicit:
 
@@ -243,7 +273,7 @@ n = n & 0x7f;        // 0..127, verifier definitely sees the bound
 
 ### Break 3 — Hit the complexity budget
 
-A pathological pattern from real life:
+A pattern that *looks* pathological:
 
 ```c
 char buf[256];
@@ -255,9 +285,21 @@ for (int i = 0; i < 256; i++) {
 }
 ```
 
-Three branches, 256 iterations, fanout grows fast. Modern Verifiers prune aggressively but you can still hit "too large." Fix: refactor with `bpf_loop`, or reduce iteration count to the longest sensible string length.
+Surprise: on a modern (7.x) Verifier this **loads cleanly**. The branch bodies are empty, so every path leaves register/scalar state unchanged and state pruning collapses them all — the 256 iterations never explode. To actually breach the budget you need *both* a high iteration count (well past `N=10000` on 6.6+, as in the stress test above) **and** branch bodies that diverge register state so the paths can't be pruned. Give each branch a state-changing side effect and raise the count:
+
+```c
+for (int i = 0; i < N; i++) {
+    if      (buf[i] == '/') *s += i;
+    else if (buf[i] == ' ') *s -= i;
+    else                    *s ^= i;
+}
+```
+
+Now the paths diverge and, at a large enough `N`, you hit the jump-complexity cap (`The sequence of NNNN jumps is too complex.`). Fix: refactor with `bpf_loop`, or reduce the iteration count to the longest sensible string length.
 
 ### Break 4 — Callback returning the wrong thing
+
+Wire a callback that returns something other than 0 or 1 into the (now-loadable) `loop_helper` from the lab:
 
 ```c
 static int cb(__u32 i, void *ctx) {
@@ -268,10 +310,10 @@ static int cb(__u32 i, void *ctx) {
 Verifier rejects:
 
 ```
-At callback return the register R0 has unbounded ranges
+At callback return the register R0 has smin=2 smax=2 should have been in [0, 1]
 ```
 
-(Or similar wording.) The callback contract specifies 0 or 1 only.
+(Or similar wording — the exact register fields vary by kernel version.) Note the value `2` is a perfectly *bounded* constant; it's rejected for being **out of range**, not for being unbounded. The callback contract specifies 0 or 1 only. (You can only reach this check once `loop_helper`'s ctx is fixed, otherwise the map-value error fires first.)
 
 ---
 
