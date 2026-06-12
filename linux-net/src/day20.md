@@ -150,12 +150,22 @@ sudo nft list ruleset
 sudo bpftrace -e 'fentry:nf_hook_slow {
   printf("hook %d pf %d\n", args->state->hook, args->state->pf);
 }' &
-
-ping -c 1 8.8.8.8
+sleep 2            # let the fentry probe finish attaching (compile+load+attach takes ~1-2s)
+ping -c 3 8.8.8.8
+sleep 1            # let the last packet's events flush
 sudo killall bpftrace
 ```
 
-You'll see PREROUTING, LOCAL_OUT, POSTROUTING, LOCAL_IN for the ICMP exchange.
+The output is raw integers, one line per hook traversed — decode them with the enum above:
+
+```
+hook 3 pf 2     # LOCAL_OUT,   AF_INET — the outgoing echo request
+hook 4 pf 2     # POSTROUTING — just before TX
+hook 0 pf 2     # PREROUTING  — the echo reply arrives
+hook 1 pf 2     # LOCAL_IN    — delivered to our socket
+```
+
+So `hook` decodes as `0=PREROUTING, 1=LOCAL_IN, 2=FORWARD, 3=LOCAL_OUT, 4=POSTROUTING`, and `pf 2 = AF_INET` (IPv4; `pf 10 = AF_INET6`). For the ICMP exchange you'll see LOCAL_OUT (3) and POSTROUTING (4) outbound, then PREROUTING (0) and LOCAL_IN (1) on the reply.
 
 ### Add a hook of your own (via nft)
 
@@ -166,6 +176,7 @@ sudo nft add rule inet test myinput meta nftrace set 1
 # Now any packet going through input gets nftrace logged
 sudo nft monitor trace &
 ping -c 1 8.8.8.8
+sudo pkill -f 'nft monitor'   # stop the backgrounded monitor once you've seen the trace
 ```
 
 You see each rule evaluation with the verdict.
@@ -174,8 +185,12 @@ You see each rule evaluation with the verdict.
 
 ```bash
 sudo nft add rule inet test myinput tcp dport 12345 drop
-nc localhost 12345    # connection refused (port not open)
-nc localhost 22       # works (different port)
+nc -w 2 localhost 12345    # HANGS, then times out after ~2s — DROP silently blackholes the SYN (no RST/ICMP)
+nc -w 2 localhost 22       # connects (different port, not matched by the rule)
+
+# Contrast drop with reject: reject *replies* (RST/ICMP) instead of blackholing.
+sudo nft add rule inet test myinput tcp dport 12346 reject
+nc -w 2 localhost 12346    # instant 'Connection refused' — reject sends an RST, unlike drop
 
 # Cleanup
 sudo nft delete table inet test
