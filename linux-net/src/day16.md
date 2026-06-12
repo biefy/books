@@ -143,6 +143,9 @@ A typical CC algorithm is ~300 lines of C, 90% of which is `cong_avoid` and the 
 # Load BBR (if not already)
 sudo modprobe tcp_bbr
 
+# iperf3 isn't installed by default on minimal images
+sudo apt-get install -y iperf3
+
 # Start an iperf3 server
 iperf3 -s -p 5201 &
 
@@ -160,9 +163,14 @@ sudo tc qdisc add dev lo root netem delay 50ms loss 1%
 iperf3 -c 127.0.0.1 -p 5201 -C cubic -t 30
 iperf3 -c 127.0.0.1 -p 5201 -C bbr -t 30
 sudo tc qdisc del dev lo root
+
+# Stop the background iperf3 server when done
+pkill iperf3   # or, in the same interactive shell: kill %1
 ```
 
 CUBIC's loss-based response will give up bandwidth at every loss; BBR's bandwidth-model approach should hold up better.
+
+Note: even though `lo`'s root qdisc is now `netem` and not `fq`, BBR still paces here. Since Linux 4.13 the TCP stack carries an internal pacing fallback (driven by `sk->sk_pacing_status`) that kicks in when the egress qdisc isn't `fq`. It's less precise than `fq`'s timestamp-based pacing, but functional — which is why this localhost test still demonstrates BBR's behavior. On a real NIC you'd front BBR with `fq` (or hardware pacing) for accurate per-packet pacing.
 
 ### Watch cwnd evolution
 
@@ -175,14 +183,25 @@ kprobe:tcp_write_xmit {
 interval:s:10 { exit(); }'
 ```
 
-Histogram of cwnd values during a transfer. Compare distributions for CUBIC vs BBR.
+`tcp_write_xmit` only fires while data is actually being sent, so on an idle box this histogram comes back empty. Give it traffic: in one terminal start a 30s transfer (the server is still running from the experiment above) with `iperf3 -c 127.0.0.1 -p 5201 -C cubic -t 30`, then in a second terminal run the bpftrace above — the 10s window captures `snd_cwnd` across the live transfer. Repeat with `-C bbr` to compare the two distributions.
 
 ### Per-socket TCP info
 
 ```bash
 ss -tin
-# Look for: ca:cubic / ca:bbr, cwnd:N, srtt:N, retrans:N
+# Look for: the CC algo as a bare token (cubic / bbr), cwnd:N,
+#           rtt:<srtt>/<rttvar>, retrans:X/Y (only appears after retransmissions)
 ```
+
+To see a `bbr` socket with a live cwnd, run `ss -tin` while one of the transfers above is in flight (use `-t 30` and pin the algorithm with `-C bbr`). On an idle box `ss -tin` shows only your SSH session (cubic) and listeners stuck at `cwnd:10`. Real output for an established socket looks like:
+
+```
+ESTAB 0 0  10.0.0.4:22  ...:62372
+	 bbr wscale:6,10 rto:219 rtt:18.897/2.546 ato:40 mss:1448 cwnd:37 ...
+	 bbr:(bw:7349256bps,mrtt:10.98,pacing_gain:2.88672,cwnd_gain:2.88672) ...
+```
+
+Note the CC algorithm prints as a bare token (`bbr` / `cubic`), the smoothed RTT as `rtt:<srtt>/<rttvar>`, and retransmits as `retrans:X/Y` (present only once a retransmission has occurred).
 
 `ss -tin` reads `tcp_get_info` (`net/ipv4/tcp.c`, search the function) which fills `struct tcp_info` from the live `tcp_sock` state.
 
