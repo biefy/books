@@ -45,6 +45,8 @@ When a TCP connection event fires (e.g., `BPF_SOCK_OPS_TCP_CONNECT_CB`), your BP
 
 Create a test cgroup and block egress UDP for any process in it.
 
+> **Prerequisite:** cgroup v2 (unified hierarchy) mounted at `/sys/fs/cgroup` — verify with `mount | grep cgroup2` (expect `cgroup2 on /sys/fs/cgroup type cgroup2 ...`) — and a kernel built with `CONFIG_CGROUP_BPF=y` (check `zgrep CGROUP_BPF /proc/config.gz` or `/boot/config-$(uname -r)`). On cgroup v1 / hybrid hosts the path and attach semantics differ.
+
 ```bash
 sudo mkdir /sys/fs/cgroup/test_block
 echo $$ | sudo tee /sys/fs/cgroup/test_block/cgroup.procs   # only this shell
@@ -72,21 +74,44 @@ int block_udp(struct __sk_buff *skb)
 
 Note: `cgroup_skb/ingress` returns **1 = allow, 0 = drop**. `cgroup_skb/egress` is wider — the verifier enforces a return range of **0-3**: `0`=drop, `1`=keep, `2`=drop and notify TCP of congestion (cn), `3`=keep and cn. Returning anything outside that range is rejected at load time.
 
-Userspace attach:
+Userspace attach. Compile this loader with the day's Makefile (same skeleton-driven pattern as earlier days) and **keep it running** while you test — `bpf_program__attach_cgroup` returns a `struct bpf_link *` whose lifetime is tied to the process. When the loader exits, the link is freed and UDP egress is allowed again:
+
 ```c
 int cg_fd = open("/sys/fs/cgroup/test_block", O_RDONLY);
 struct fw_bpf *skel = fw_bpf__open_and_load();
 struct bpf_link *l = bpf_program__attach_cgroup(skel->progs.block_udp, cg_fd);
+printf("attached, Ctrl-C to detach\n");
+pause();   /* keep the process (and the link) alive */
 ```
 
-Test:
-```bash
-# from the shell that's in test_block:
-nc -u 1.1.1.1 53 <<< "test"   # blocked
-ping 1.1.1.1                  # works (ICMP, not UDP)
+If you want the policy to survive loader exit, pin the link instead: `bpf_link__pin(l, "/sys/fs/bpf/block_udp")` (needs bpffs mounted at `/sys/fs/bpf`, which is standard). Run the loader in one terminal, then perform the Test below from the `test_block` shell while it is still running.
 
-# from another shell (not in test_block):
-nc -u 1.1.1.1 53 <<< "test"   # works
+Test. Use a UDP probe whose success/failure is *visible* — `dig` defaults to UDP/53, exactly the protocol/port the filter drops, so the timeout-vs-answer contrast is unambiguous (raw `nc -u` would hang identically in both cases and reveal nothing):
+
+```bash
+# from the shell that's in test_block (egress UDP dropped):
+dig +tries=1 +timeout=2 @1.1.1.1 example.com
+#   -> ";; communications error to 1.1.1.1#53: timed out
+#       ... no servers could be reached"   (UDP/53 blocked)
+ping -c 3 1.1.1.1            # works: 3 replies (ICMP, not UDP)
+
+# from another shell (NOT in test_block):
+dig +tries=1 +timeout=2 @1.1.1.1 example.com
+#   -> returns an A-record ANSWER section, e.g.
+#        example.com.   215   IN   A   104.20.23.154   (UDP/53 allowed)
+```
+
+This ties back to the chapter's own check question: DNS over UDP/53 is exactly what a `cgroup_skb/egress` UDP drop kills.
+
+**Teardown** (run this when done — and it's also the Break 2 recovery):
+```bash
+# 1. move your shell back to the root cgroup (run from another shell if the
+#    current one is locked out by the egress drop):
+echo $$ | sudo tee /sys/fs/cgroup/cgroup.procs
+# 2. stop the loader (Ctrl-C). Since the bpf_link isn't pinned, this detaches
+#    the egress program automatically.
+# 3. remove the cgroup (rmdir only succeeds once it has no procs):
+sudo rmdir /sys/fs/cgroup/test_block
 ```
 
 ### Part B: sock_ops TCP tuning
@@ -112,10 +137,25 @@ Attach to a cgroup:
 struct bpf_link *l = bpf_program__attach_cgroup(skel->progs.tcp_tune, cg_fd);
 ```
 
-Verify:
+Verify. There's nothing to observe until a *fresh* TCP connection fires sockops from inside the cgroup, and BBR must actually be available — otherwise `bpf_setsockopt(...,"bbr",...)` fails silently (that's Break 3). Also scope `ss` to the target so you don't match unrelated sockets (e.g. your SSH session, which may itself be on BBR):
+
 ```bash
-ss -ti | grep bbr   # connections from this cgroup show 'bbr'
+# prerequisite: BBR must be available
+sudo modprobe tcp_bbr 2>/dev/null   # no-op if built in
+sysctl net.ipv4.tcp_available_congestion_control
+#   -> net.ipv4.tcp_available_congestion_control = reno cubic dctcp bbr htcp
+#      (the list must include 'bbr')
+
+# with the loader attached, run from the shell that's in the cgroup so a fresh
+# connect fires sockops; keep the socket alive long enough to observe it:
+curl -s https://speed.cloudflare.com/__up -T /dev/zero --max-time 4 >/dev/null &
+sleep 1
+ss -ti dst :443 | grep bbr
+#   -> the info line for this socket shows 'bbr', e.g.
+#        bbr wscale:6,10 rto:219 rtt:18.6/1.2 ... bbr:(bw:7.35Mbps,...)
 ```
+
+Expected: the in-cgroup connection's `ss -i` info line contains `bbr`. A socket opened from a shell **not** in the cgroup shows the system default (e.g. `cubic`). If `ss` is empty, either no fresh connection was made from the cgroup, or BBR is not loaded (the `bpf_setsockopt` failed silently — Break 3).
 
 ---
 
@@ -127,7 +167,7 @@ Return `5` (or any value > 3) from a `cgroup_skb/egress` program. The verifier r
 
 ### Break 2 — Forget the IPPROTO check
 
-Drop *all* packets in cgroup_skb/egress (`return 0` always). Your shell loses all network access. Rejoin from another shell. Be careful with cgroup attachment — you can lock yourself out as easily as with `iptables -P OUTPUT DROP`.
+Drop *all* packets in cgroup_skb/egress (`return 0` always). Your shell loses all network access. Be careful with cgroup attachment — you can lock yourself out as easily as with `iptables -P OUTPUT DROP`. Recover with the **Teardown** steps above: either kill the loader (which detaches the filter from `test_block`) or, from a second shell, move your stuck shell back to the root cgroup with `echo $$ | sudo tee /sys/fs/cgroup/cgroup.procs`. Either restores network, because the egress program only runs for procs still inside the cgroup.
 
 ### Break 3 — TCP CC not loaded
 
