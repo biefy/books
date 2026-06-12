@@ -44,18 +44,50 @@ enum skb_drop_reason {     /* names real; order/values abridged for illustration
 
 **Inspect drops:**
 
+An idle box drops almost nothing, so provoke some `NO_SOCKET` drops first. In another terminal, hit a closed port a few times — each attempt is dropped with no listener:
+
 ```bash
-# Live event stream with reasons
-sudo perf trace --no-syscalls -e skb:kfree_skb 2>&1 | head -50
+for i in $(seq 1 50); do curl -s --max-time 1 http://localhost:1 >/dev/null; done
+```
 
-# Or dropwatch
+While that runs, watch the live event stream:
+
+```bash
+# Live event stream with reasons (timeout so it terminates cleanly)
+sudo timeout 10 perf trace --no-syscalls -e skb:kfree_skb 2>&1 | head -50
+```
+
+Each line names the call site that freed the skb plus the reason category:
+
+```
+0.104 curl/506057 skb:kfree_skb(skbaddr: 0xffff..., location: 0xffff..., protocol: 2048, reason: SKB_DROP_REASON_NO_SOCKET)
+```
+
+`dropwatch` aggregates the same tracepoint by reason and location. It ships in its own `dropwatch` package (`apt install dropwatch` / `dnf install dropwatch`) — skip this block if it isn't installed:
+
+```bash
 sudo dropwatch -l kw       # 'kw' = kallsyms based
-> start
-# (see drops with location and reason)
-> stop
+```
 
+That drops you at dropwatch's interactive prompt (`dropwatch>`); type `start`, generate drops, then `stop`:
+
+```
+dropwatch> start
+1 drops at tcp_v4_rcv+0x2a (SKB_DROP_REASON_NO_SOCKET)
+dropwatch> stop
+```
+
+To aggregate reasons over a window, bound `perf trace` with `timeout` *before* the pipe — `perf trace` streams forever, and `sort`/`uniq` only print after the input stream ends, so they need a clean EOF:
+
+```bash
 # Aggregate by reason
-sudo perf trace --no-syscalls -e skb:kfree_skb 2>&1 | awk '{print $NF}' | sort | uniq -c | sort -rn | head
+sudo timeout 10 perf trace --no-syscalls -e skb:kfree_skb 2>&1 | awk '{print $NF}' | sort | uniq -c | sort -rn | head
+```
+
+With the closed-port loop running, `SKB_DROP_REASON_NO_SOCKET` dominates the histogram:
+
+```
+    160 SKB_DROP_REASON_NO_SOCKET)
 ```
 
 **Adopting `kfree_skb_reason`** is an ongoing kernel project. Many call sites still use plain `kfree_skb`; new code is expected to use `_reason`.
@@ -75,11 +107,16 @@ What devlink does: more abstract device knobs.
 
 Tools: `devlink dev show`, `devlink port show`, `devlink dev info`, `devlink resource show`. The `iproute2` package ships the `devlink` binary.
 
+Run `devlink dev show` first and copy one of the listed handles into the next two commands — `pci/0000:01:00.0` below is a placeholder that almost certainly won't match your NIC:
+
 ```bash
 devlink dev show
+# Substitute a handle from the line above, e.g.:
 devlink dev info pci/0000:01:00.0
 devlink resource show pci/0000:01:00.0
 ```
+
+On virtio-net / `hv_netvsc` / most cloud-VM NICs `devlink dev show` prints **nothing** — those drivers don't register a devlink instance, so there is no handle to inspect. You need an mlx5 / ice / nfp device (some cloud VMs expose an mlx5 SR-IOV VF) to see real output. Even then `resource show` often returns `Operation not supported` — it's driver-specific (see below).
 
 devlink is **driver-specific** — each driver opts in by registering its capabilities. mlx5, ice (Intel), nfp (Netronome) have rich devlink support; many older drivers don't.
 
@@ -147,21 +184,49 @@ Per-flow TLS offload (Day 25) is well-established. Inline IPsec offload landed i
 
 ## Today's experiment
 
-```bash
-# See drops with reasons (live)
-sudo perf trace --no-syscalls -e skb:kfree_skb 2>&1 | head -20
+First provoke some drops (idle boxes drop almost nothing), then watch them with reasons:
 
+```bash
+# Trigger NO_SOCKET drops in another terminal:
+for i in $(seq 1 50); do curl -s --max-time 1 http://localhost:1 >/dev/null; done
+
+# See drops with reasons (live; timeout so the pipe ends cleanly)
+sudo timeout 10 perf trace --no-syscalls -e skb:kfree_skb 2>&1 | head -20
+```
+
+Each line names the kernel call site that freed the skb plus a drop-reason category (e.g. `SKB_DROP_REASON_NO_SOCKET`) when the disposal used `kfree_skb_reason`.
+
+```bash
 # Probe devlink
 which devlink && devlink dev show
-
-# Look at YAML netlink specs
-ls Documentation/netlink/specs/    # in the kernel tree
-
-# Try a YAML-generated python tool
-cd tools/net/ynl
-python3 ./pyynl/cli.py --spec ../../../Documentation/netlink/specs/devlink.yaml \
-    --do dev-get --json '{}' 2>&1 | head     # may need root
 ```
+
+Prints one device handle per registered device — or nothing on virtio/cloud NICs that register no devlink instance.
+
+```bash
+# Look at the YAML netlink specs
+cd ~/code/linux                    # your kernel source tree
+ls Documentation/netlink/specs/
+```
+
+Lists the per-protocol `.yaml` spec files, including `devlink.yaml`, `ethtool.yaml`, and `psp.yaml`.
+
+```bash
+# Try a YAML-generated python tool. Install the ynl deps first:
+pip install -r tools/net/ynl/requirements.txt   # or: pip install jsonschema pyyaml
+cd tools/net/ynl
+# ethtool's spec decodes cleanly against a stock NIC — dump the ring sizes:
+python3 ./pyynl/cli.py --spec ../../../Documentation/netlink/specs/ethtool.yaml \
+    --dump rings-get 2>&1 | head     # may need root
+```
+
+This prints a JSON object per interface — the kernel's ethtool ring config, fetched over netlink with zero hand-written C:
+
+```
+[{'header': {'dev-index': 2, 'dev-name': 'eth0'}, 'rx': 9362, 'rx-max': 18139, ...}]
+```
+
+Two gotchas worth knowing. **Op naming:** ops are `get`/`rings-get`, not `dev-get` — `--do dev-get` raises `KeyError: 'dev-get'`. Use `--dump <op>` (lists every instance, like `devlink dev show`) since the `--do` form needs a specific id. **Spec-vs-kernel skew:** the YAML specs track mainline, so dumping a spec whose attributes are newer/older than your running driver can raise `YnlException: Space '...' has no attribute with value 'N'` — e.g. `devlink.yaml --dump get` against an mlx5 device on this kernel. That's a spec/kernel version mismatch, not a bug in your invocation; the stabler specs like `ethtool.yaml` decode cleanly. Without the deps you'll instead see `ModuleNotFoundError: No module named 'jsonschema'`.
 
 ## What to read in the kernel
 
