@@ -152,19 +152,22 @@ cleanup() {
   sudo ip rule del from 10.99.0.0/24 lookup 99 priority 99 2>/dev/null || true
   sudo ip route del default via 127.0.0.1 table 99 2>/dev/null || true
   sudo ip route del 10.99.0.0/24 dev lo 2>/dev/null || true
+  sudo ip addr del 10.99.0.5/32 dev lo 2>/dev/null || true
 }
 trap cleanup EXIT
 
-sudo ip route add 10.99.0.0/24 dev lo
+# 10.99.0.5 must be a real local address — `ping -I` binds the socket to it,
+# and the kernel rejects the bind if the address isn't assigned to an interface.
+sudo ip addr add 10.99.0.5/32 dev lo
 sudo ip rule add from 10.99.0.0/24 lookup 99 priority 99
 sudo ip route add default via 127.0.0.1 table 99
 
 # Trace which table is consulted
 sudo bpftrace -e '
-fentry:fib_rules_lookup { @rules = count(); }
 fentry:fib_table_lookup { printf("table_id=%d\n", args->tb->tb_id); }
 ' &
 tracer=$!
+sleep 2   # let bpftrace attach its fentry probes before we send traffic
 
 # Send packet from 10.99 source — should hit table 99
 ping -I 10.99.0.5 -c 1 8.8.8.8
@@ -175,7 +178,9 @@ ping -c 1 8.8.8.8
 sudo kill "$tracer"
 ```
 
-You'll see `table_id=99` for the first ping and `table_id=254` (main) for the second.
+For each ping you'll first see one or more `table_id=255` lines — that's the always-first `local` table lookup (rule 0), which misses for an external destination like 8.8.8.8. The first ping then shows `table_id=99` — proof the `from 10.99.0.0/24` rule steered it into table 99 — while the second ping falls through to `table_id=254` (main). The leading 255 lines are normal: `fib_rules_lookup` walks rule 0 first on every lookup, so don't be surprised if 255 repeats.
+
+Neither ping will actually get a reply from 8.8.8.8 — that's expected. Table 99's next-hop `127.0.0.1` is a deliberate dead-end used only to force a distinct table, and the route is loopback-bound. We only care about the `table_id=...` lines bpftrace prints, not the ping result.
 
 ## What to read in the kernel
 
