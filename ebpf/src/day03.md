@@ -165,22 +165,37 @@ Expected:
 PID 24501 (rm) ppid 24450 (bash) deleted a file
 ```
 
+We backgrounded the consumer with `&`, so stop it before moving on (otherwise it keeps polling the ringbuf and printing into the shell while you run the inspect/break steps):
+
+```bash
+sudo pkill -f ./parent
+```
+
+(Or, mirroring Day 1, run `sudo ./parent` in the foreground in one terminal, do the `touch /tmp/x && rm /tmp/x` in a second terminal, and Ctrl-C the consumer when done.)
+
 ---
 
 ## Inspect what CO-RE actually emitted
 
 This is the most important step today. You need to *see* the relocations to believe they exist.
 
-```bash
-# Dump CO-RE relocations from your compiled object:
-bpftool gen min_core_btf /sys/kernel/btf/vmlinux min.btf parent.bpf.o
-# (creates a minimal BTF with only the types your program references)
+Disassemble the object with relocations interleaved (the `-r` flag is what makes the CO-RE records appear — `-d` alone never prints them):
 
-# Or look directly at the BPF object:
-llvm-objdump -d parent.bpf.o
+```bash
+llvm-objdump -dr parent.bpf.o | grep CO-RE
 ```
 
-Look for instructions whose immediate operand is a magic value like `0x0` followed by a CO-RE relocation in the section `.relo.btf`. Or use:
+Recent LLVM annotates the BPF disassembly with the CO-RE relocation records read from the object's `.BTF.ext` section. You'll see one line per kernel-field access:
+
+```
+0000000000000060:  CO-RE <byte_off> [13] struct task_struct::real_parent
+00000000000000a0:  CO-RE <byte_off> [13] struct task_struct::tgid
+00000000000000e8:  CO-RE <byte_off> [13] struct task_struct::comm
+```
+
+(addresses and the type index `[13]` vary by build). Drop the `| grep CO-RE` to see the full disassembly: the load instruction just above each relocation carries the **compile-time** byte offset Clang baked in — e.g. `r1 = 0xae0` for `real_parent` — *not* a placeholder like `0x0`. libbpf rewrites that immediate at load time if the running kernel's layout differs. CO-RE relocation records live in the ELF section `.BTF.ext` (the object also has `.BTF`, `.rel.BTF`, and `.rel.BTF.ext`); there is no `.relo.btf` section.
+
+To inspect the embedded types instead:
 
 ```bash
 bpftool btf dump file parent.bpf.o
@@ -188,16 +203,29 @@ bpftool btf dump file parent.bpf.o
 
 You'll see your `struct event`, your maps, and references to kernel types like `task_struct.real_parent`.
 
-To see relocations applied at load time:
+> **Aside — shipping minimal BTF.** `bpftool gen min_core_btf /sys/kernel/btf/vmlinux min.btf parent.bpf.o` writes a minimal BTF file containing only the types your program references (it prints nothing to stdout). That's for *portability* — shipping a tiny BTF alongside your `.o` for kernels without `/sys/kernel/btf/vmlinux` — not for inspecting relocations.
 
-```c
-// in parent.c, before open_and_load:
-LIBBPF_OPTS(bpf_object_open_opts, opts, .kernel_log_level = 1);
-struct parent_bpf *skel = parent_bpf__open_opts(&opts);
-parent_bpf__load(skel);
+To watch the relocations get applied at load time, you need **libbpf's own debug log**, not the kernel verifier log. The two are different: `.kernel_log_level` feeds `bpf_attr.log_level`, which controls the in-kernel *verifier* log (a disassembled, post-relocation instruction dump plus verifier state). CO-RE patching happens in libbpf userspace *before* the `BPF_PROG_LOAD` syscall, so the verifier log contains no `CO-RE` string and no relocation provenance — grepping it for `CO-RE` finds nothing.
+
+The patching messages come out of libbpf's print callback at the `LIBBPF_DEBUG` level. Easiest from the shell — load with bpftool's `-d` flag (which sets libbpf to `LIBBPF_DEBUG`) and grep for the relocation lines:
+
+```bash
+sudo bpftool -d prog load parent.bpf.o /sys/fs/bpf/parent 2>&1 | grep relo
+sudo rm -f /sys/fs/bpf/parent   # clean up the pin
 ```
 
-The verifier log dumps the patched instructions. Search the log for `CO-RE` — libbpf prints what it patched.
+You'll see lines like `prog 'on_unlink': relo #N: ... patched insn ...`. From C, register a print callback and raise the level before open/load:
+
+```c
+static int dbg(enum libbpf_print_level lvl, const char *fmt, va_list ap)
+{
+    return vfprintf(stderr, fmt, ap);
+}
+// in main(), before parent_bpf__open():
+libbpf_set_print(dbg);
+```
+
+Note libbpf's *default* print callback only emits `WARN` to stderr; the `INFO`/`DEBUG` relocation lines are suppressed unless you install your own callback or use a debug-enabled loader.
 
 ---
 
@@ -211,21 +239,31 @@ Add this line:
 __u32 fake = BPF_CORE_READ(task, this_field_does_not_exist);
 ```
 
-The compile succeeds (CO-RE references types by *name string*, not by C resolution). At load time, libbpf can't find the field and aborts with:
+You might expect this to compile and only blow up at load time. It doesn't — the build fails immediately:
+
+```
+error: no member named 'this_field_does_not_exist' in 'struct task_struct'
+```
+
+Here's why: `BPF_CORE_READ` doesn't reference fields by an opaque name string. It expands to the *real* C member-access expression (`task->this_field_does_not_exist`) wrapped in `__builtin_preserve_access_index`, and Clang type-checks that member against the `struct task_struct` in your `vmlinux.h`. A name that exists in no BTF at all is a plain C error. (`bpf_core_field_exists(task->this_field_does_not_exist)` fails the same way — it also emits the member-access expression.)
+
+So to exercise the genuine load-time **relocation-failure** path — the one that prints
 
 ```
 libbpf: prog 'on_unlink': relo #N: failed to relocate ...
 ```
 
-Replace with `bpf_core_field_exists` to handle gracefully:
+you need a field that *exists in your build's BTF/`vmlinux.h` but is absent on the **target** kernel*. The realistic way to trigger it is to compile against a newer `vmlinux.h` and load on an older kernel that lacks the field.
+
+For the graceful-degradation demo, use a field that actually exists so the program compiles, and gate it on `bpf_core_field_exists`:
 
 ```c
 __u32 fake = 0;
-if (bpf_core_field_exists(task->this_field_does_not_exist))
-    fake = BPF_CORE_READ(task, this_field_does_not_exist);
+if (bpf_core_field_exists(task->pid))
+    fake = BPF_CORE_READ(task, pid);
 ```
 
-Now libbpf patches the access to a no-op when the field is absent. Same `.o` works on kernels that have or lack the field.
+The point of `bpf_core_field_exists` is fields that *appear or disappear across kernel versions*: libbpf evaluates the check at load time against the target kernel's BTF and patches the branch to a no-op when the field is absent, so a single `.o` runs on kernels that have or lack the field. It is **not** a way to reference a name that exists in no BTF at all.
 
 ### Break 2 — Direct deref vs `BPF_CORE_READ`
 
