@@ -134,17 +134,22 @@ Replaced **perfbuf** (`BPF_MAP_TYPE_PERF_EVENT_ARRAY`) for most uses. Perfbuf is
 # On your Linux 7.0 box
 mkdir -p ~/ebpf-labs/day01 && cd ~/ebpf-labs/day01
 
+# Clone libbpf-bootstrap — it provides the Makefile and the vendored
+# libbpf + bpftool submodules the build needs. --recurse-submodules is
+# required; without it the Makefile build fails for lack of libbpf/bpftool.
+git clone --recurse-submodules https://github.com/libbpf/libbpf-bootstrap ~/libbpf-bootstrap
+
 # Generate vmlinux.h (regenerate after kernel upgrades)
 sudo bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h
 ```
 
-Grab a `Makefile` from `libbpf-bootstrap/examples/c/` and adapt it (change `APPS = hello`). You need:
+Copy `~/libbpf-bootstrap/examples/c/Makefile` into this directory and change its `APPS = bootstrap` line to `APPS = hello`. With `APPS = hello`, the Makefile expects your two source files to be named *exactly* `hello.bpf.c` (kernel side) and `hello.c` (userspace side), and it generates `hello.skel.h` for you. You also need:
 
 - `clang` ≥ 17 with `-target bpf`
 - `bpftool gen skeleton`
 - libbpf headers and `-lbpf` for userspace
 
-If you'd rather skip Makefile setup, copy `libbpf-bootstrap/examples/c/Makefile` verbatim and rename the example.
+The vendored `libbpf` and `bpftool` under `~/libbpf-bootstrap/` (pulled in by `--recurse-submodules` above) satisfy the last two; the Makefile builds them for you on first `make`.
 
 ### `hello.bpf.c` — the kernel side
 
@@ -181,7 +186,7 @@ int BPF_PROG(on_unlink, int dfd, struct filename *name)
 Walkthrough of every line that's new:
 
 - `#include "vmlinux.h"` — pulls in every kernel type, including `struct filename` used in the prototype.
-- `char LICENSE[] SEC("license") = "GPL";` — the kernel rejects loading any non-GPL BPF program that uses GPL-only helpers (most of them). This is *not* legal advice; it's a load-time gate.
+- `char LICENSE[] SEC("license") = "GPL";` — a load-time gate, not legal advice. The kernel rejects a non-GPL program *only* if it calls a GPL-only helper. Many of the most useful helpers are GPL-only (`bpf_probe_read_kernel`, `bpf_get_current_task`, `bpf_get_stackid`, …), but the four simple helpers this lab uses are *not* — so this line has no teeth yet today (see Break 3).
 - `struct event` — the type we'll send through ringbuf. Both kernel and userspace include this same definition; ringbuf transports raw bytes.
 - The `SEC(".maps")` block — modern map declaration syntax. The `__uint(...)` macros from `bpf_helpers.h` produce BTF the loader uses to know it's a 256-KiB ringbuf.
 - `SEC("fentry/filename_unlinkat")` — attach point. `filename_unlinkat` is in `fs/namei.c`, called on every `unlink()` and `unlinkat()` syscall.
@@ -255,6 +260,8 @@ PID 13421 rm deleted a file
 PID 13421 rm deleted a file
 ```
 
+On a busy machine you'll also see lines whose `comm` is something other than `rm` — package managers, editors saving over temp files, `/tmp` churn. That's not a bug; it's the whole point. Your doorbell fires on *every* `unlink`/`unlinkat` in the system, not just yours. Pick out the two lines whose `comm` is `rm`.
+
 Congratulations. You just installed a doorbell on a kernel function.
 
 ---
@@ -297,17 +304,49 @@ This shows the difference between **loader-time** errors (map config wrong) and 
 
 ### Break 3 — Remove the LICENSE
 
-Delete the `char LICENSE[] SEC("license") = "GPL";` line. Load fails with:
+Try the obvious thing first: delete the `char LICENSE[] SEC("license") = "GPL";` line and rebuild. The program **loads and runs exactly as before**. Surprised? The GPL gate fires only when your program *calls a GPL-only helper*, and none of the four helpers in `hello.bpf.c` (`bpf_ringbuf_reserve`, `bpf_ringbuf_submit`, `bpf_get_current_pid_tgid`, `bpf_get_current_comm`) are GPL-only.
+
+To make the gate bite, first give it something to gate on. Add a GPL-only helper call inside `on_unlink`:
+
+```c
+(void)bpf_get_current_task();   // bpf_get_current_task is a GPL-only helper
+```
+
+Now delete the LICENSE line again and rebuild. *This* time the load fails:
 
 ```
 cannot call GPL-restricted function from non-GPL compatible program
 ```
 
-Most useful helpers are GPL-gated.
+The lesson: the license string is a load-time gate with teeth **only** for GPL-only helpers. Put the LICENSE line back (and you can drop the `bpf_get_current_task` call again) before moving on.
 
 ### Break 4 — Reserve more than you write
 
-Change to `bpf_ringbuf_reserve(&rb, sizeof(*e) + 1, 0);` but only write `sizeof(*e)` bytes. The Verifier accepts (you reserved enough). The consumer sees a record one byte larger than expected with a garbage trailing byte. The lesson: **ringbuf records are sized at reserve time, not at submit time.**
+The lesson here is that **ringbuf records are sized at reserve time, not at submit time** — but the consumer in `hello.c` never looks at the record length, so right now you can't see it. First make the size visible. Change `handle()` to print the delivered length `sz`:
+
+```c
+printf("PID %d %s deleted a file (sz=%zu)\n", e->pid, e->comm, sz);
+```
+
+Rebuild and run the **unmodified** program. Each line now ends with the record size:
+
+```
+PID 13421 rm deleted a file (sz=20)
+```
+
+`sizeof(struct event)` is 20 — a 4-byte `pid` plus a 16-byte `comm`. Now over-allocate the reservation while still writing only `sizeof(*e)` bytes:
+
+```c
+struct event *e = bpf_ringbuf_reserve(&rb, sizeof(*e) + 1, 0);
+```
+
+The Verifier accepts it (you reserved enough). Rebuild, run, delete a file again:
+
+```
+PID 13421 rm deleted a file (sz=21)
+```
+
+The record is one byte larger even though you wrote the same bytes — the length is fixed when you **reserve**, not when you **submit**. (That trailing byte is uninitialized; we don't print it, the `20 → 21` size delta is the observable signal.) Restore the original `sizeof(*e)` reservation before moving on.
 
 ---
 
