@@ -145,6 +145,7 @@ Three approaches:
 1. **Kernel source.** Grep `BTF_KFUNCS_START` blocks in `kernel/bpf/` and elsewhere:
 
    ```bash
+   cd ~/code/linux
    grep -rn 'BTF_KFUNCS_START' kernel/bpf net/ drivers/ | head
    ```
 
@@ -193,12 +194,25 @@ Build, load, attach, observe:
 
 ```bash
 make
-sudo ./kfunc_demo &
-touch /tmp/x && rm /tmp/x
-sudo cat /sys/kernel/debug/tracing/trace_pipe
+sudo ./kfunc_demo &                              # loads + attaches the fentry
+sudo cat /sys/kernel/debug/tracing/trace_pipe &  # stream events live
+for i in 1 2 3; do touch /tmp/x$i && rm /tmp/x$i; done
 ```
 
-You should see `acquired pid=N` per delete.
+You should see one `acquired pid=N` line per delete:
+
+```
+            rm-12345   [001] ...1   842.713604: bpf_trace_printk: acquired pid=12345
+            rm-12348   [000] ...1   842.714902: bpf_trace_printk: acquired pid=12348
+            rm-12351   [001] ...1   842.716071: bpf_trace_printk: acquired pid=12351
+```
+
+`filename_unlinkat` fires once per `rm`, so the count of lines matches the number of deletes. The loader must stay backgrounded while you observe — killing it detaches the fentry. When done, tear everything down:
+
+```bash
+sudo pkill -f trace_pipe   # stop the streaming cat
+sudo pkill kfunc_demo      # detach the fentry (loader was started with sudo)
+```
 
 ## What to break
 
@@ -220,7 +234,13 @@ if (acq->pid > 1000)
 return 0;
 ```
 
-Verifier rejects — there's an exit path (when `pid <= 1000`) where the ref is leaked. Verifier requires release on **every** exit path. Fix: release before any conditional return:
+Verifier rejects — there's an exit path (when `pid <= 1000`) where the ref is leaked. The rejection is the same class of leak error as the forget-release case:
+
+```
+Unreleased reference id=1 alloc_insn=2
+```
+
+The id is `1` because there is only a single acquire in this program. The verifier requires release on **every** exit path. Fix: release before any conditional return:
 
 ```c
 __u32 pid = acq->pid;
@@ -241,15 +261,17 @@ Rejected: the second call sees the id as already closed.
 
 ```c
 extern struct bpf_cpumask *bpf_cpumask_create(void) __ksym;
+extern void bpf_cpumask_release(struct bpf_cpumask *cm) __ksym;
 
 SEC("xdp")
 int xdp_prog(struct xdp_md *ctx) {
     struct bpf_cpumask *cm = bpf_cpumask_create();
-    /* ... */
+    if (cm) bpf_cpumask_release(cm);
+    return XDP_PASS;
 }
 ```
 
-The cpumask kfunc family is registered only for TRACING, STRUCT_OPS, and SYSCALL program types (`kernel/bpf/cpumask.c`), **not** XDP. The verifier rejects with:
+Unlike the three breaks above, this one **can't** be reproduced by editing the fentry lab — cpumask kfuncs *are* allowed for tracing programs, so the edit has to be a separate, complete XDP object with its own loader (the program above is loadable as written). The cpumask kfunc family is registered only for TRACING, STRUCT_OPS, and SYSCALL program types (`kernel/bpf/cpumask.c`), **not** XDP. The verifier rejects at the call site — before it ever reaches the return-path or reference-leak checks — with:
 
 ```
 calling kernel function bpf_cpumask_create is not allowed
