@@ -147,7 +147,17 @@ echo hi | nc -q 1 localhost 9999
 # Stop tracer (Ctrl-C in the bpftrace shell)
 ```
 
-You'll see init → get_port (server) → init (client) → connect → set_state through SYN_SENT → ESTABLISHED → CLOSE_WAIT → LAST_ACK → CLOSED.
+You'll see init → get_port (server) → init (client) → connect → set_state through SYN_SENT → ESTABLISHED → CLOSE_WAIT → LAST_ACK → CLOSE.
+
+`tcp_set_state` prints the *new* state as a raw integer, not a name — so a line like `set_state 0xffff... -> 2` means "this sock moved to SYN_SENT." The mapping (from `include/net/tcp_states.h`) is: `1`=ESTABLISHED, `2`=SYN_SENT, `3`=SYN_RECV, `4`=FIN_WAIT1, `5`=FIN_WAIT2, `6`=TIME_WAIT, `7`=CLOSE, `8`=CLOSE_WAIT, `9`=LAST_ACK, `10`=LISTEN, `11`=CLOSING. The two distinct `%p` sock pointers tell the server listener apart from the client connection — each transitions through its own sequence. To read the states as names directly, decode them in a `BEGIN` block (so the map is populated once, not re-assigned on every hit):
+
+```bash
+sudo bpftrace -e '
+BEGIN { @sn[1]="ESTABLISHED";@sn[2]="SYN_SENT";@sn[3]="SYN_RECV";@sn[4]="FIN_WAIT1";@sn[5]="FIN_WAIT2";@sn[6]="TIME_WAIT";@sn[7]="CLOSE";@sn[8]="CLOSE_WAIT";@sn[9]="LAST_ACK";@sn[10]="LISTEN";@sn[11]="CLOSING"; }
+fentry:tcp_set_state { printf("set_state %p -> %s\n", args->sk, @sn[args->state]); }
+END { clear(@sn); }
+'
+```
 
 ### See the bind/established hashes
 
@@ -155,8 +165,11 @@ You'll see init → get_port (server) → init (client) → connect → set_stat
 # Bound listening sockets:
 sudo ss -tlnp
 
-# All established TCP, with kernel sock pointer:
-sudo ss -tap
+# Only the established (ehash) entries, with owning process:
+sudo ss -tnp state established
+
+# (ss -tap would also include LISTEN sockets from the bhash above —
+#  the `state established` filter isolates the ehash side of the contrast.)
 
 # Memory accounting:
 ss -tim
