@@ -113,49 +113,135 @@ It's worse than plain TCP when:
 old_mptcp_enabled=$(cat /proc/sys/net/mptcp/enabled)
 sudo sysctl net.mptcp.enabled
 sudo sysctl -w net.mptcp.enabled=1
-trap 'sudo sysctl -w net.mptcp.enabled=$old_mptcp_enabled; rm -f /tmp/mptcp_client /tmp/mptcp_client.c' EXIT
+trap 'sudo sysctl -w net.mptcp.enabled=$old_mptcp_enabled; pkill -f /tmp/mptcp_demo 2>/dev/null; rm -f /tmp/mptcp_demo /tmp/mptcp_demo.c' EXIT
 
 # Use ip mptcp tooling
 sudo ip mptcp endpoint show
 cat /proc/sys/net/mptcp/available_schedulers
+# 'endpoint show' is normally empty on a single-host test until you add
+# endpoints — that's expected, not a failure. 'available_schedulers' prints
+# at least 'default'.
 
-# Quick test (need a partner system or use loopback)
-# Server:
-nc -l --mptcp 9999 &      # need recent nc with --mptcp support, or a custom binary
-
-# Client (with IPPROTO_MPTCP):
-cat << 'EOF' > /tmp/mptcp_client.c
+# Quick test over loopback. Stock `nc` has no `--mptcp` flag and the `mptcpize`
+# LD_PRELOAD wrapper needs the mptcpd package — neither is guaranteed present —
+# so we use ONE self-contained binary that is both the MPTCP server and client.
+# It holds the connection open for a few seconds so `ss -M` and tcpdump can
+# observe the live msk and its subflow instead of catching nothing after exit.
+cat << 'EOF' > /tmp/mptcp_demo.c
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#ifndef IPPROTO_MPTCP
 #define IPPROTO_MPTCP 262
-int main() {
-    int s = socket(AF_INET, SOCK_STREAM, IPPROTO_MPTCP);
-    if (s < 0) { perror("socket"); return 1; }
-    struct sockaddr_in a = { AF_INET, htons(9999) };
+#endif
+int main(void) {
+    struct sockaddr_in a = { .sin_family = AF_INET, .sin_port = htons(9999) };
     inet_aton("127.0.0.1", &a.sin_addr);
-    if (connect(s, (struct sockaddr*)&a, sizeof a) < 0) { perror("connect"); return 1; }
-    write(s, "hello\n", 6);
-    char buf[64]; int n = read(s, buf, sizeof buf);
-    if (n > 0) write(1, buf, n);
+
+    int srv = socket(AF_INET, SOCK_STREAM, IPPROTO_MPTCP);
+    if (srv < 0) { perror("socket(server)"); return 1; }
+    int one = 1; setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+    if (bind(srv, (struct sockaddr*)&a, sizeof a) < 0) { perror("bind"); return 1; }
+    if (listen(srv, 1) < 0) { perror("listen"); return 1; }
+
+    if (fork() == 0) {                      // child = client
+        int c = socket(AF_INET, SOCK_STREAM, IPPROTO_MPTCP);
+        if (c < 0) { perror("socket(client)"); _exit(1); }
+        if (connect(c, (struct sockaddr*)&a, sizeof a) < 0) { perror("connect"); _exit(1); }
+        write(c, "hello\n", 6);
+        sleep(6);                           // hold the connection open to observe
+        close(c); _exit(0);
+    }
+
+    int cs = accept(srv, NULL, NULL);       // parent = server
+    if (cs < 0) { perror("accept"); return 1; }
+    char buf[64]; int n = read(cs, buf, sizeof buf);
+    if (n > 0) write(1, buf, n);            // prints "hello"
+    sleep(6);
+    close(cs); close(srv);
+    wait(NULL);
     return 0;
 }
 EOF
-cc /tmp/mptcp_client.c -o /tmp/mptcp_client && /tmp/mptcp_client
+cc /tmp/mptcp_demo.c -o /tmp/mptcp_demo
 
-# Watch with ss
-ss -M | head      # 'M' = MPTCP. Shows msk and subflows.
+# Run it in the background so we can watch the connection while it is still up.
+/tmp/mptcp_demo &
+sleep 1
+
+# 'M' = MPTCP. Shows the msk and its subflow while the connection is live.
+ss -M | head
 ```
 
-Verify via tcpdump:
+On loopback you see the single subflow as a pair of `ESTAB` rows (the client end
+and the server end of the one path; your ephemeral port will differ):
+
+```
+State Recv-Q Send-Q Local Address:Port  Peer Address:Port
+ESTAB 0      0          127.0.0.1:48902    127.0.0.1:9999
+ESTAB 0      0          127.0.0.1:9999     127.0.0.1:48902
+```
+
+If `ss -M` prints only the header, the connection already closed before you
+looked — the `sleep(6)` in both ends is what keeps it alive long enough to
+observe, so re-run `ss -M` while `/tmp/mptcp_demo` is still in the background.
+
+Verify via tcpdump. Start the capture **first** (line-buffered with `-l`,
+self-terminating with `timeout`), then drive traffic into it. tcpdump decodes
+MPTCP TCP options in **lowercase** (`mptcp ... capable`, `mptcp ... dss`), so
+match those — the uppercase `MP_CAPABLE`/`DSS` tokens never appear in its output,
+and `-X` only dumps payload bytes where the binary option fields are not literal
+strings.
 
 ```bash
-sudo tcpdump -i lo -n -X 'tcp port 9999' | grep -E "MPC|MP_CAPABLE|MP_JOIN|DSS"
+sudo timeout 8 tcpdump -l -i lo -nn 'tcp port 9999' 2>/dev/null | grep -i mptcp &
+sleep 1
+/tmp/mptcp_demo
 ```
+
+You should see `mptcp ... capable` on the SYN/SYN-ACK (the MP_CAPABLE handshake)
+and `mptcp ... dss` on the data and ACK segments:
+
+```
+IP 127.0.0.1.9999 > 127.0.0.1.48902: Flags [.], ..., options [...,mptcp 26 dss fin ack ... seq ... subseq 0 len 1,...], length 0
+IP 127.0.0.1.48902 > 127.0.0.1.9999: Flags [F.], ..., options [...,mptcp 8 dss ack ...], length 0
+```
+
+### Seeing real multipath (optional)
+
+The loopback test above only ever has **one** path — a single address pair — so
+the connection completes the MP_CAPABLE handshake plus DSS on exactly **one**
+subflow. `ss -M` lists that single subflow and **`MP_JOIN` never appears**:
+there is no second path to join. To observe genuine multipath on a single host,
+give the kernel a second address it can open an additional subflow from. This
+**changes persistent kernel MPTCP state**, so undo it afterward (verify the exact
+`ip mptcp` syntax on your kernel — it has shifted across releases):
+
+```bash
+# Announce a second loopback address and allow one extra subflow.
+sudo ip addr add 127.0.0.2/8 dev lo
+sudo ip mptcp limits set subflow 2 add_addr_accepted 2
+sudo ip mptcp endpoint add 127.0.0.2 dev lo signal    # ADD_ADDR so the peer can join
+sudo ip mptcp endpoint add 127.0.0.2 dev lo subflow   # initiate a subflow from it
+
+# Re-run the transfer, then look for the second subflow and the MP_JOIN exchange:
+/tmp/mptcp_demo & sleep 1; ss -M | head
+sudo timeout 8 tcpdump -l -i lo -nn 'tcp port 9999' 2>/dev/null | grep -iE 'join|add'
+
+# Cleanup
+sudo ip mptcp endpoint flush
+sudo ip mptcp limits set subflow 2 add_addr_accepted 0
+sudo ip addr del 127.0.0.2/8 dev lo
+```
+
+With the second endpoint configured you should see `mptcp ... join` in the
+capture and an extra subflow in `ss -M` — the multipath behavior that is the
+whole point of MPTCP.
 
 ## What to read in the kernel
 
