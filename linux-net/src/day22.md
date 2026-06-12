@@ -87,7 +87,7 @@ sysctl net.netfilter.nf_conntrack_buckets     # hash table size (rounded to powe
 
 Rule of thumb: **buckets = max / 4 to max / 8**. Defaults are conservative; busy gateways set both higher (millions of entries on big NAT boxes).
 
-When `nf_conntrack_max` is reached, new connections fail to track, and depending on the policy (`nf_conntrack_tcp_loose`, etc.) may also be dropped. **`/proc/net/stat/nf_conntrack`** shows per-CPU counters including `drop` and `early_drop` (early eviction of LRU when full).
+When `nf_conntrack_max` is reached, new connections fail to track, and depending on the policy (`nf_conntrack_tcp_loose`, etc.) may also be dropped. The per-CPU counters including `drop` and `early_drop` (early eviction of LRU when full) are reported by `conntrack -S`. They are *also* exposed in **`/proc/net/stat/nf_conntrack`**, but only when the kernel is built with `CONFIG_NF_CONNTRACK_PROCFS=y` — that procfs view is deprecated and off on many modern kernels (including the 7.0 target), so prefer `conntrack -S`.
 
 ## Conntrack helpers
 
@@ -123,6 +123,15 @@ This is why you only write the SNAT rule once. Conntrack remembers the mapping a
 
 ## Today's experiment
 
+> **Required setup:** the userspace `conntrack` tool is *not* part of a default install. Every `conntrack ...` command in this chapter (this experiment and the "Force entries to expire" section below) needs it:
+>
+> ```bash
+> sudo apt-get install -y conntrack        # Debian/Ubuntu
+> # Fedora/RHEL:  sudo dnf install -y conntrack-tools
+> ```
+>
+> The force-expire section also uses `nc` (netcat); install it with `sudo apt-get install -y netcat-openbsd` if `which nc` comes up empty.
+
 ```bash
 # Inspect entries
 sudo conntrack -L | head
@@ -134,15 +143,28 @@ sudo conntrack -E &
 ping -c 3 8.8.8.8 &
 curl -sI https://example.com > /dev/null
 
-# Stats
+# Stats (per-CPU drop / early_drop counters)
 sudo conntrack -S
-cat /proc/net/stat/nf_conntrack | head -5
+# Same counters via procfs, only if CONFIG_NF_CONNTRACK_PROCFS=y (often off):
+[ -r /proc/net/stat/nf_conntrack ] && head -5 /proc/net/stat/nf_conntrack \
+  || echo "(no procfs view; needs CONFIG_NF_CONNTRACK_PROCFS=y — use 'conntrack -S')"
 
-# Per-state count
-sudo conntrack -L | awk '{print $1, $4}' | sort | uniq -c | sort -rn
+# Per-state count — only TCP has a state column ($4 is the state for tcp rows;
+# for udp/icmp $4 is 'src=...', which would pollute the histogram), so filter -p tcp:
+sudo conntrack -L -p tcp 2>/dev/null | awk '{print $4}' | sort | uniq -c | sort -rn
 
 sudo killall conntrack    # stop the -E monitor
 ```
+
+On a busy host the per-state histogram is dominated by `ESTABLISHED`, with a handful of `SYN_SENT`/`TIME_WAIT`/`CLOSE_WAIT`:
+
+```
+     42 ESTABLISHED
+      3 TIME_WAIT
+      1 SYN_SENT
+```
+
+(`udp` and `icmp` flows have no state column — only a timeout — which is exactly why we filter to `-p tcp`.)
 
 Watch the table fill and entries age out. Default UDP timeout is 30s; TCP ESTABLISHED is 5 days (yes, days — long-lived connections shouldn't get garbage-collected).
 
@@ -174,8 +196,9 @@ nc -l 9999 & srv=$!
 nc localhost 9999 & cli=$!
 sudo conntrack -L | grep 9999     # see the entry
 
-# After 60s of idle:
-sudo conntrack -L | grep 9999     # gone
+# The entry only ages out after the (lowered) idle timeout, so actually wait:
+echo "waiting ~65s for the idle entry to age out..."; sleep 65
+sudo conntrack -L | grep 9999     # now gone (no output)
 ```
 
 Always restore the timeout. It is global state, and lowering it can break legitimate long-lived idle connections on the host.
