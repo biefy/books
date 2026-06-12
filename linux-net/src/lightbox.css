@@ -1,27 +1,42 @@
+/* Widen the content column so diagrams render larger (their on-page text size
+   is proportional to display width / native width). Diagrams dominate these
+   books and were rendering with sub-body-size text at the stock 750px; 1000px
+   makes them ~1.3x larger while keeping prose under ~90 chars/line. */
+:root {
+  --content-max-width: 1000px;
+}
+
 #lightbox-overlay {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.85);
   z-index: 9999;
   display: none;
-  align-items: center;
-  justify-content: center;
+  /* Scroll the overlay itself so tall diagrams can exceed the viewport
+     height and be read top-to-bottom instead of being shrunk to fit. */
+  overflow: auto;
   padding: 2rem;
 }
 #lightbox-overlay.open {
-  display: flex;
+  display: block;
 }
 #lightbox-overlay .lightbox-content {
   display: flex;
   flex-direction: column;
   align-items: center;
+  /* Center horizontally; allow natural (possibly tall) height. */
+  margin: 0 auto;
+  width: fit-content;
   max-width: 95vw;
-  max-height: 95vh;
 }
 #lightbox-overlay .lightbox-img {
-  max-width: 95vw;
-  max-height: 88vh;
-  object-fit: contain;
+  /* Fill the available width so text renders large; let height follow the
+     aspect ratio and the overlay scroll vertically. No max-height clamp and
+     no object-fit:contain (both shrank tall diagrams to ~0.2x even
+     full-screen). Never upscale a small diagram past its natural size. */
+  width: 100%;
+  max-width: max-content;
+  height: auto;
   background: white;
   border-radius: 6px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
@@ -35,17 +50,18 @@
   max-width: 80vw;
 }
 #lightbox-overlay .lightbox-close {
-  position: absolute;
+  position: fixed;
   top: 0.8rem;
   right: 1.2rem;
   font-size: 2.2rem;
-  background: transparent;
+  background: rgba(0, 0, 0, 0.6);
   border: none;
   color: #fff;
   cursor: pointer;
   line-height: 1;
   padding: 0.2rem 0.6rem;
   border-radius: 4px;
+  z-index: 1;
 }
 #lightbox-overlay .lightbox-close:hover {
   background: rgba(255, 255, 255, 0.1);
