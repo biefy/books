@@ -141,36 +141,90 @@ nc localhost 9999      # both ends in ESTAB
 # 60s later: TIME_WAIT entry expires
 ```
 
-Trace state transitions:
+Trace state transitions. This probe fires for every socket system-wide but nothing drives it on an idle box, so **leave it running and, in another terminal, re-run the `nc -l 9999 &` / `echo q | nc -q 0 localhost 9999` listener+client pair from the [force-close block](#force-close-to-see-time_wait) below** to provoke transitions. The `interval:s:10` bound makes it exit cleanly after 10s:
+
 ```bash
 sudo bpftrace -e '
 fentry:tcp_set_state {
   printf("sk=%p state=%d -> %d\n", args->sk, args->sk->__sk_common.skc_state, args->state);
-}'
+}
+interval:s:10 { exit(); }'
 ```
 
-You'll see every transition with the kernel's view of `sk` pointer.
+The integers are the `tcp_states.h` enum values from above: `1`=ESTABLISHED, `2`=SYN_SENT, `3`=SYN_RECV, `4`=FIN_WAIT1, `5`=FIN_WAIT2, `6`=TIME_WAIT, `7`=CLOSE, `8`=CLOSE_WAIT, `9`=LAST_ACK. Because the probe is system-wide you'll see the client's and the server's transitions interleaved, each tagged with the kernel's `sk` pointer. A client connect/close prints roughly:
+
+```
+sk=0xffff…  state=7 -> 2    # CLOSE -> SYN_SENT       (client connect)
+sk=0xffff…  state=2 -> 1    # SYN_SENT -> ESTABLISHED
+sk=0xffff…  state=1 -> 4    # ESTABLISHED -> FIN_WAIT1  (active closer)
+sk=0xffff…  state=4 -> 5    # FIN_WAIT1 -> FIN_WAIT2
+sk=0xffff…  state=5 -> 7    # FIN_WAIT2 -> CLOSE
+```
+
+Note you will **not** see a transition into TIME_WAIT (state `6`) here — the chapter's headline state. Entering TIME_WAIT spins up a separate minisock and calls `tcp_done()`, which sets the *original* socket to TCP_CLOSE (`7`). So `tcp_set_state` on the full socket goes `… -> 5 -> 7`, never `-> 6`. To watch TIME_WAIT itself, use `ss -tan` as below.
 
 ### Force-close to see TIME_WAIT
 
 ```bash
-# Server keeps listening; client connects then disconnects
+# Server accepts one connection then exits; client (nc -q 0) closes first -> client TIME_WAIT
 nc -l 9999 &
 sleep 0.1
 echo q | nc -q 0 localhost 9999
 
 # Immediately:
 ss -tan | grep 9999
-# tcp  TIME-WAIT  0  0  127.0.0.1:9999  127.0.0.1:NNNN
+# tcp  TIME-WAIT  0  0  127.0.0.1:NNNN  127.0.0.1:9999   # Local = ephemeral client port, Peer = :9999
 ```
 
-Observe: the closing side sits in TIME_WAIT for ~60s. The other side returns to CLOSED immediately.
+Observe: the client is the active closer (`nc -q 0` closes as soon as stdin hits EOF), so its ephemeral port sits in TIME_WAIT for ~60s — note `ss` prints `Local Address:Port` first, then `Peer Address:Port`, so the ephemeral port is `Local` and `:9999` is `Peer`. Plain `nc -l` accepts a single connection and exits when it closes, so only the client's TIME-WAIT remains (no LISTEN row). The server side returns to CLOSED immediately.
 
 ## What to break
 
-- **Set `tcp_fin_timeout=5`**, then close a connection where the server doesn't reciprocate. You'll see the FIN_WAIT_2 expire after ~5s. Useful for diagnosing connection leaks.
-- **Hammer `tcp_max_tw_buckets`**: reduce it to 100 (`sudo sysctl -w net.ipv4.tcp_max_tw_buckets=100`), run a load test that opens many short connections. After 100 TIME_WAITs, new closes skip TIME_WAIT and close immediately (no RST is sent); you'll see `TcpExt: TCPTimeWaitOverflow` (in `nstat` / `/proc/net/netstat`) increment.
-- **Try `tcp_tw_reuse=1`** for outgoing-only workloads: relieves the bucket pressure for clients that connect frequently to the same servers (test client + benchmarking tools).
+- **Set `tcp_fin_timeout=5`**, then drive a connection into FIN_WAIT_2 — a state you reach only when the peer ACKs your FIN but never sends its own. A plain `nc` close won't do it (the peer reciprocates with its own FIN), so use a listener that accepts but never closes:
+
+  ```bash
+  sudo sysctl -w net.ipv4.tcp_fin_timeout=5
+
+  # Listener that accepts but never closes (its kernel ACKs the FIN; the app sends none back):
+  python3 -c 'import socket,time; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind(("127.0.0.1",9999)); s.listen(); c,_=s.accept(); time.sleep(600)' &
+  sleep 0.3
+
+  # Client connects then closes its write side -> FIN_WAIT_1, then FIN_WAIT_2 after the server's ACK:
+  exec 3<>/dev/tcp/127.0.0.1/9999; exec 3>&-
+
+  watch -n0.5 'ss -tan state fin-wait-2'   # the FIN_WAIT_2 row appears, then vanishes after ~5s
+
+  sudo sysctl -w net.ipv4.tcp_fin_timeout=60   # restore the default
+  ```
+
+  Useful for diagnosing connection leaks.
+- **Hammer `tcp_max_tw_buckets`**: cap the global TIME_WAIT count and watch the overflow counter climb. Capture the default first so you can restore it:
+
+  ```bash
+  orig=$(cat /proc/sys/net/ipv4/tcp_max_tw_buckets)
+  sudo sysctl -w net.ipv4.tcp_max_tw_buckets=100
+
+  nc -l -k 9999 &                              # persistent listener (ncat -k)
+  nstat -az TcpExtTCPTimeWaitOverflow          # baseline (-z shows zero-valued counters)
+  for i in $(seq 1 500); do echo q | nc -q 0 localhost 9999; done
+  nstat -az TcpExtTCPTimeWaitOverflow          # the count has risen (e.g. ~400)
+
+  sudo sysctl -w net.ipv4.tcp_max_tw_buckets=$orig   # restore
+  kill %1                                            # stop the listener
+  ```
+
+  Once the cap is hit, new closes skip TIME_WAIT and close immediately (no RST is sent), so `ss -tan | grep TIME-WAIT | wc -l` stays low — the rising `TCPTimeWaitOverflow` counter, not the visible TIME_WAIT count, is the reliable signal.
+- **Try `tcp_tw_reuse=1`** for outgoing-only workloads: it lets the kernel reuse local TIME_WAIT slots for new *outgoing* connections (requires TCP timestamps), relieving bucket pressure for clients that connect frequently to the same server (test clients, benchmarking tools). Make it observable:
+
+  ```bash
+  sudo sysctl -w net.ipv4.tcp_tw_reuse=1
+  nc -l -k 9999 &
+  watch -n0.5 'ss -tan state time-wait | wc -l'   # in one terminal
+  # in another, open many short outgoing connections to the same server:
+  for i in $(seq 1 2000); do echo q | nc -q 0 localhost 9999; done
+  # the TIME_WAIT count stays bounded as the kernel reuses slots for new connects
+  sudo sysctl -w net.ipv4.tcp_tw_reuse=2          # restore the default
+  ```
 
 ## What to read in the kernel
 
