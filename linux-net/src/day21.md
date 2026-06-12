@@ -118,6 +118,13 @@ sudo nft list table inet filter
 
 `counter` accumulates packets/bytes. Built-in; no separate "counter table" required.
 
+You've now built a real `inet filter` table whose `input` chain has `policy drop`, plus several named sets and maps. When you're done experimenting, tear the whole thing down in one transaction so you don't leave a drop-policy firewall (and stray sets/maps) loaded — exactly the "you forgot the other ruleset is running" trap the check question warns about:
+
+```bash
+# Removes all chains, rules, named sets, and maps in this table at once
+sudo nft delete table inet filter
+```
+
 ## How nft_do_chain works (briefly)
 
 `nft_do_chain` (`net/netfilter/nf_tables_core.c:250`) is the runtime entry. Pseudocode of its core loop:
@@ -170,24 +177,42 @@ sudo nft list ruleset
 # Build a small ruleset
 sudo nft add table inet test
 sudo nft 'add chain inet test myinput { type filter hook input priority 0 ; }'
-sudo nft add rule inet test myinput tcp dport 12345 drop counter
+# Enable tracing FIRST. 'drop' is a terminal verdict: once it fires, nft_do_chain
+# returns and any rule (or trailing expression) after it is never evaluated for
+# that packet. So nftrace must come before the drop rule, or the blocked packet
+# is never traced. For the same reason 'counter' must come before the verdict,
+# not after — newer nft versions even reject 'drop counter' at parse time
+# ("Statement after terminal statement has no effect").
 sudo nft add rule inet test myinput meta nftrace set 1
+sudo nft add rule inet test myinput tcp dport 12345 counter drop
 
 # In another terminal, monitor
 sudo nft monitor trace &
 
-# Test
-nc localhost 12345     # blocked
-nc localhost 22        # allowed (different port)
+# Test (connect-scan + 2s timeout so each command returns on its own — no Ctrl-C)
+nc -z -w2 localhost 12345 ; echo "exit=$?"   # blocked: hangs ~2s then times out, exit!=0
+nc -z -w2 localhost 22    ; echo "exit=$?"   # allowed: exit 0 if sshd is listening
 
-# See counters
+# See counters — the dport 12345 rule's counter should show at least one packet
+# per nc -z attempt (each SYN to the dropped port is counted before the verdict)
 sudo nft list table inet test
+#   ...
+#   chain myinput {
+#       type filter hook input priority filter; policy accept;
+#       meta nftrace set 1
+#       tcp dport 12345 counter packets 6 bytes 360 drop
+#   }
+# (packets/bytes scale with how many times you ran nc; 0 here would mean the
+#  counter was placed after the verdict and never evaluated — see the note above.)
 
-# Clean up
+# Clean up — kill the background monitor too, then drop the table
+sudo pkill -f 'nft monitor trace'
 sudo nft delete table inet test
 ```
 
-`nftrace` causes packets matching the rule to be logged via `nft monitor trace`. The output shows each rule that matched and the verdict.
+`nftrace` causes packets matching the rule to be logged via `nft monitor trace`. Because the nftrace rule runs *before* the terminal `drop`, the trace for `nc -z localhost 12345` shows the `tcp dport 12345` match followed by the `drop` verdict — the whole point of the experiment. (Had nftrace been added after the drop rule, the dropped packet would never reach it and only port-22 traffic would be traced.)
+
+Note that nftables `drop` sends no RST, so a blocked connection shows up as a ~2-second hang (the `nc -w2` timeout) and a non-zero exit, **not** an instant "connection refused". Port 22 only succeeds if `sshd` is actually listening; if it isn't, start it first or expect a fast "refused".
 
 ### See iptables-nft conversion
 
