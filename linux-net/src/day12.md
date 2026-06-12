@@ -94,19 +94,27 @@ Two namespaces, both with VTEPs talking through the host (init_net) acting as th
 sudo ip netns add A
 sudo ip netns add B
 
-# Underlay veth pairs
+# Underlay: bridge both host-side veths into one L2 segment (init_net is the underlay).
+# Without the bridge, vethA and vethB are two separate L2 segments and ARP for the
+# underlay peer never resolves — the tunnel can't carry a single packet.
 sudo ip link add vethA type veth peer name vethA_p
 sudo ip link add vethB type veth peer name vethB_p
 sudo ip link set vethA_p netns A
 sudo ip link set vethB_p netns B
-sudo ip addr add 192.168.99.10/24 dev vethA
-sudo ip addr add 192.168.99.20/24 dev vethB
+sudo ip link add br-underlay type bridge
+sudo ip link set vethA master br-underlay
+sudo ip link set vethB master br-underlay
 sudo ip link set vethA up
 sudo ip link set vethB up
+sudo ip link set br-underlay up
 sudo ip netns exec A ip addr add 192.168.99.1/24 dev vethA_p
 sudo ip netns exec B ip addr add 192.168.99.2/24 dev vethB_p
 sudo ip netns exec A ip link set vethA_p up
 sudo ip netns exec B ip link set vethB_p up
+
+# The VTEP underlay addresses live only on the namespace ends; the bridge needs no IP.
+# Confirm the underlay works *before* building the tunnel on top of it:
+sudo ip netns exec A ping -c1 192.168.99.2   # underlay must work first
 
 # VXLAN endpoints
 sudo ip netns exec A ip link add vxlan0 type vxlan \
@@ -123,12 +131,24 @@ sudo ip netns exec B ip link set vxlan0 up
 sudo ip netns exec A ping -c 2 10.100.0.2
 ```
 
-Then watch the encapsulated traffic:
+Then watch the encapsulated traffic. Start the capture *before* generating
+traffic — if you attach tcpdump after the pings have already exited you get an
+empty capture. Bound the capture with `timeout` so it doesn't run forever:
 ```bash
-sudo tcpdump -i vethA -nn 'udp port 4789'
+sudo timeout 8 tcpdump -i br-underlay -nn 'udp port 4789' &
+sleep 1
+sudo ip netns exec A ping -c 5 10.100.0.2
+wait
 ```
 
-You'll see UDP packets carrying the VXLAN-wrapped pings.
+Each ICMP echo/reply appears as a UDP datagram to port 4789 between the two
+underlay VTEPs (192.168.99.1 and 192.168.99.2) — the VXLAN-encapsulated ping.
+tcpdump decodes the encapsulation and the source UDP port is the inner-flow hash,
+so it varies:
+```
+IP 192.168.99.1.<hashed> > 192.168.99.2.4789: VXLAN, flags [I] (0x08), vni 100
+IP 192.168.99.2.<hashed> > 192.168.99.1.4789: VXLAN, flags [I] (0x08), vni 100
+```
 
 ## Today's experiment — break the MTU
 
@@ -139,13 +159,50 @@ sudo ip netns exec A ip link show vxlan0
 # Force inner side to send 1500-byte packets that won't fit:
 sudo ip netns exec A ip link set vxlan0 mtu 1500
 sudo ip netns exec A ping -M do -s 1472 -c 2 10.100.0.2   # don't fragment, 1500 total
-# Likely fails. Verify: tcpdump shows ICMP "frag needed" or just silent drop.
+# The first probe slips through; every later DF send is rejected locally — see below.
 
 # Restore
 sudo ip netns exec A ip link set vxlan0 mtu 1450
 ```
 
+What you actually see — and *why* it is not the on-wire ICMP you might expect:
+
+```
+PING 10.100.0.2 (10.100.0.2) 1472(1500) bytes of data.
+1480 bytes from 10.100.0.2: icmp_seq=1 ttl=64 time=... ms
+ping: sendmsg: Message too long
+
+--- 10.100.0.2 ping statistics ---
+2 packets transmitted, 1 received, +1 errors, 50% packet loss
+```
+
+With the default `df unset`, the outer IP header's Don't-Fragment bit is *clear*,
+so the underlay would happily IP-fragment the ~1550-byte outer packet (1500-byte
+inner + ~50B overhead) and the peer would reassemble it. But the kernel's tunnel
+PMTU check (`skb_tunnel_check_pmtu` in `vxlan_core.c`) lowers the *inner* route's
+PMTU to 1450 as soon as it sees an oversize frame. The very first DF probe is sent
+before that cached PMTU exists, so `icmp_seq=1` succeeds; every subsequent DF send
+hits the cached 1450 PMTU and is rejected *locally* with `EMSGSIZE` — `ping:
+sendmsg: Message too long`. It is **not** an on-wire ICMP "fragmentation needed"
+and **not** a silent drop. (Append `df set` to the `ip link add ... type vxlan`
+lines to make it deterministic: then *every* packet fails with `Message too long`,
+100% loss, because the outer header now refuses to fragment.)
+
 This is the classic VXLAN deployment failure. Production datacenters either use jumbo frames on the underlay (MTU 9000) or rigorously MSS-clamp TCP.
+
+## Cleanup
+
+Tear down everything the lab created. Deleting the two namespaces removes their
+veth ends and `vxlan0` automatically — a veth pair is deleted symmetrically, so
+the init_net peers `vethA`/`vethB` disappear with their in-namespace ends. The
+bridge lives in init_net and is *not* removed by deleting the namespaces, so
+delete it explicitly:
+
+```bash
+sudo ip netns del A
+sudo ip netns del B
+sudo ip link del br-underlay
+```
 
 ## What to read in the kernel
 
