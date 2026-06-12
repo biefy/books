@@ -1,54 +1,69 @@
-direction: right
+direction: down
 
 title: |md
   ## ECMP and multipath
 | {near: top-center; shape: text}
 
-setup: "Route contains several nexthops" {
+setup: "Route has several nexthops" {
   style.fill: "#dbeafe"
   s_body: |md
-    `ip route add default \\
-      nexthop via 192.168.1.1 weight 1 \\
-      nexthop via 192.168.2.1 weight 1`
+    ```
+    ip route add default \
+     nexthop via 192.168.1.1 weight 1 \
+     nexthop via 192.168.2.1 weight 1
+    ```
 
-    **Does:** one FIB result carries multiple
-    usable next-hop candidates.
+    **Does:** one FIB result  
+    carries multiple usable  
+    next-hop candidates.
   |
 }
 
 hash: "Compute multipath hash" {
   style.fill: "#fef3c7"
   h_body: |md
-    **Why:** pick one nexthop per flow so packets
-    do not reorder across paths.
+    **Why:** pick one nexthop  
+    per flow so packets do  
+    not reorder across paths.
 
-    Kernel default policy **0**:
+    Default policy **0**:  
     hash src IP + dst IP.
 
-    Optional policy **1**:
-    include L4 ports/proto for better spread
-    between the same endpoint pair.
+    Policy **1**: include L4  
+    ports/proto for better  
+    spread between the same  
+    endpoint pair.
   |
 }
 
 select: "Select nexthop" {
   style.fill: "#fef3c7"
   sel_body: |md
-    **Does:** maps hash into weighted nexthop set.
-    **Why next:** selected nexthop provides output
-    device, gateway, MTU, and neighbor lookup key.
-    **State:** skb/rtable has one chosen path.
+    **Does:** maps hash into  
+    weighted nexthop set.
+
+    **Why next:** selected  
+    nexthop provides output  
+    device, gateway, MTU,  
+    and neighbor lookup key.
+
+    **State:** skb/rtable  
+    has one chosen path.
   |
 }
 
 resilient: "Resilient hashing" {
   style.fill: "#dcfce7"
   rh_body: |md
-    **Problem:** plain modulo changes when a
-    nexthop is added/removed, so many flows move.
+    **Problem:** plain modulo  
+    changes when a nexthop is  
+    added/removed, so many  
+    flows move.
 
-    **Fix:** bucket table remembers assignments;
-    removing one nexthop only remaps its buckets.
+    **Fix:** bucket table  
+    remembers assignments;  
+    removing one nexthop only  
+    remaps its buckets.
   |
 }
 

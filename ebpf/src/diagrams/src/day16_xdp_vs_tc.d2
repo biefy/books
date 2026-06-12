@@ -7,41 +7,44 @@ title: |md
 xdp: "XDP" {
   style.fill: "#fef3c7"
   x_body: |md
-    Where: driver, before skb alloc
-    Speed: ~10 ns + your logic
-    Sees: raw frame bytes (data, data_end)
-    Direction: ingress only
-    Modify: yes (carefully — no skb metadata yet)
-    Helpers: bpf_redirect, bpf_xdp_adjust_head, ...
-
-    **Best for:** drop, forward, simple parsing
+    - Where: driver, before skb alloc  
+    - Speed: ~10 ns + your logic  
+    - Sees: raw frame bytes (data, data_end)  
+    - Direction: ingress only  
+    - Modify: yes (carefully — no skb  
+      metadata yet)  
+    - Helpers: bpf_redirect,  
+      bpf_xdp_adjust_head, ...  
+      
+    **Best for:** drop, forward, simple parsing  
   |
 }
 
 tc: "tc / tcx" {
   style.fill: "#dcfce7"
   t_body: |md
-    Where: after skb allocation (ingress)
-            or before driver xmit (egress)
-    Speed: ~50 ns + your logic
-    Sees: __sk_buff (full kernel metadata)
-    Direction: **ingress AND egress**
-    Modify: yes, with skb helpers
-    Helpers: bpf_skb_*, bpf_csum_diff, bpf_redirect_peer, ...
-
-    **Best for:** policy, mark, NAT, encap, egress
+    - Where: after skb alloc (ingress) or  
+      before driver xmit (egress)  
+    - Speed: ~50 ns + your logic  
+    - Sees: __sk_buff (full kernel metadata)  
+    - Direction: **ingress AND egress**  
+    - Modify: yes, with skb helpers  
+    - Helpers: bpf_skb_*, bpf_csum_diff,  
+      bpf_redirect_peer, ...  
+      
+    **Best for:** policy, mark, NAT, encap, egress  
   |
 }
 
 both: "Use both" {
   style.fill: "#dbeafe"
   b_body: |md
-    Cilium-style: XDP for fast-path drops/loadbalance,
-    tc for skb-aware filtering and egress shaping.
-    The two run in **different positions** — they
-    don't conflict; they compose.
+    Cilium-style: XDP for fast-path  
+    drops/loadbalance, tc for skb-aware  
+    filtering and egress shaping. The two  
+    run in **different positions** — they  
+    don't conflict; they compose.  
   |
 }
 
-xdp -> both
-tc -> both
+xdp -> tc -> both

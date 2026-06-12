@@ -1,4 +1,4 @@
-direction: right
+direction: down
 
 title: |md
   ## struct_ops: BPF replaces a kernel vtable
@@ -10,12 +10,13 @@ before: "Before struct_ops" {
     A subsystem has a vtable in C:
     ```c
     struct tcp_congestion_ops bbr = {
-        .name = "bbr",
-        .init = bbr_init,
-        .cong_avoid = bbr_main,
-        ...
+      .name = "bbr",
+      .init = bbr_init,
+      .cong_avoid = bbr_main,
+      ...
     };
-    tcp_register_congestion_control(&bbr);
+    tcp_register_
+      congestion_control(&bbr);
     ```
 
     To add a new CC algorithm:
@@ -31,19 +32,22 @@ after: "With struct_ops" {
   a_body: |md
     A BPF program defines the vtable:
     ```c
-    struct tcp_congestion_ops bbr_bpf = {
-        .name = "bbr_bpf",
-        .init = (void *)bbr_init_bpf,
-        .cong_avoid = (void *)bbr_main_bpf,
+    struct tcp_congestion_ops
+        bbr_bpf = {
+      .name = "bbr_bpf",
+      .init = (void *)bbr_init_bpf,
+      .cong_avoid =
+          (void *)bbr_main_bpf,
     };
-    SEC(".struct_ops") struct tcp_congestion_ops
+    SEC(".struct_ops")
+    struct tcp_congestion_ops
         bbr_bpf;
     ```
     Each function is a BPF program.
 
-    Loading registers it via
-    `tcp_register_congestion_control`.
-    Userspace selects with `setsockopt`.
+    Loading registers it via  
+    `tcp_register_congestion_control`.  
+    Userspace selects via `setsockopt`.
   |
 }
 
@@ -52,8 +56,8 @@ powers: |md
   - **TCP Congestion Control** in BPF
   - **sched_ext** — BPF schedulers (Day 25+)
 
-  Anywhere the kernel has a `struct ops`
-  with function pointers, struct_ops can
+  Anywhere the kernel has a `struct ops`  
+  with function pointers, struct_ops can  
   let BPF supply implementations.
 | {style.fill: "#fef3c7"}
 

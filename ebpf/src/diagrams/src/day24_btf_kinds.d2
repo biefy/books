@@ -7,40 +7,42 @@ title: |md
 basic: "Basic kinds" {
   style.fill: "#dbeafe"
   b_body: |md
-    BTF_KIND_INT       — int, char, long
-    BTF_KIND_PTR       — pointer to type
-    BTF_KIND_ARRAY     — fixed-size array
-    BTF_KIND_STRUCT    — struct with named fields
-    BTF_KIND_UNION     — union variant
-    BTF_KIND_ENUM      — enum with values
-    BTF_KIND_FWD       — forward decl
-    BTF_KIND_TYPEDEF   — typedef alias
-    BTF_KIND_VOLATILE/CONST/RESTRICT
+    - INT — int, char, long
+    - PTR — pointer to type
+    - ARRAY — fixed-size array
+    - STRUCT — named fields
+    - UNION — union variant
+    - ENUM — enum with values
+    - FWD — forward decl
+    - TYPEDEF — typedef alias
+    - VOLATILE / CONST / RESTRICT
   |
 }
 
-func: "Function and func decl kinds" {
+func: "Function & decl kinds" {
   style.fill: "#fef3c7"
   f_body: |md
-    BTF_KIND_FUNC_PROTO — function signature
-    BTF_KIND_FUNC       — actual function
-    BTF_KIND_VAR        — global variable
-    BTF_KIND_DATASEC    — data section
+    - FUNC_PROTO — function signature
+    - FUNC — actual function
+    - VAR — global variable
+    - DATASEC — data section
+    - DATASEC — data section
   |
 }
 
 new: "Newer additions" {
   style.fill: "#dcfce7"
   n_body: |md
-    BTF_KIND_FLOAT      — added 2021
-    BTF_KIND_DECL_TAG   — annotations
-    BTF_KIND_TYPE_TAG   — type-level tags
-    BTF_KIND_ENUM64     — 64-bit enums
+    - FLOAT — added 2021
+    - DECL_TAG — annotations
+    - TYPE_TAG — type-level tags
+    - ENUM64 — 64-bit enums
+    - ENUM64 — 64-bit enums
   |
 }
 
-count: "About 17 kinds total. Inspect via bpftool btf dump." {shape: text}
+count: "~17 kinds total. Inspect via: bpftool btf dump" {shape: text}
 
-basic -> count
-func -> count
+basic -> func
+func -> new
 new -> count

@@ -1,4 +1,4 @@
-direction: right
+direction: down
 
 title: |md
   ## Common qdiscs
@@ -8,8 +8,10 @@ pfifo: "pfifo_fast" {
   style.fill: "#fef3c7"
   p_body: |md
     Default in older kernels.
-    Three priority bands (interactive,
-    bulk, low).
+
+    Three priority bands
+    (interactive, bulk, low).
+
     Simple drop-tail FIFO per band.
   |
 }
@@ -19,11 +21,12 @@ fq_codel: "fq_codel" {
   f_body: |md
     Default since 4.12.
     Combines:
-    - Stochastic Fair Queueing (per-flow)
+    - Stochastic Fair Queueing
+      (per-flow)
     - CoDel (controlled delay) AQM
 
-    Solves bufferbloat well in most cases.
-    Source: net/sched/sch_fq_codel.c
+    Solves bufferbloat in most cases.
+    Source: sch_fq_codel.c
   |
 }
 
@@ -31,47 +34,56 @@ fq: "fq" {
   style.fill: "#dbeafe"
   fq_body: |md
     Fair Queueing with pacing.
-    Required for BBR (paces to estimated bw).
 
-    Source: net/sched/sch_fq.c
+    Required for BBR
+    (paces to estimated bw).
+
+    Source: sch_fq.c
   |
 }
 
 htb: "htb / hfsc / cake" {
   style.fill: "#fef3c7"
   h_body: |md
-    Hierarchical token bucket / fair-share.
-    Configurable rate limits per class.
+    Hierarchical token bucket /
+    fair-share.
 
-    cake: turnkey "good defaults" QoS.
+    Configurable rate limits
+    per class.
+
+    cake: turnkey "good
+    defaults" QoS.
   |
 }
 
 clsact: "clsact" {
   style.fill: "#dbeafe"
   c_body: |md
-    Hook-only qdisc; no queueing logic.
-    Provides ingress/egress slots for
-    tc-bpf / tcx attach.
+    Hook-only qdisc;
+    no queueing logic.
 
-    Source: net/sched/sch_ingress.c
+    Provides ingress/egress slots
+    for tc-bpf / tcx attach.
+
+    Source: sch_ingress.c
   |
 }
 
 ctrl: "Manage with: tc qdisc" {
   style.fill: "#fef3c7"
   ctrl_body: |md
+    ```
     tc qdisc show dev eth0
-    sudo tc qdisc replace dev eth0 root fq
-    sudo tc qdisc add dev eth0 ingress
+    tc qdisc replace \
+      dev eth0 root fq
+    tc qdisc add \
+      dev eth0 ingress
+    ```
+    (run as root / sudo)
 
-    Per-CPU qdiscs auto-created on multi-queue
-    NICs via 'mq' wrapper.
+    Per-CPU qdiscs auto-created
+    on multi-queue NICs ('mq').
   |
 }
 
-pfifo -> ctrl
-fq_codel -> ctrl
-fq -> ctrl
-htb -> ctrl
-clsact -> ctrl
+pfifo -> fq_codel -> fq -> htb -> clsact -> ctrl

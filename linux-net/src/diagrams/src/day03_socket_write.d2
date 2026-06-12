@@ -4,50 +4,20 @@ title: |md
   ## Socket write path: where the bytes go
 | {near: top-center; shape: text}
 
-write: "send() / write()" {
+write: "send() / write()\n\nUserspace places bytes in the syscall args.\nKernel does: sock_sendmsg → tcp_sendmsg" {
   style.fill: "#dbeafe"
-  w_body: |md
-    Userspace places bytes in the syscall args.
-    Kernel does:
-      sock_sendmsg → tcp_sendmsg
-  |
 }
 
-queue: "sk_write_queue (per socket)" {
+queue: "sk_write_queue (per socket)\n\ntcp_sendmsg copies bytes from user into\nkernel skbs, appended to sk->sk_write_queue.\n\nConstraints:\n- sk->sk_sndbuf limits queued bytes\n- Cgroup memory accounting\n- skbs may merge for efficiency" {
   style.fill: "#fef3c7"
-  q_body: |md
-    tcp_sendmsg copies bytes from user into kernel skbs.
-    skbs are appended to sk->sk_write_queue.
-
-    Constraints:
-    - sk->sk_sndbuf limits queued bytes
-    - Cgroup memory accounting
-    - skbs may merge for efficiency
-  |
 }
 
-cwnd: "tcp_write_xmit decides what to send NOW" {
+cwnd: "tcp_write_xmit decides what to send NOW\n\nWalks the queue, decides per-skb:\n- Is congestion window open? (tcp_cwnd_test)\n- Is send window open? (tcp_snd_wnd_test)\n- Is Nagle satisfied?\n- TSO segment size?\n\nSends what it can; leaves the rest for later\n(next ACK, RTO, app push, ...)" {
   style.fill: "#dcfce7"
-  c_body: |md
-    Walks the queue, decides per-skb:
-    - Is congestion window open?  (tcp_cwnd_test)
-    - Is send window open?         (tcp_snd_wnd_test)
-    - Is Nagle satisfied?
-    - TSO segment size?
-
-    Sends what it can; leaves the rest for later
-    (next ACK, RTO, app push, ...)
-  |
 }
 
-xmit: "tcp_transmit_skb → ip_queue_xmit → ..." {
+xmit: "tcp_transmit_skb → ip_queue_xmit → ...\n\nHeader build, IP output, neighbor resolve,\nqdisc enqueue, driver xmit.\n\nSee bottom of full TX flow." {
   style.fill: "#fee2e2"
-  x_body: |md
-    Header build, IP output, neighbor resolve,
-    qdisc enqueue, driver xmit.
-
-    See bottom of full TX flow.
-  |
 }
 
 write -> queue -> cwnd -> xmit

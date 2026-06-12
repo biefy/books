@@ -1,4 +1,10 @@
-direction: right
+vars: {
+  d2-config: {
+    layout-engine: elk
+  }
+}
+
+direction: down
 
 title: |md
   ## BPF_MAP_TYPE_HASH internals
@@ -6,13 +12,14 @@ title: |md
 
 key: "key (PID = 13421)" {shape: parallelogram; style.fill: "#dbeafe"}
 hash: "jhash(key)" {shape: hexagon; style.fill: "#fef3c7"}
-buckets: "buckets[]\n(power-of-2 sized,\nrounded up from max_entries)" {
+buckets: "buckets[]\n(power-of-2 sized,\nrounded up\nfrom max_entries)" {
   shape: rectangle
   style.fill: "#f9fafb"
   b0: "bucket[0]" {shape: rectangle}
   b1: "bucket[1]" {shape: rectangle}
   bN: "bucket[N]\n(hash mod size)" {shape: rectangle; style.fill: "#fef3c7"}
   bM: "bucket[M]" {shape: rectangle}
+  b0 -> b1 -> bN -> bM
 }
 
 bucket_chain: "hlist (linked list)\nfor that bucket" {
@@ -31,8 +38,12 @@ buckets.bN -> bucket_chain: "walk chain,\ncompare keys"
 bucket_chain.e1 -> found: "match"
 
 note: |md
-  - **Key + value** are *copies* in the map; lookup returns a pointer into map memory.
-  - **Atomicity**: `__sync_fetch_and_add` on the value pointer = atomic update. No lock, no race.
-  - **`max_entries`** caps element count; once full, `bpf_map_update_elem` returns `-E2BIG`.
-  - **`BPF_MAP_TYPE_PERCPU_HASH`** is the same shape but per-CPU values — no atomics needed.
+  - **Key + value** are *copies* in the map;\
+    lookup returns a pointer into map memory.
+  - **Atomicity**: `__sync_fetch_and_add` on the\
+    value pointer = atomic update. No lock, no race.
+  - **`max_entries`** caps element count; once full,\
+    `bpf_map_update_elem` returns `-E2BIG`.
+  - **`BPF_MAP_TYPE_PERCPU_HASH`** is the same shape\
+    but per-CPU values — no atomics needed.
 | {near: bottom-center; shape: text}

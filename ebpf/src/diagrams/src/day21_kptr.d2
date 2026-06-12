@@ -1,55 +1,95 @@
-direction: right
+direction: down
 
 title: |md
-  ## Storing a kernel pointer across program invocations: kptr
+  ## kptr: storing a kernel pointer across runs
 | {near: top-center; shape: text}
 
-problem: "Problem: tp_btf hands you a *task_struct" {
+problem: "Problem: tp_btf gives a *task_struct" {
   style.fill: "#fee2e2"
   p_body: |md
-    The pointer is **trusted only for the
-    duration of this BPF program execution.**
-    After the program returns, the task
-    might be freed.
+    Pointer is
+    **trusted** only
+    for this run.
 
-    Saving the pointer in a map directly
-    is rejected by the verifier:
-    'cannot reference object of type X
-     in this map'.
+    After return,
+    task may be
+    freed.
+
+    Saving it in a
+    map is rejected
+    by the verifier:
+
+    "cannot reference
+    object of type X
+    in this map".
   |
 }
 
-solution: "Solution: refcounted kptr in a map" {
+solution: "Solution: refcounted kptr in map" {
   style.fill: "#dcfce7"
-  s_body: |md
+  s_code: |md
     ```c
-    struct val { struct task_struct __kptr *t; };
-
+    struct val {
+      struct task_struct
+        __kptr *t;
+    };
     struct {
-      __uint(type, BPF_MAP_TYPE_HASH);
-      __type(value, struct val);
+      __uint(type,
+        BPF_MAP_TYPE_HASH);
+      __type(value,
+        struct val);
     } m SEC(".maps");
     ```
-
-    - `__kptr` annotation tells verifier
-      this slot holds a refcounted pointer
-    - Use `bpf_kptr_xchg(slot, new)` to
-      atomically swap; old must be released
   |
+  s_notes: |md
+    `__kptr`
+    marks the slot
+
+    as a
+    refcounted
+    pointer.
+
+    `bpf_kptr_xchg`
+    (slot, new)
+
+    swaps it
+    atomically;
+    old must be
+    released.
+  |
+  s_code -> s_notes: { style.opacity: 0 }
 }
 
 flow: "Lifecycle" {
   style.fill: "#fef3c7"
   f_body: |md
-    1. acquire kfunc returns refcount=1, ref id N
-    2. xchg into map: ref id N closed,
-       map slot now owns the refcount
-    3. lookup later: kptr_xchg(slot, NULL)
-       returns the kptr; ref id M opens
-    4. release with bpf_task_release: ref id M closed
+    1. acquire kfunc:
 
-    All transitions verifier-checked.
-    No leaks, no UAFs.
+    refcount=1,
+    ref id N
+
+    2. xchg into map:
+
+    ref id N closed,
+    slot owns refcount
+
+    3. lookup:
+
+    kptr_xchg(slot,
+    NULL) returns
+    kptr, ref id M
+    opens
+
+    4. release:
+
+    bpf_task_release,
+    ref id M closed
+
+    All transitions
+    verifier-checked.
+
+    No leaks,
+    no UAFs.
   |
 }
 

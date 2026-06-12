@@ -1,4 +1,4 @@
-direction: right
+direction: down
 
 title: |md
   ## io_uring socket ops
@@ -7,39 +7,47 @@ title: |md
 basic: "Basic ops" {
   style.fill: "#dbeafe"
   b_body: |md
-    Submit Queue Entry (SQE) → kernel
-    Completion Queue Entry (CQE) → userspace
+    SQE (Submit Q Entry) → kernel  
+    CQE (Completion Q Entry) → user
 
-    - IORING_OP_RECV / SEND
-    - IORING_OP_RECVMSG / SENDMSG
-    - IORING_OP_ACCEPT
-    - IORING_OP_CONNECT
-    - IORING_OP_CLOSE
+    IORING_OP_ ops:
+    - RECV / SEND
+    - RECVMSG / SENDMSG
+    - ACCEPT
+    - CONNECT
+    - CLOSE
   |
 }
 
 advanced: "Modern features" {
   style.fill: "#dcfce7"
   a_body: |md
-    - IORING_OP_RECVMSG_MULTISHOT (5.18+)
-      one submission, many completions
-    - IORING_OP_SEND_ZC / SENDMSG_ZC (6.0+)
-      zero-copy send
-    - Provided buffers (5.19+)
-      kernel picks buffer at recv time
-    - Registered buffers (5.0+)
-      pre-pinned for zero-copy
+    RECVMSG_MULTISHOT (5.18+)  
+    one submit, many CQEs
+
+    SEND_ZC / SENDMSG_ZC (6.0+)  
+    zero-copy (ZC) send
+
+    Provided buffers (5.19+)  
+    kernel picks buf at recv
+
+    Registered buffers (5.0+)  
+    pre-pinned, zero-copy
   |
 }
 
 vs: "vs epoll" {
   style.fill: "#fef3c7"
   v_body: |md
-    epoll: 'tell me when ready, I'll syscall'
-    io_uring: 'do this for me, tell me when done'
+    epoll: 'tell me when ready,  
+    I'll syscall'
 
-    io_uring batches better; lower syscall rate
-    at high QPS. epoll simpler.
+    io_uring: 'do this for me,  
+    tell me when done'
+
+    io_uring batches better;  
+    lower syscall rate at  
+    high QPS. epoll simpler.
   |
 }
 

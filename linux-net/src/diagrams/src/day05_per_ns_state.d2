@@ -1,4 +1,4 @@
-direction: right
+direction: down
 
 title: |md
   ## Per-netns subsystem state
@@ -13,14 +13,14 @@ routing: "Per-ns routing" {
     - net->ipv6.fib6_main_tbl
 
     `ip route` only shows the
-    current namespace's table.
+    current ns's table.
   |
 }
 
 netfilter: "Per-ns netfilter" {
   style.fill: "#fef3c7"
   nf_body: |md
-    nf_hooks registered per-ns:
+    nf_hooks per-ns:
     - net->nf.hooks_ipv4[]
     - net->nf.hooks_ipv6[]
     - net->nf.hooks_bridge[]
@@ -61,10 +61,8 @@ sysctl: "Per-ns sysctls" {
     - ip_forward
     - conntrack_max
 
-    Some are global only (e.g., kernel.*).
+    Some are global only (e.g. kernel.*).
   |
 }
 
-routing -> sysctl
-netfilter -> sysctl
-socks -> sysctl
+routing -> netfilter -> socks -> sysctl

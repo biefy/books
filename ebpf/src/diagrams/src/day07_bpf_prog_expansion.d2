@@ -1,4 +1,4 @@
-direction: right
+direction: down
 
 title: |md
   ## How BPF_PROG unpacks trampoline arguments
@@ -10,11 +10,11 @@ src: "Source code you write" {
     ```c
     SEC("fexit/vfs_read")
     int BPF_PROG(on_exit,
-                 struct file *f,
-                 char *buf,
-                 size_t count,
-                 loff_t *pos,
-                 ssize_t ret)
+        struct file *f,
+        char *buf,
+        size_t count,
+        loff_t *pos,
+        ssize_t ret)
     {
         /* use args + ret directly */
     }
@@ -25,12 +25,14 @@ src: "Source code you write" {
 ctx: "Trampoline ctx array" {
   style.fill: "#fef3c7"
   body: |md
-    **Does:** stores each original function
-    argument in a `u64` slot.
+    **Does:**
+    - stores each original function
+    - argument in a `u64` slot.
 
-    **Why next:** the BPF program ABI is
-    `int (*)(u64 *ctx)`, but learners want
-    typed C parameters.
+    **Why next:**
+    - the BPF program ABI is
+    - `int (*)(u64 *ctx)`, but learners
+    - want typed C parameters.
 
     ```
     ctx[0] = struct file *
@@ -45,12 +47,14 @@ ctx: "Trampoline ctx array" {
 expanded: "Generated wrapper" {
   style.fill: "#dcfce7"
   body: |md
-    **Does:** `BPF_PROG` creates an outer
-    ctx-taking function and an inner typed
-    function.
+    **Does:**
+    - `BPF_PROG` creates an outer
+    - ctx-taking function and an inner
+    - typed function.
 
-    **State change:** positional slots become
-    verifier-visible typed arguments.
+    **State change:**
+    - positional slots become
+    - verifier-visible typed arguments.
 
     ```c
     return ____on_exit(ctx,

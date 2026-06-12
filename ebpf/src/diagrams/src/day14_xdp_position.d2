@@ -7,11 +7,16 @@ title: |md
 driver: "NIC driver RX path" {
   style.fill: "#dbeafe"
   d_body: |md
-    1. Hardware DMAs packet to RX ring
-    2. NAPI poll wakes driver
-    3. Driver receives raw frame
-    4. **XDP runs here** (before skb alloc!)
-    5. Decision: PASS / DROP / TX / REDIRECT
+    1. HW DMAs packet
+       to RX ring
+    2. NAPI poll wakes
+       driver
+    3. Driver gets
+       raw frame
+    4. **XDP runs here**
+       (before skb alloc!)
+    5. Decision: PASS / DROP
+       / TX / REDIRECT
   |
 }
 
@@ -22,7 +27,7 @@ xdp_layer: "XDP program (BPF)" {
     Returns: action constant
 
     Cost: ~50 ns + your logic
-    Throughput: 10-100 Mpps per core
+    Throughput: 10-100 Mpps/core
   |
 }
 
@@ -32,7 +37,8 @@ stack: "Linux network stack" {
   style.fill: "#dcfce7"
   s_body: |md
     - tc ingress (next BPF hook)
-    - netfilter (iptables/nftables)
+    - netfilter
+      (iptables/nftables)
     - IP routing
     - Socket lookup
     - Application
@@ -45,6 +51,10 @@ xdp_layer -> driver: "DROP, TX, REDIRECT" {style.stroke-dash: 4}
 skb_alloc -> stack
 
 note: |md
-  **Why XDP is fast:** runs before skb allocation, before any kernel net stack work.
-  Just a function call from the driver with a pointer to the packet.
+  **Why XDP is fast:**
+
+  - runs before skb allocation
+  - before any kernel net stack work
+  - just a function call from the
+    driver with a packet pointer
 | {near: bottom-center; shape: text}

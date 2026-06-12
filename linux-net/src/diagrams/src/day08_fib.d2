@@ -1,36 +1,43 @@
 direction: down
 
 title: |md
-  ## FIB: the Forwarding Information Base
+  ### FIB: Forwarding
+  ### Information Base
 | {near: top-center; shape: text}
 
 flow: "Lookup input: flowi4" {
   style.fill: "#dbeafe"
   f_body: |md
-    struct flowi4 holds the lookup key:
+    flowi4 lookup key:
+
     - daddr (dest IP)
     - saddr (src IP, may be 0)
     - tos / DSCP
-    - oif (output interface, may be 0)
-    - iif (input interface, may be 0)
+    - oif (out iface, may be 0)
+    - iif (in iface, may be 0)
     - flowi4_mark (skb mark)
 
-    The lookup happens against a fib_table.
+    Lookup runs against a fib_table.
   |
 }
 
 trie: "fib_trie: LC-trie data structure" {
   style.fill: "#fef3c7"
   t_body: |md
-    Linux uses LC-trie (level-compressed trie)
-    for the routing table.
+    LC-trie (level-compressed
+    trie) for the routing table.
 
-    - Path-compressed: skip levels with single child
-    - Branch factor adapts to data density
-    - Lookup: O(W) where W = key bits (32 for IPv4)
-    - In practice: 5-15 memory accesses per lookup
+    - Path-compressed: skip
+    - &nbsp;&nbsp;single-child levels
+    - Branch factor adapts
+    - &nbsp;&nbsp;to data density
+    - Lookup O(W), W = key
+    - &nbsp;&nbsp;bits (32 for IPv4)
+    - ~5-15 memory accesses
+    - &nbsp;&nbsp;per lookup
 
-    See net/ipv4/fib_trie.c — search fib_table_lookup
+    See net/ipv4/fib_trie.c
+    (fib_table_lookup)
   |
 }
 
@@ -38,15 +45,20 @@ result: "Result: struct fib_result" {
   style.fill: "#dcfce7"
   r_body: |md
     Lookup returns:
-    - prefixlen of the matching route
-    - nhc (next hop, struct fib_nh_common)
-    - type (UNICAST, LOCAL, BROADCAST, MULTICAST)
+
+    - prefixlen of the match
+    - nhc: next hop
+    - &nbsp;&nbsp;(fib_nh_common)
+    - type: UNICAST, LOCAL,
+    - &nbsp;&nbsp;BROADCAST, MULTICAST
     - tclassid
     - table id
 
-    Higher-level wrappers (ip_route_input,
-    ip_route_output_flow) take this and construct
-    a struct dst_entry / rtable for the skb.
+    Wrappers build a
+    dst_entry / rtable:
+
+    - ip_route_input
+    - ip_route_output_flow
   |
 }
 

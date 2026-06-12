@@ -7,50 +7,43 @@ title: |md
 tso: "TSO — TCP Segmentation Offload" {
   style.fill: "#fef3c7"
   tso_body: |md
-    Where: NIC hardware (or driver software).
+    **Where:** NIC hardware (or driver software).
 
-    Stack hands one large skb (up to 64 KB)
-    to the driver. NIC chops into MSS-sized
-    TCP segments, replicates the IP/TCP
-    header per segment, computes checksums.
-
-    ✅ Massive CPU savings on TX
-    ❌ NIC must support it (NETIF_F_TSO)
+    - Stack hands one large skb (up to 64 KB) to driver.
+    - NIC chops into MSS-sized TCP segments.
+    - Replicates the IP/TCP header per segment.
+    - Computes checksums.
+    - ✅ Massive CPU savings on TX
+    - ❌ NIC must support it (NETIF_F_TSO)
   |
 }
 
 gso: "GSO — Generic Segmentation Offload" {
   style.fill: "#dcfce7"
   gso_body: |md
-    Where: software, late in the TX path.
+    **Where:** software, late in the TX path.
 
-    If NIC doesn't do TSO, kernel does the
-    chopping itself just before xmit. So the
-    stack still runs TX once per superpacket;
-    only the final segmentation is per-segment.
-
-    ✅ Works on any NIC
-    ✅ Same CPU win as TSO for the stack
-    ❌ Software cost for the segmentation step
-
-    See net/core/gso.c (added 2024).
+    - If NIC doesn't do TSO, kernel chops just before xmit.
+    - Stack still runs TX once per superpacket.
+    - Only the final segmentation is per-segment.
+    - ✅ Works on any NIC
+    - ✅ Same CPU win as TSO for the stack
+    - ❌ Software cost for the segmentation step
+    - See net/core/gso.c (added 2024).
   |
 }
 
 gro: "GRO — Generic Receive Offload" {
   style.fill: "#dbeafe"
   gro_body: |md
-    Where: software in NAPI poll, before stack.
+    **Where:** software in NAPI poll, before stack.
 
-    Coalesces consecutive same-flow segments
-    into one large skb (up to ~64 KB) so the
-    stack sees one packet instead of N.
-
-    ✅ Massive CPU savings on RX
-    ❌ Adds latency (waits for more in burst)
-    ❌ Sometimes interferes with timing
-
-    See net/core/gro.c.
+    - Coalesces same-flow segments into one skb (~64 KB).
+    - Stack sees one packet, not N.
+    - ✅ Massive CPU savings on RX
+    - ❌ Adds latency (waits for burst)
+    - ❌ Sometimes interferes with timing
+    - See net/core/gro.c.
   |
 }
 
@@ -58,6 +51,6 @@ ctrl: "Control:\nethtool -K eth0 tso on / off\nethtool -K eth0 gso on / off\neth
   style.fill: "#fef3c7"
 }
 
-tso -> ctrl
-gso -> ctrl
+tso -> gso
+gso -> gro
 gro -> ctrl

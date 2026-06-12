@@ -4,56 +4,61 @@ title: |md
   ## struct net — one per netns
 | {near: top-center; shape: text}
 
-netns: "struct net (include/net/net_namespace.h:62)" {
+netns: "struct net (net_namespace.h:62)" {
   style.fill: "#dbeafe"
   n_body: |md
-    Each network namespace is one of these.
-    Holds **everything** that's per-namespace:
+    One per network namespace.
+    Holds **everything** per-ns:
 
-    - dev_base_head      — list of net_devices
-    - rtnl               — netlink socket for this ns
-    - ipv4.fib_main      — IPv4 routing table
-    - ipv4.tcp_death_row — TCP timewait state
+    - dev_base_head — net_devices
+    - rtnl — netlink socket
+    - ipv4.fib_main — routes
+    - ipv4.tcp_death_row — timewait
     - ipv4.fib_notifier_ops
     - ipv6.fib6_main_tbl
-    - nft_state          — nftables rules
-    - ct.count, ct.htable — conntrack
-    - sysctls            — per-ns sysctl table
-    - proc_net           — /proc/net for this ns
-    - ns                 — common nsfs handle
+    - nft_state — nftables rules
+    - ct.count, ct.htable
+    - sysctls — per-ns table
+    - proc_net — /proc/net
+    - ns — nsfs handle
   |
 }
 
 usage: "Per-call dispatch" {
   style.fill: "#fef3c7"
   u_body: |md
-    Most net functions take `struct net *net` first.
+    Funcs take `struct net *net`
+    first. Examples:
 
-    Examples:
-    - ip_rcv() does `dev_net(dev)` to get the dev's ns.
-    - fib_lookup(net, &fl, &res) — different
-      result per ns even with same flow.
-    - nf_hook(NFPROTO, hook, net, ...) — chains
-      registered per-ns.
+    - ip_rcv() calls dev_net(dev)
+      for the dev's ns.
+    - fib_lookup(net, &fl, &res)
+      — per-ns result.
+    - nf_hook(proto, hook, net)
+      — chains per-ns.
 
-    Net is a first-class parameter, not a global.
+    Net is a parameter, not a
+    global.
   |
 }
 
 shared: "What's NOT per-ns" {
   style.fill: "#fee2e2"
   s_body: |md
-    - Hardware (NICs themselves)
-    - Slab caches (skbuff_head_cache shared)
+    - Hardware (the NICs)
+    - Slab caches
+      (skbuff_head_cache)
     - Route cache slabs
-    - Most BPF maps (unless explicitly per-ns)
+    - Most BPF maps
+      (unless per-ns)
     - kernel timers
     - process scheduler
 
-    A NIC starts in init_net; can be moved to
-    another ns with `ip link set <if> netns <ns>`.
+    A NIC starts in init_net;
+    move it with:
+    ip link set IF netns NS
   |
 }
 
 netns -> usage
-netns -> shared
+usage -> shared

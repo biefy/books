@@ -1,14 +1,18 @@
 direction: down
 
 title: |md
-  ## IPv6 extension headers (chain after ipv6hdr)
+  ### IPv6 extension headers
+  (chain after ipv6hdr)
 | {near: top-center; shape: text}
 
 ipv6: "IPv6 base header" {
   style.fill: "#dbeafe"
   i_body: |md
     nexthdr field tells what's next:
-    - 6 = TCP  17 = UDP  58 = ICMPv6
+
+    - 6 = TCP
+    - 17 = UDP
+    - 58 = ICMPv6
     - 0 = HOP-BY-HOP options
     - 43 = Routing header (SR, RPL)
     - 44 = Fragment header
@@ -18,28 +22,38 @@ ipv6: "IPv6 base header" {
   |
 }
 
-chain: "Each ext hdr also has nexthdr" {
+chain: "Each ext hdr has its own nexthdr" {
   style.fill: "#fef3c7"
   c_body: |md
-    Headers chain:
-    [ipv6 nh=43] -> [routing nh=60] -> [destopt nh=6] -> [TCP]
+    Headers chain (each -> nexthdr):
 
-    Walk via ipv6_skip_exthdr() in
-    net/ipv6/exthdrs.c.
+    [ipv6 nh=43] ->
+    [routing nh=60] ->
+    [destopt nh=6] ->
+    [TCP]
 
-    Each hop walks one extension.
-    Some are end-host only (HOPOPT processed everywhere).
+    - Walk via `ipv6_skip_exthdr()`
+    - in `net/ipv6/exthdrs.c`
+    - Each hop walks one extension
+    - Some are end-host only
+    - (HOPOPT processed everywhere)
   |
 }
 
 risks: "Why this matters" {
   style.fill: "#fee2e2"
   r_body: |md
-    - Length-prefixed parsers — bug fertile (Day's homework)
-    - SRv6 in particular grew the kernel many CVEs
-      (recent fix: ipv6 rpl srh OOB write, kernel 7.0)
-    - Each extension can grow the headroom — the
-      stack must reserve mac_len for re-pushed headers
+    - Length-prefixed parsers
+    - are bug fertile
+    - (Day's homework)
+    - SRv6 grew the kernel
+    - many CVEs (recent fix:
+    - ipv6 rpl srh OOB write,
+    - kernel 7.0)
+    - Each extension can grow
+    - the headroom — the stack
+    - must reserve mac_len for
+    - re-pushed headers
   |
 }
 

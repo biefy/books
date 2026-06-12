@@ -1,4 +1,4 @@
-direction: right
+direction: down
 
 title: |md
   ## nftables vs iptables
@@ -7,30 +7,32 @@ title: |md
 ipt: "iptables / x_tables" {
   style.fill: "#fee2e2"
   i_body: |md
-    **Does:** walks fixed-shape rule entries
-    in chain order.
-
-    **Why next rule:** current rule did not
-    produce a terminal verdict.
-
-    **State model:** protocol-specific tables
-    (`iptables`, `ip6tables`, `arptables`, `ebtables`)
-    plus match/target modules.
+    - **Does:** walks fixed-shape
+    - rule entries in chain order.
+    - **Why next rule:** current
+    - rule gave no terminal verdict.
+    - **State model:** per-protocol
+    - tables (`iptables`,
+    - `ip6tables`, `arptables`,
+    - `ebtables`) plus match/
+    - target modules.
   |
 }
 
 nft: "nftables / nf_tables" {
   style.fill: "#dcfce7"
   n_body: |md
-    **Does:** evaluates a sequence of expressions
-    in `nft_do_chain()`.
-
-    **Why faster for large policies:** sets/maps
-    replace long linear chains for membership and
-    key-to-verdict decisions.
-
-    **State model:** one syntax across inet, ip,
-    ip6, arp, bridge, and netdev families.
+    - **Does:** evaluates a
+    - sequence of expressions
+    - in `nft_do_chain()`.
+    - **Why faster for large**
+    - **policies:** sets/maps
+    - replace long linear chains
+    - for membership and
+    - key-to-verdict decisions.
+    - **State model:** one syntax
+    - across inet, ip, ip6, arp,
+    - bridge, and netdev families.
   |
 }
 
@@ -38,15 +40,17 @@ cmd: "Same policy, different execution" {
   style.fill: "#fef3c7"
   c_body: |md
     iptables:
-      `-p tcp --dport 22 -j ACCEPT`
+    `-p tcp --dport 22 -j ACCEPT`
 
     nftables:
-      `tcp dport 22 accept`
+    `tcp dport 22 accept`
 
-    **Both:** return a Netfilter verdict at the
-    same hook; don't mix engines casually.
+    - **Both:** return a Netfilter
+    - verdict at the same hook;
+    - don't mix engines casually.
   |
 }
 
+ipt -> nft: {style.opacity: 0}
 ipt -> cmd: "linear entry matched"
 nft -> cmd: "expression verdict reached"
