@@ -4,10 +4,14 @@ title: |md
   ## ringbuf: many writers, one reader, no locks
 | {near: top-center; shape: text}
 
-cpu0: "CPU 0\nBPF prog instance" {shape: rectangle; style.fill: "#dbeafe"}
-cpu1: "CPU 1\nBPF prog instance" {shape: rectangle; style.fill: "#dbeafe"}
-cpu2: "CPU 2\nBPF prog instance" {shape: rectangle; style.fill: "#dbeafe"}
-cpu3: "CPU 3\nBPF prog instance" {shape: rectangle; style.fill: "#dbeafe"}
+producers: "BPF prog instances (per-CPU)" {
+  grid-columns: 2
+  style.fill: "#dbeafe"
+  cpu0: "CPU 0"
+  cpu1: "CPU 1"
+  cpu2: "CPU 2"
+  cpu3: "CPU 3"
+}
 
 ring: "ringbuf shared memory (256 KiB)" {
   shape: rectangle
@@ -20,19 +24,9 @@ ring: "ringbuf shared memory (256 KiB)" {
   rec0 -- rec1 -- rec2 -- rec3 -- free
 }
 
-cpu0 -> ring.rec0: "reserve+submit\n(atomic cmpxchg\non producer pos)"
-cpu1 -> ring.rec1
-cpu2 -> ring.rec2
-cpu3 -> ring.rec3
+producers -> ring: "reserve+submit\n(atomic cmpxchg\non producer pos)"
 
 reader: "Userspace consumer\n(epoll on ring fd)" {shape: rectangle; style.fill: "#dcfce7"}
-ring.rec0 -> reader: "ring_buffer__poll()"
-ring.rec1 -> reader
-ring.rec2 -> reader
-ring.rec3 -> reader
+ring -> reader: "ring_buffer__poll()"
 
-note: |md
-  - **Producer**: `bpf_ringbuf_reserve()` advances producer pos with cmpxchg
-  - **Consumer**: reads in producer order, regardless of submit order
-  - **Per-record header**: holds size + busy bit (lets submit/discard race-free)
-| {near: bottom-center; shape: text}
+note: "Producer: bpf_ringbuf_reserve()\nadvances producer pos with cmpxchg\n\nConsumer: reads in producer order,\nregardless of submit order\n\nPer-record header: holds size + busy bit\n(lets submit/discard race-free)" {near: bottom-center; shape: text}

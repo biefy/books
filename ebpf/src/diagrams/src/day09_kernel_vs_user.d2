@@ -1,58 +1,30 @@
-direction: right
+direction: down
 
-title: |md
-  ## Kernel stack vs user stack walking
-| {near: top-center; shape: text}
+title: "Kernel stack vs user stack walking" {shape: text; style.font-size: 28; near: top-center}
 
 kstack: "Kernel stack\n`bpf_get_stackid(ctx, m, 0)`" {
   style.fill: "#dbeafe"
-  ks_what: |md
-    Walks kernel ip frames using:
-    - **ORC unwinder** (default on x86_64 since 4.14)
-    - or frame pointers (`CONFIG_FRAME_POINTER`)
-
-    ✅ Always available in kernel context
-    ✅ Symbolized via /proc/kallsyms
-    ✅ Cheap (~1µs)
-
-    Frame format: array of kernel virtual addresses
-  |
+  ks_what: "Walks kernel ip frames using:\n- ORC unwinder (default on x86_64 since 4.14)\n- or frame pointers (CONFIG_FRAME_POINTER)\n\n✅ Always available in kernel context\n✅ Symbolized via /proc/kallsyms\n✅ Cheap (~1µs)\n\nFrame format: array of kernel virtual addresses" {
+    style.fill: "#eff6ff"
+  }
 }
 
-ustack: "User stack\n`bpf_get_stackid(ctx, m, BPF_F_USER_STACK)`" {
+ustack: "User stack\n`bpf_get_stackid(`\n`  ctx, m, BPF_F_USER_STACK)`" {
   style.fill: "#fef3c7"
-  us_what: |md
-    Walks **userspace** stack of current task:
-    - Requires `CONFIG_FRAME_POINTER` in user binary,
-      OR DWARF unwind info (slower, kernel can't use)
-
-    ⚠️ Userspace stacks often lack frame pointers
-        (gcc -fomit-frame-pointer is default on amd64)
-    ⚠️ JIT'd languages (JS, Java) need extra symbol info
-
-    ✅ Symbolize via /proc/PID/maps + ELF symbols
-    ✅ Reveals "which function in your app called read()"
-
-    Frame format: array of user virtual addresses
-  |
+  us_what: "Walks userspace stack of current task:\n- Requires CONFIG_FRAME_POINTER in\n  user binary, OR DWARF unwind info\n  (slower, kernel can't use)\n\n⚠️ Userspace stacks often lack\n    frame pointers (gcc -fomit-\n    frame-pointer default on amd64)\n⚠️ JIT'd languages (JS, Java)\n    need extra symbol info\n\n✅ Symbolize via /proc/PID/maps\n    + ELF symbols\n✅ Reveals \"which function in your\n    app called read()\"\n\nFrame format: array of\nuser virtual addresses" {
+    style.fill: "#fffbeb"
+  }
 }
 
 both: "Both at once\n`bpf_get_stack(ctx, buf, sz, 0)`\n+ `bpf_get_stack(ctx, buf, sz, USER)`" {
   style.fill: "#dcfce7"
-  both_what: |md
-    Use **two separate calls** to capture
-    a **mixed** kernel+user stack
-    (kernel frames stack on top of the
-    syscall entry, user frames below).
-
-    Combine in userspace before symbolizing.
-  |
+  both_what: "Use two separate calls to capture a mixed\nkernel+user stack (kernel frames stack on top\nof the syscall entry, user frames below).\n\nCombine in userspace before symbolizing." {
+    style.fill: "#f0fdf4"
+  }
 }
 
 flag: "Flags:\n- 0 (kernel)\n- BPF_F_USER_STACK\n- BPF_F_FAST_STACK_CMP\n- BPF_F_REUSE_STACKID" {
   style.fill: "#f3f4f6"
 }
 
-kstack -> flag {style.stroke-dash: 4}
-ustack -> flag {style.stroke-dash: 4}
-both -> flag {style.stroke-dash: 4}
+kstack -> ustack -> both -> flag {style.stroke-dash: 4}

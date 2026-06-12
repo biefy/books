@@ -1,22 +1,23 @@
+%%{init: {"sequence": {"useMaxWidth": false, "actorMargin": 20, "noteMargin": 8}}}%%
 sequenceDiagram
-    participant US as Userspace loader
-    participant LIB as libbpf skeleton
-    participant BPF as BPF verifier/maps
+    participant US as Userspace<br/>loader
+    participant LIB as libbpf<br/>skeleton
+    participant BPF as BPF<br/>verifier/maps
     participant LNK as bpf_link<br/>(.struct_ops.link)
-    participant TCP as TCP CC subsystem
-    participant SK as Application socket
+    participant TCP as TCP CC<br/>subsystem
+    participant SK as Application<br/>socket
 
-    US->>LIB: open .bpf.o with callbacks + vtable
-    LIB->>BPF: BPF_PROG_LOAD each struct_ops callback
-    Note over BPF: signatures checked against kernel BTF vtable
-    LIB->>BPF: create/update struct_ops map
-    Note over BPF: map stores callback pointers
-    LIB->>LNK: attach struct_ops link
-    LNK->>TCP: register tcp_congestion_ops name
-    Note over TCP: algorithm appears in available_congestion_control
-    SK->>TCP: setsockopt(TCP_CONGESTION, name)
-    TCP->>BPF: invoke selected callbacks on TCP events
-    Note over BPF: BPF code is now part of the CC algorithm
+    US->>LIB: open .bpf.o with<br/>callbacks + vtable
+    LIB->>BPF: BPF_PROG_LOAD each<br/>struct_ops callback
+    Note over BPF: signatures checked<br/>against kernel BTF vtable
+    LIB->>BPF: create/update<br/>struct_ops map
+    Note over BPF: map stores<br/>callback pointers
+    LIB->>LNK: attach<br/>struct_ops link
+    LNK->>TCP: register<br/>tcp_congestion_ops name
+    Note over TCP: algorithm appears in<br/>available_congestion_control
+    SK->>TCP: setsockopt<br/>(TCP_CONGESTION, name)
+    TCP->>BPF: invoke selected<br/>callbacks on TCP events
+    Note over BPF: BPF code is now<br/>part of the CC algorithm
     US->>LNK: close/destroy link
     LNK->>TCP: unregister algorithm
-    Note over TCP: sockets can no longer select this BPF CC
+    Note over TCP: sockets can no longer<br/>select this BPF CC

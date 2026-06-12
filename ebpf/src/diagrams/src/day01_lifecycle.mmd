@@ -1,27 +1,28 @@
+%%{init: {"sequence": {"useMaxWidth": false, "actorMargin": 8, "messageMargin": 24, "boxMargin": 8, "noteMargin": 8, "mirrorActors": false}}}%%
 sequenceDiagram
     autonumber
     participant DEV as You
-    participant CC as clang -target bpf
+    participant CC as clang<br/>-target bpf
     participant LB as libbpf
-    participant SC as bpf() syscall
+    participant SC as bpf()<br/>syscall
     participant VER as Verifier
     participant JIT as JIT
-    participant ATT as Attach point<br/>(filename_unlinkat)
+    participant ATT as Attach pt<br/>(filename_unlinkat)
 
     DEV->>CC: hello.bpf.c
-    CC-->>DEV: hello.bpf.o<br/>(BPF bytecode + BTF)
+    CC-->>DEV: hello.bpf.o<br/>(bytecode + BTF)
     DEV->>LB: open object
-    LB->>LB: CO-RE relocate<br/>using kernel BTF
+    LB->>LB: CO-RE relocate<br/>via kernel BTF
     LB->>SC: BPF_PROG_LOAD
-    SC->>VER: analyze every instruction
+    SC->>VER: analyze every<br/>instruction
     alt program is safe
         VER-->>SC: accept
-        SC->>JIT: compile to native
+        SC->>JIT: compile<br/>to native
         JIT-->>SC: native code
         SC-->>LB: prog_fd
         LB->>SC: BPF_LINK_CREATE
-        SC->>ATT: install trampoline
-        Note over ATT: now every call to<br/>filename_unlinkat invokes<br/>your program
+        SC->>ATT: install<br/>trampoline
+        Note over ATT: every call to<br/>filename_unlinkat<br/>invokes your program
     else program is unsafe
         VER-->>SC: reject + log
         SC-->>LB: -EACCES

@@ -1,22 +1,22 @@
 flowchart TD
+    SYN["incoming SYN to :80"]
+    Hash["__inet_lookup_listener<br/>+ reuseport_select_sock"]
+    Pick{Pick which sock?}
+
     Listen1["sock1 (worker 1)<br/>SO_REUSEPORT, bind :80"]
     Listen2["sock2 (worker 2)<br/>SO_REUSEPORT, bind :80"]
     Listen3["sock3 (worker 3)<br/>SO_REUSEPORT, bind :80"]
     Listen4["sock4 (worker 4)<br/>SO_REUSEPORT, bind :80"]
 
-    SYN["incoming SYN to :80"]
-    Hash["__inet_lookup_listener<br/>+ reuseport_select_sock"]
-    Pick{Pick which sock?}
+    Note["Default: hash 4-tuple, modulo N<br/>BPF: SO_ATTACH_REUSEPORT_EBPF<br/>lets program decide deterministically"]
 
+    SYN --> Hash --> Pick
     Pick --> Listen1
     Pick --> Listen2
     Pick --> Listen3
     Pick --> Listen4
-
-    Note["Default: hash 4-tuple, modulo N<br/>BPF: SO_ATTACH_REUSEPORT_EBPF<br/>lets program decide deterministically"]
-
-    SYN --> Hash --> Pick
-    Pick -.- Note
+    Listen1 ~~~ Listen2 ~~~ Listen3 ~~~ Listen4
+    Listen4 -.- Note
 
     classDef sock fill:#dbeafe,stroke:#2563eb
     classDef hot fill:#fef3c7,stroke:#d97706

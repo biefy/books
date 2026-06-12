@@ -1,4 +1,4 @@
-flowchart LR
+flowchart TD
     Pkt["packet at Netfilter hook<br/><b>does:</b> presents 5-tuple, zone, direction<br/><b>why next:</b> conntrack needs a tuple key<br/><b>state:</b> skb may not yet have nfct"]
     Tuple["tuple extraction<br/><b>does:</b> parses L3/L4 headers and reply tuple<br/><b>why next:</b> hash lookup uses normalized original/reply keys<br/><b>state:</b> tuplehash candidate"]
     Lookup["conntrack lookup<br/><b>does:</b> searches confirmed table for either direction<br/><b>why next:</b> existing flow can update state; miss may create NEW<br/><b>state:</b> nf_conn found or miss"]

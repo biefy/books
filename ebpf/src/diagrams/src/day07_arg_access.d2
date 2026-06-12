@@ -1,4 +1,4 @@
-direction: right
+direction: down
 
 title: |md
   ## Argument access by program type
@@ -9,15 +9,17 @@ fentry: "fentry/fexit" {
   body: |md
     ```c
     SEC("fentry/vfs_read")
-    int BPF_PROG(p, struct file *f,
-                 char *buf, size_t n,
-                 loff_t *pos) { ... }
+    int BPF_PROG(p,
+      struct file *f, char *buf,
+      size_t n, loff_t *pos)
+    { ... }
     ```
-    **Does:** trampoline supplies BTF-typed
-    function args.
+    **Does:**
+    - trampoline supplies BTF-typed function args
 
-    **State:** `f` is trusted `PTR_TO_BTF_ID`,
-    so direct field reads are allowed.
+    **State:**
+    - `f` is trusted `PTR_TO_BTF_ID`
+    - direct field reads are allowed
   |
 }
 
@@ -26,13 +28,15 @@ kprobe: "kprobe/kretprobe" {
   body: |md
     ```c
     SEC("kprobe/vfs_read")
-    int BPF_KPROBE(p, struct file *f, ...) { ... }
+    int BPF_KPROBE(p,
+      struct file *f, ...) { ... }
     ```
-    **Does:** trap saves CPU registers in
-    `struct pt_regs`.
+    **Does:**
+    - trap saves CPU registers in `struct pt_regs`
 
-    **State:** extracted pointers are scalars;
-    use `bpf_probe_read_kernel` for fields.
+    **State:**
+    - extracted pointers are scalars
+    - use `bpf_probe_read_kernel` for fields
   |
 }
 
@@ -40,14 +44,19 @@ tracepoint: "tracepoint/..." {
   style.fill: "#fee2e2"
   body: |md
     ```c
-    SEC("tracepoint/syscalls/sys_enter_read")
-    int p(struct trace_event_raw_sys_enter *ctx)
+    SEC("tracepoint/syscalls/
+      sys_enter_read")
+    int p(struct
+      trace_event_raw_sys_enter
+      *ctx)
     ```
-    **Does:** reads a copied event struct.
+    **Does:**
+    - reads a copied event struct
 
-    **State:** stable fields from
-    `/sys/kernel/tracing/events/.../format`,
-    not live kernel objects.
+    **State:**
+    - stable fields from `events/.../format`
+    - under `/sys/kernel/tracing/`
+    - not live kernel objects
   |
 }
 
@@ -56,13 +65,16 @@ rawtp: "raw_tracepoint/..." {
   body: |md
     ```c
     SEC("raw_tracepoint/sched_switch")
-    int p(struct bpf_raw_tracepoint_args *ctx)
+    int p(struct
+      bpf_raw_tracepoint_args *ctx)
     ```
-    **Does:** exposes raw tracepoint args as
-    positional `u64` slots.
+    **Does:**
+    - exposes raw tracepoint args
+    - as positional `u64` slots
 
-    **State:** lower-level than tracepoint;
-    caller must unpack by index.
+    **State:**
+    - lower-level than tracepoint
+    - caller must unpack by index
   |
 }
 
@@ -72,17 +84,31 @@ tpbtf: "tp_btf/..." {
     ```c
     SEC("tp_btf/sched_switch")
     int BPF_PROG(p, bool preempt,
-                 struct task_struct *prev,
-                 struct task_struct *next)
+      struct task_struct *prev,
+      struct task_struct *next)
     ```
-    **Does:** uses tracepoint BTF prototype.
+    **Does:**
+    - uses tracepoint BTF prototype
 
-    **State:** live typed pointers for the
-    duration of the callback.
+    **State:**
+    - live typed pointers
+    - for the whole callback
   |
 }
 
-fentry -> kprobe: "same target can be observed through older trap path"
-kprobe -> tracepoint: "explicit events avoid fragile function names"
-tracepoint -> rawtp: "skip copied struct when raw args are desired"
-rawtp -> tpbtf: "BTF restores typed arguments for new code"
+fentry -> kprobe
+kprobe -> tracepoint
+tracepoint -> rawtp
+rawtp -> tpbtf
+
+legend: |md
+  **Why move down the chain**
+  - fentry -> kprobe:
+  - older trap path, same target
+  - kprobe -> tracepoint:
+  - explicit events avoid fragile fn names
+  - tracepoint -> raw_tracepoint:
+  - skip copied struct when raw args wanted
+  - raw_tracepoint -> tp_btf:
+  - BTF restores typed arguments
+| {near: bottom-center; shape: text}

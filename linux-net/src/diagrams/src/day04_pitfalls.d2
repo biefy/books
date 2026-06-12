@@ -1,20 +1,21 @@
-direction: right
+direction: down
 
 title: |md
   ## When offloads bite you
 | {near: top-center; shape: text}
 
-bpf: "BPF programs (XDP, tc-bpf)" {
+bpf: "BPF (XDP, tc-bpf)" {
   style.fill: "#fee2e2"
   b_body: |md
-    GRO ON: program sees one big skb,
-            not the original wire segments.
+    GRO ON: program sees one big skb,\
+    not the original wire segments.
+
     Effects:
     - Latency tracing per-packet → wrong
     - Packet count metrics → low
     - Per-segment flags lost
 
-    Many BPF programs disable GRO on
+    Many BPF programs disable GRO on\
     the NIC they trace.
   |
 }
@@ -22,12 +23,12 @@ bpf: "BPF programs (XDP, tc-bpf)" {
 tcp: "TCP timing measurements" {
   style.fill: "#fef3c7"
   t_body: |md
-    GRO holds segments briefly to
-    coalesce. Add 10-100 µs latency
-    on bursts. Mostly invisible at
+    GRO holds segments briefly to\
+    coalesce. Adds 10-100 µs latency\
+    on bursts. Mostly invisible at\
     application layer.
 
-    For latency-critical workloads
+    For latency-critical workloads\
     (HFT, RDMA), GRO is OFF.
   |
 }
@@ -35,12 +36,13 @@ tcp: "TCP timing measurements" {
 cap: "Packet capture / IDS" {
   style.fill: "#dbeafe"
   c_body: |md
-    tcpdump on RX sees pre-stack —
-    so it observes the GRO superpackets
-    too! Use `ethtool -K eth0 gro off`
+    tcpdump on RX sees pre-stack —\
+    so it observes the GRO\
+    superpackets too! Use\
+    `ethtool -K eth0 gro off`\
     if you need wire-fidelity captures.
 
-    Or capture before driver-receive
+    Or capture before driver-receive\
     via XDP-pass-through.
   |
 }
@@ -53,11 +55,9 @@ verdict: "ethtool -K is the toggle" {
     - GSO on
     - TSO on (if HW supports)
 
-    Disable as needed:
-    sudo ethtool -K eth0 gro off
+    Disable as needed:\
+    `sudo ethtool -K eth0 gro off`
   |
 }
 
-bpf -> verdict
-tcp -> verdict
-cap -> verdict
+bpf -> tcp -> cap -> verdict

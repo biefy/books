@@ -1,13 +1,13 @@
-flowchart LR
-    Start["<b>1. interface enables IPv6</b><br/>joins required multicast groups and prepares link-local state<br/><b>handoff:</b> every IPv6 node needs a usable link-local address<br/><b>state:</b> tentative device IPv6 configuration"]
+flowchart TD
+    Start["<b>1. interface enables IPv6</b><br/>joins required multicast groups,<br/>prepares link-local state<br/><b>handoff:</b> every IPv6 node needs<br/>a usable link-local address<br/><b>state:</b> tentative device IPv6 config"]
 
-    LinkLocal["<b>2. link-local + DAD</b><br/>derive fe80:: address and probe for duplicates<br/><b>handoff:</b> no duplicate means control traffic can use the link<br/><b>state:</b> link-local address is preferred or rejected"]
+    LinkLocal["<b>2. link-local + DAD</b><br/>derive fe80:: address,<br/>probe for duplicates<br/><b>handoff:</b> no duplicate means<br/>control traffic can use the link<br/><b>state:</b> link-local preferred or rejected"]
 
-    RA["<b>3. Router Advertisement</b><br/>learn prefixes, lifetimes, default router, A/M/O flags<br/><b>handoff:</b> flags select SLAAC, DHCPv6, or both<br/><b>state:</b> router and prefix policy are known"]
+    RA["<b>3. Router Advertisement</b><br/>learn prefixes, lifetimes,<br/>default router, A/M/O flags<br/><b>handoff:</b> flags select SLAAC,<br/>DHCPv6, or both<br/><b>state:</b> router and prefix policy known"]
 
-    Addr["<b>4. address configuration</b><br/>SLAAC forms an address, DHCPv6 obtains managed data<br/><b>handoff:</b> each new address must pass DAD before use<br/><b>state:</b> global address and options are installed"]
+    Addr["<b>4. address configuration</b><br/>SLAAC forms an address,<br/>DHCPv6 obtains managed data<br/><b>handoff:</b> each new address<br/>must pass DAD before use<br/><b>state:</b> global address and options installed"]
 
-    Ready["<b>5. NDP-ready interface</b><br/>neighbor discovery resolves next hops and tracks reachability<br/><b>state:</b> IPv6 can send to local-link neighbors and routers"]
+    Ready["<b>5. NDP-ready interface</b><br/>neighbor discovery resolves next hops,<br/>tracks reachability<br/><b>state:</b> IPv6 can send to<br/>local-link neighbors and routers"]
 
     Start --> LinkLocal --> RA --> Addr --> Ready
     LinkLocal -. duplicate .-> Start

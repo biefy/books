@@ -1,13 +1,13 @@
-flowchart LR
-    Wake["<b>1. task becomes runnable</b><br/>wakeup, fork, or preemption makes a task eligible<br/><b>handoff:</b> sched_ext asks BPF where it should wait<br/><b>state:</b> task has runnable state and previous CPU"]
+flowchart TD
+    Wake["<b>1. task becomes runnable</b><br/>wakeup, fork, or preemption<br/>makes a task eligible<br/><b>handoff:</b> sched_ext asks BPF<br/>where it should wait<br/><b>state:</b> task has runnable state<br/>and previous CPU"]
 
-    Enq["<b>2. ops.enqueue</b><br/>BPF chooses DSQ, slice, FIFO or vtime ordering<br/><b>handoff:</b> task must wait until a CPU needs work<br/><b>state:</b> scx_bpf_dsq_insert* records queue ownership"]
+    Enq["<b>2. ops.enqueue</b><br/>BPF chooses DSQ, slice,<br/>FIFO or vtime ordering<br/><b>handoff:</b> task must wait<br/>until a CPU needs work<br/><b>state:</b> scx_bpf_dsq_insert*<br/>records queue ownership"]
 
-    DSQ["<b>3. dispatch queue</b><br/>kernel-managed runnable-task queue ordered by policy<br/><b>handoff:</b> dispatch can move work to a CPU-local DSQ<br/><b>state:</b> task is queued, not yet running"]
+    DSQ["<b>3. dispatch queue</b><br/>kernel-managed runnable-task<br/>queue ordered by policy<br/><b>handoff:</b> dispatch can move<br/>work to a CPU-local DSQ<br/><b>state:</b> task is queued,<br/>not yet running"]
 
-    Dispatch["<b>4. ops.dispatch</b><br/>CPU needs work, BPF calls scx_bpf_dsq_move_to_local or inserts local work<br/><b>handoff:</b> core scheduler runs only from the local DSQ<br/><b>state:</b> selected task is local to that CPU"]
+    Dispatch["<b>4. ops.dispatch</b><br/>CPU needs work, BPF calls<br/>scx_bpf_dsq_move_to_local<br/>or inserts local work<br/><b>handoff:</b> core scheduler runs<br/>only from the local DSQ<br/><b>state:</b> selected task is<br/>local to that CPU"]
 
-    Run["<b>5. CPU runs task</b><br/>task consumes slice until block, preempt, yield, or exit<br/><b>handoff:</b> runnable again means another enqueue cycle<br/><b>state:</b> runtime accounted, watchdog sees progress"]
+    Run["<b>5. CPU runs task</b><br/>task consumes slice until<br/>block, preempt, yield, or exit<br/><b>handoff:</b> runnable again means<br/>another enqueue cycle<br/><b>state:</b> runtime accounted,<br/>watchdog sees progress"]
 
     Wake --> Enq --> DSQ --> Dispatch --> Run
     Run -. blocks then wakes / slice ends .-> Wake

@@ -1,65 +1,21 @@
-direction: right
+direction: down
 
 title: |md
   ## DSQ patterns: shared vs per-CPU dispatch
 | {near: top-center; shape: text}
 
-global: "Global DSQ\n(SCX_DSQ_GLOBAL)" {
+global: "Global DSQ (SCX_DSQ_GLOBAL)\n\nSingle queue, all CPUs pull from it.\n\nPros:\n- Simple\n- Automatic load balancing\n  (idle CPUs grab next task)\n\nCons:\n- Cache locality lost\n- Lock contention at high rate\n- No latency guarantees\n\nUsed by: scx_simple (default)" {
   style.fill: "#fef3c7"
-  g_body: |md
-    Single queue, all CPUs pull from it.
-
-    Pros:
-    - Simple
-    - Automatic load balancing
-      (idle CPUs grab next task)
-
-    Cons:
-    - Cache locality lost
-    - Lock contention at high rate
-    - No latency guarantees
-
-    Used by: scx_simple (default)
-  |
 }
 
-percpu: "Per-CPU DSQ\n(scx_bpf_create_dsq)" {
+percpu: "Per-CPU DSQ (scx_bpf_create_dsq)\n\nEach CPU has its own queue.\n\nPros:\n- Cache locality\n- No lock contention\n- Per-CPU policy possible\n\nCons:\n- Manual load balancing in BPF\n- Idle CPUs starve if no work locally\n\nUsed by: scx_central, scx_flatcg" {
   style.fill: "#dcfce7"
-  p_body: |md
-    Each CPU has its own queue.
-
-    Pros:
-    - Cache locality
-    - No lock contention
-    - Per-CPU policy possible
-
-    Cons:
-    - Manual load balancing in BPF
-    - Idle CPUs starve if no work locally
-
-    Used by: scx_central, scx_flatcg
-  |
 }
 
-central: "Central DSQ\n(scx_central pattern)" {
+central: "Central DSQ (scx_central pattern)\n\nOne CPU acts as 'central' dispatcher;\nothers enqueue but never dispatch directly.\n\nPros:\n- Centralized policy decisions\n- Flexible (anti-thrashing,\n  latency-priority queues, ...)\n\nCons:\n- Central CPU is bottleneck\n- Cross-CPU IPI cost\n\nUsed by: scx_central" {
   style.fill: "#dbeafe"
-  ce_body: |md
-    One CPU acts as 'central'
-    dispatcher; others enqueue
-    but never dispatch directly.
-
-    Pros:
-    - Centralized policy decisions
-    - Flexible (anti-thrashing,
-      latency-priority queues, ...)
-
-    Cons:
-    - Central CPU is bottleneck
-    - Cross-CPU IPI cost
-
-    Used by: scx_central
-  |
 }
 
+global -> percpu: {style.opacity: 0}
 global -> central: "scaling up" {style.stroke-dash: 4}
 percpu -> central: "with central control" {style.stroke-dash: 4}

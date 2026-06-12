@@ -1,4 +1,4 @@
-flowchart LR
+flowchart TD
     HW["<b>1. NIC + NAPI batch</b><br/>DMA fills RX descriptors, IRQ schedules NAPI<br/><b>handoff:</b> poll budget moves work out of hard IRQ<br/><b>state:</b> driver owns packet buffers"]
 
     XDP["<b>2. driver poll + native XDP</b><br/>driver reaps descriptors and runs XDP before skb allocation<br/><b>handoff:</b> only XDP_PASS enters the normal stack<br/><b>state:</b> packet may be dropped, redirected, TX'd, or passed"]

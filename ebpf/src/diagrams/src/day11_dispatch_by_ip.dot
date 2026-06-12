@@ -1,5 +1,5 @@
 digraph G {
-    rankdir=LR;
+    rankdir=TB;
     node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
 
     legend [label="bpf_get_func_ip(ctx)\nreturns the IP of the function\nthat fired this multi-probe", fillcolor="#fef3c7", shape=note];

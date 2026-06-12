@@ -6,7 +6,7 @@ flowchart LR
         Dev["dev_queue_xmit"]
         Check{"NIC supports TSO?"}
         TSO["TSO: hand 64 KB skb to NIC<br/>NIC segments in HW"]
-        GSO["GSO: __skb_gso_segment splits<br/>in software, hands chain to driver"]
+        GSO["GSO: __skb_gso_segment<br/>splits in software,<br/>hands chain to driver"]
         Wire["wire: 40+ MTU-sized segments"]
 
         App --> TCP --> IP --> Dev --> Check

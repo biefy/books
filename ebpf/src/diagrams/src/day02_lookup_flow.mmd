@@ -1,8 +1,8 @@
 flowchart TD
-    Start(["bpf_map_lookup_elem(&counts, &pid)"])
+    Start(["bpf_map_lookup_elem(\n&counts, &pid)"])
     Decide{"return value\n== NULL?"}
-    Update["bpf_map_update_elem(&counts, &pid, &one, BPF_ANY)\n(insert with starting value)"]
-    Atomic["__sync_fetch_and_add(cnt, 1)\n(atomic increment in-place)"]
+    Update["bpf_map_update_elem(\n&counts, &pid,\n&one, BPF_ANY)\n(insert with starting value)"]
+    Atomic["__sync_fetch_and_add(\ncnt, 1)\n(atomic increment in-place)"]
     Out(["return 0"])
 
     Start --> Decide

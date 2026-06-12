@@ -1,4 +1,4 @@
-flowchart LR
+flowchart TD
     Frame["Tagged frame arrives at eth0"]
     Strip{"HW VLAN strip?"}
     HwStripped["skb->vlan_tci set<br/>skb->vlan_proto = 0x8100<br/>frame appears untagged"]

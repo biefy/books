@@ -1,7 +1,7 @@
 direction: down
 
 title: |md
-  ## Helpers vs kfuncs at the language level
+  ### Helpers vs kfuncs (language level)
 | {near: top-center; shape: text}
 
 helper: "Calling a helper" {
@@ -10,16 +10,15 @@ helper: "Calling a helper" {
     ```c
     #include <bpf/bpf_helpers.h>
 
-    /* declared in header as a function pointer
+    /* header declares it as a fn-pointer
        constant at a fixed enum offset:
        (void *)BPF_FUNC_map_lookup_elem */
-    void *p = bpf_map_lookup_elem(&map, &key);
+    void *p =
+      bpf_map_lookup_elem(&map, &key);
     ```
     - Frozen UAPI list (≈230 entries)
-    - Compiles to a `call` with immediate
-      operand = enum value
-    - Verifier knows the proto from the
-      kernel's `bpf_func_proto` struct
+    - Compiles to a `call` with immediate = enum value
+    - Verifier reads proto from `bpf_func_proto`
   |
 }
 
@@ -28,29 +27,31 @@ kfunc: "Calling a kfunc" {
   k_body: |md
     ```c
     extern struct task_struct *
-    bpf_task_acquire(struct task_struct *) __ksym;
+    bpf_task_acquire(
+      struct task_struct *) __ksym;
 
     extern void
-    bpf_task_release(struct task_struct *) __ksym;
+    bpf_task_release(
+      struct task_struct *) __ksym;
 
-    struct task_struct *t = bpf_task_acquire(cur);
+    struct task_struct *t =
+      bpf_task_acquire(cur);
     if (!t) return 0;
     /* ... */
     bpf_task_release(t);
     ```
     - In-tree, NOT frozen UAPI
-    - Compiled as ordinary symbol references
-    - Resolved against kernel BTF at load time
-    - Verifier checks proto from kernel BTF
-    - Lifetime semantics enforced (acquire/release)
+    - Compiled as ordinary symbol refs
+    - Resolved vs kernel BTF at load
+    - Verifier checks proto from BTF
+    - Lifetime enforced (acquire/release)
   |
 }
 
 verdict: |md
-  **New BPF features arrive as kfuncs.**
-  Helpers stop growing; the existing list stays frozen.
-  Wherever you see `__ksym`, that's a kfunc.
+  - **New BPF features arrive as kfuncs.**
+  - Helpers stop growing; the existing list stays frozen.
+  - Wherever you see `__ksym`, that's a kfunc.
 | {near: bottom-center; shape: text}
 
-helper -> verdict
-kfunc -> verdict
+helper -> kfunc -> verdict

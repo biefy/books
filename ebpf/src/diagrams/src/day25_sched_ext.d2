@@ -1,44 +1,52 @@
 direction: down
 
 title: |md
-  ## sched_ext: BPF as the kernel scheduler
+  ## sched_ext: BPF as the kernel scheduler  
 | {near: top-center; shape: text}
 
 cfs: "Default scheduler (CFS)" {
   style.fill: "#fee2e2"
   c_body: |md
-    Single in-kernel implementation:
-    - kernel/sched/fair.c
-    - red-black tree of runnable tasks
-    - virtual runtime accounting
-    - load balancing across CPUs
-    - hardcoded policy
+    Single in-kernel implementation:  
+    - kernel/sched/fair.c  
+    - red-black tree of runnable tasks  
+    - virtual runtime accounting  
+    - load balancing across CPUs  
+    - hardcoded policy  
 
-    To change policy: kernel patch.
+    To change policy: kernel patch.  
   |
 }
 
 scx: "sched_ext (BPF scheduler)" {
   style.fill: "#dcfce7"
   s_body: |md
-    Pluggable scheduler via struct_ops:
-    - kernel/sched/ext.c (framework)
-    - your BPF program implements callbacks:
-      enqueue, dispatch, init, exit
-    - load BPF object → scheduler activates
-    - watchdog catches stalls → falls back to CFS
+    Pluggable scheduler via struct_ops:  
+    - kernel/sched/ext.c (framework)  
+    - your BPF program implements  
+      callbacks: enqueue, dispatch,  
+      init, exit  
+    - load BPF object → activates  
+    - watchdog catches stalls →  
+      falls back to CFS  
 
-    Iterate scheduling policy at userspace speed.
+    Iterate scheduling policy at  
+    userspace speed.  
   |
 }
 
 watchdog: |md
-  **The watchdog is mandatory.** A faulty BPF scheduler that
-  fails to dispatch tasks would freeze the system. The kernel
-  monitors tasks waiting > 30 seconds without dispatch and
-  ejects the BPF scheduler, falling back to CFS.
+  **The watchdog is mandatory.**  
+  A faulty BPF scheduler that  
+  fails to dispatch tasks would  
+  freeze the system. The kernel  
+  monitors tasks waiting > 30  
+  seconds without dispatch and  
+  ejects the BPF scheduler,  
+  falling back to CFS.  
 
-  This safety net is what makes BPF scheduling shippable.
+  This safety net is what makes  
+  BPF scheduling shippable.  
 | {style.fill: "#fef3c7"}
 
 cfs -> scx

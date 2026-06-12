@@ -1,8 +1,6 @@
 direction: down
 
-title: |md
-  ## TID vs TGID — pick the right key for in-flight tracking
-| {near: top-center; shape: text}
+title: "TID vs TGID\npick the right key for in-flight tracking" {near: top-center; shape: text; style.font-size: 26}
 
 proc: "Process firefox (TGID = 13421)" {
   style.fill: "#fef3c7"
@@ -10,47 +8,21 @@ proc: "Process firefox (TGID = 13421)" {
   t2: "Thread 2\nTID 13422" {style.fill: "#dbeafe"}
   t3: "Thread 3\nTID 13423" {style.fill: "#dbeafe"}
   t4: "Thread 4\nTID 13424" {style.fill: "#dbeafe"}
+  t1 -> t2 -> t3 -> t4
 }
 
-scenario: |md
-  ### Scenario: all 4 threads call vfs_read concurrently
-| {shape: text}
+scenario: "Scenario: all 4 threads call vfs_read concurrently" {shape: text; style.font-size: 20}
 
-wrong: "WRONG: key by TGID" {
+wrong: "WRONG: key by TGID\n\nMap: { 13421 → ts1 }\n\nThread 1 enters → store ts1, key 13421\nThread 2 enters → overwrite ts2, key 13421\nThread 3 enters → overwrite ts3, key 13421\nThread 4 enters → overwrite ts4, key 13421\nThread 1 exits → reads ts4\n  (the most recent overwrite)\n\n→ Latency = exit_time(t1) − entry_time(t4)\n→ Garbage values: sometimes huge,\n  sometimes negative" {
   style.fill: "#fee2e2"
-  body_w: |md
-    Map: { 13421 → ts1 }
-
-    Thread 1 enters → store ts1 with key 13421
-    Thread 2 enters → **overwrite** ts2 with key 13421
-    Thread 3 enters → **overwrite** ts3 with key 13421
-    Thread 4 enters → **overwrite** ts4 with key 13421
-    Thread 1 exits → reads ts4 (the most recent overwrite)
-
-    → Latency = exit_time(t1) - entry_time(t4)
-    → Garbage values, sometimes huge, sometimes negative
-  |
 }
 
-right: "RIGHT: key by TID" {
+right: "RIGHT: key by TID\n\nMap: { 13421→ts1, 13422→ts2,\n       13423→ts3, 13424→ts4 }\n\nEach thread has its own slot\nEach exit retrieves its entry timestamp\nNo collisions\n\n→ Latency = exit(tN) − entry(tN)\n  for each thread\n→ Correct per-call duration" {
   style.fill: "#dcfce7"
-  body_r: |md
-    Map: { 13421→ts1, 13422→ts2, 13423→ts3, 13424→ts4 }
-
-    Each thread has its own slot
-    Each exit retrieves *its* entry timestamp
-    No collisions
-
-    → Latency = exit(tN) - entry(tN) for each thread
-    → Correct per-call duration
-  |
 }
 
-proc -> wrong: "all 4 hit same map slot"
-proc -> right: "each thread, own slot"
+proc -> scenario
+scenario -> wrong: "all 4 hit same map slot"
+wrong -> right: "each thread, own slot"
 
-note: |md
-  **Rule:** for synchronous per-thread tracking, key by **TID**.
-  TID = lower 32 bits of `bpf_get_current_pid_tgid()`.
-  TGID = upper 32 bits = what userspace calls "PID".
-| {near: bottom-center; shape: text}
+note: "Rule: for synchronous per-thread tracking, key by TID.\nTID = lower 32 bits of bpf_get_current_pid_tgid().\nTGID = upper 32 bits = what userspace calls \"PID\"." {near: bottom-center; shape: text}

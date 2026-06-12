@@ -1,5 +1,5 @@
 digraph G {
-    rankdir=LR;
+    rankdir=TB;
     node [shape=box, style="rounded,filled", fontname="Monaco", fontsize=10];
 
     skb [label="skb (descriptor)\n\nhead\ndata  ->\ntail  ->\nend   ->", fillcolor="#dbeafe"];

@@ -1,4 +1,4 @@
-direction: right
+direction: down
 
 title: |md
   ## One tracepoint event, three BPF interfaces
@@ -9,55 +9,48 @@ kernel: "Kernel TRACE_EVENT" {
   body: |md
     `trace_sched_switch(preempt, prev, next)`
 
-    **Does:** marks the scheduler's switch point.
-    **Why next:** attached consumers choose how much
-    structure they want.
-    **State:** original C arguments are still in hand.
+    - **Does:** marks scheduler switch point.
+    - **Why next:** consumers pick how much structure.
+    - **State:** original C args still in hand.
   |
 }
 
 regular: "SEC(\"tracepoint/sched/sched_switch\")" {
   style.fill: "#fee2e2"
   body: |md
-    **Does:** kernel copies selected fields into
-    `struct trace_event_raw_sched_switch`.
-
-    **State:** stable copied bytes:
-    `prev_comm`, `prev_pid`, `next_comm`, ...
-
-    **Tradeoff:** stable format, but no live
-    `task_struct *` access.
+    - **Does:** kernel copies selected fields  
+      into `trace_event_raw_sched_switch`.
+    - **State:** stable copied bytes:  
+      `prev_comm`, `prev_pid`, `next_comm`, ...
+    - **Tradeoff:** stable format, but  
+      no live `task_struct *` access.
   |
 }
 
 raw: "SEC(\"raw_tracepoint/sched_switch\")" {
   style.fill: "#fde68a"
   body: |md
-    **Does:** exposes raw tracepoint args in
-    `struct bpf_raw_tracepoint_args`.
-
-    **State:** `ctx->args[0]`, `ctx->args[1]`, ...
-    must be decoded by position.
-
-    **Tradeoff:** no copied event struct, but less
-    type help than `tp_btf`.
+    - **Does:** exposes raw tracepoint args  
+      in `bpf_raw_tracepoint_args`.
+    - **State:** `ctx->args[0]`, `ctx->args[1]`, ...  
+      decoded by position.
+    - **Tradeoff:** no copied event struct,  
+      but less type help than `tp_btf`.
   |
 }
 
 btf: "SEC(\"tp_btf/sched_switch\")" {
   style.fill: "#dcfce7"
   body: |md
-    **Does:** passes BTF-typed tracepoint args:
-    `bool preempt`, `task_struct *prev`, `*next`.
-
-    **State:** live typed pointers valid during
-    the callback.
-
-    **Tradeoff:** needs kernel BTF and CO-RE care
-    for struct fields.
+    - **Does:** passes BTF-typed args:  
+      `bool preempt`, `task_struct *prev`, `*next`.
+    - **State:** live typed pointers valid  
+      during the callback.
+    - **Tradeoff:** needs kernel BTF and  
+      CO-RE care for struct fields.
   |
 }
 
-kernel -> regular: "copy event fields if regular listeners exist"
-kernel -> raw: "pass raw slots"
-kernel -> btf: "pass typed args"
+kernel -> regular: "copy fields"
+regular -> raw: "raw slots"
+raw -> btf: "BTF-typed args"

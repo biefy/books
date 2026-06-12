@@ -1,4 +1,4 @@
-flowchart LR
+flowchart TD
     Call["BPF program calls<br/>bpf_copy_from_user(buf, sz, user_ptr)"]
     Check["page table lookup<br/>for user_ptr"]
     Mapped{Page in memory?}

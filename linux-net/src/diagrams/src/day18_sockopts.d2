@@ -1,4 +1,4 @@
-direction: right
+direction: down
 
 title: |md
   ## Sockopts: per-socket tuning knobs
@@ -6,52 +6,22 @@ title: |md
 
 generic: "Generic (SOL_SOCKET)" {
   style.fill: "#dbeafe"
-  g_body: |md
-    - SO_RCVBUF, SO_SNDBUF — buffer sizes
-    - SO_REUSEADDR, SO_REUSEPORT
-    - SO_KEEPALIVE
-    - SO_LINGER
-    - SO_BINDTODEVICE
-    - SO_PRIORITY (for tc/qdisc)
-    - SO_MARK (set fwmark on tx)
-  |
+  g_body: "- SO_RCVBUF / SO_SNDBUF (buffers)\n- SO_REUSEADDR / SO_REUSEPORT\n- SO_KEEPALIVE\n- SO_LINGER\n- SO_BINDTODEVICE\n- SO_PRIORITY (for tc/qdisc)\n- SO_MARK (set fwmark on tx)"
 }
 
 ip: "IP (SOL_IP / SOL_IPV6)" {
   style.fill: "#fef3c7"
-  ip_body: |md
-    - IP_TOS, IP_TTL
-    - IP_MULTICAST_*
-    - IP_FREEBIND
-    - IP_PKTINFO (recv aux info)
-    - IP_TRANSPARENT (TPROXY)
-  |
+  ip_body: "- IP_TOS, IP_TTL\n- IP_MULTICAST_*\n- IP_FREEBIND\n- IP_PKTINFO (recv aux info)\n- IP_TRANSPARENT (TPROXY)"
 }
 
 tcp: "TCP (SOL_TCP)" {
   style.fill: "#dcfce7"
-  tcp_body: |md
-    - TCP_NODELAY (disable Nagle)
-    - TCP_CORK (batch sends)
-    - TCP_QUICKACK
-    - TCP_CONGESTION (algorithm name)
-    - TCP_FASTOPEN
-    - TCP_USER_TIMEOUT
-    - TCP_INFO (read tcp stats)
-    - TCP_TX_DELAY (BBR pacing tuning)
-  |
+  tcp_body: "- TCP_NODELAY (disable Nagle)\n- TCP_CORK (batch sends)\n- TCP_QUICKACK\n- TCP_CONGESTION (algorithm name)\n- TCP_FASTOPEN\n- TCP_USER_TIMEOUT\n- TCP_INFO (read tcp stats)\n- TCP_TX_DELAY (BBR pacing tuning)"
 }
 
 bpf: "BPF can set most via sock_ops" {
   style.fill: "#fef3c7"
-  b_body: |md
-    bpf_setsockopt(skops, SOL_TCP,
-                   TCP_CONGESTION, "bbr", 3);
-    Lets per-cgroup or per-flow policies
-    override application defaults.
-  |
+  b_body: "bpf_setsockopt(skops, SOL_TCP,\n               TCP_CONGESTION, \"bbr\", 3);\nLets per-cgroup or per-flow policies\noverride application defaults."
 }
 
-generic -> bpf
-ip -> bpf
-tcp -> bpf
+generic -> ip -> tcp -> bpf

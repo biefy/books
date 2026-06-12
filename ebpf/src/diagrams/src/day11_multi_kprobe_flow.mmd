@@ -1,4 +1,4 @@
-flowchart LR
+flowchart TD
     User["userspace attach request<br/><b>does:</b> passes one BPF prog plus many function names/patterns<br/><b>why next:</b> kernel must resolve names before probes exist<br/><b>state:</b> desired attach set"]
     LinkCreate["BPF_LINK_CREATE<br/><b>does:</b> creates kprobe_multi link request<br/><b>why next:</b> link gives one lifetime owner for all probes<br/><b>state:</b> pending bpf_link fd"]
     Resolve["name/address resolution<br/><b>does:</b> resolves kallsyms/ftrace locations and sorts addresses<br/><b>why next:</b> ftrace needs concrete instruction sites<br/><b>state:</b> validated address array"]

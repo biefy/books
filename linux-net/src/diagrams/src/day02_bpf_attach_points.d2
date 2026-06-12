@@ -1,49 +1,21 @@
-direction: right
+direction: down
 
-title: |md
-  ## Where to attach BPF on the RX path
-| {near: top-center; shape: text}
+title: "Where to attach BPF on the RX path" {near: top-center; shape: text; style.font-size: 20}
 
-p1: "1. Driver / before skb alloc" {
+p1: "1. Driver / before skb alloc\nHooks: XDP (driver-mode,\n  generic, offloaded)\nSees: raw DMA buffer\nCost: ~10ns + your logic\nAction: PASS / DROP\n  / TX / REDIRECT" {
   style.fill: "#fee2e2"
-  p1_body: |md
-    Hooks: **XDP** (driver-mode, generic, offloaded)
-    Sees: raw DMA buffer
-    Cost: ~10ns + your logic
-    Action: PASS / DROP / TX / REDIRECT
-  |
 }
 
-p2: "2. After GRO, before stack" {
+p2: "2. After GRO, before stack\nHooks: tc-bpf ingress,\n  tcx ingress\nSees: __sk_buff\n  (full metadata)\nCost: ~50ns + your logic\nAction: TC_ACT_OK\n  / SHOT / REDIRECT" {
   style.fill: "#fef3c7"
-  p2_body: |md
-    Hooks: **tc-bpf ingress**, **tcx ingress**
-    Sees: __sk_buff (full metadata)
-    Cost: ~50ns + your logic
-    Action: TC_ACT_OK / SHOT / REDIRECT
-  |
 }
 
-p3: "3. Inside ip_rcv / netfilter" {
+p3: "3. Inside ip_rcv / netfilter\nHooks: netfilter\n  (PRE_ROUTING),\n  fentry/fexit on ip_rcv*\nSees: skb at IP layer\nCost: ~50-100ns\nAction: filter,\n  mangle, observe" {
   style.fill: "#dcfce7"
-  p3_body: |md
-    Hooks: **netfilter** (PRE_ROUTING),
-           **fentry/fexit** on ip_rcv*
-    Sees: skb at IP layer
-    Cost: ~50-100ns
-    Action: filter, mangle, observe
-  |
 }
 
-p4: "4. Per-socket / cgroup" {
+p4: "4. Per-socket / cgroup\nHooks: cgroup_skb/ingress,\n  sk_filter (sk_buff filter)\nSees: skb after socket lookup\nCost: variable\nAction: drop or allow" {
   style.fill: "#dbeafe"
-  p4_body: |md
-    Hooks: **cgroup_skb/ingress**,
-           **sk_filter** (sk_buff filter)
-    Sees: skb after socket lookup
-    Cost: variable
-    Action: drop or allow
-  |
 }
 
 p1 -> p2: "if XDP_PASS" {style.stroke-dash: 4}

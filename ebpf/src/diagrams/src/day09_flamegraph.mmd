@@ -1,9 +1,9 @@
-flowchart LR
-    Sample["BPF sample point<br/><b>does:</b> calls bpf_get_stackid for kernel/user stack<br/><b>why next:</b> hot path should store compact IDs, not symbolize<br/><b>state:</b> stack map has frame array; stackid returned"]
-    Hist["histogram map<br/><b>does:</b> increments count for stackid or stackid pair<br/><b>why next:</b> userspace can aggregate without per-event flood<br/><b>state:</b> stackid -> count"]
-    Read["userspace snapshot<br/><b>does:</b> reads histogram and stack maps<br/><b>why next:</b> symbols live outside BPF verifier/kernel fast path<br/><b>state:</b> raw IP arrays plus counts"]
-    Sym["symbolization<br/><b>does:</b> maps kernel IPs via kallsyms and user IPs via PID maps/ELF<br/><b>why next:</b> flamegraph needs function names and folded stacks<br/><b>state:</b> named call chains"]
-    Fold["folded stacks<br/><b>does:</b> formats 'a;b;c count' lines<br/><b>why next:</b> flamegraph renderer consumes folded input<br/><b>state:</b> weighted stack strings"]
+flowchart TD
+    Sample["BPF sample point<br/><b>does:</b> calls bpf_get_stackid for kernel/user stack<br/><b>why next:</b> hot path stores compact IDs, not symbolize<br/><b>state:</b> stack map has frame array; stackid returned"]
+    Hist["histogram map<br/><b>does:</b> increments count for stackid or pair<br/><b>why next:</b> userspace aggregates without per-event flood<br/><b>state:</b> stackid -> count"]
+    Read["userspace snapshot<br/><b>does:</b> reads histogram and stack maps<br/><b>why next:</b> symbols live outside verifier/fast path<br/><b>state:</b> raw IP arrays plus counts"]
+    Sym["symbolization<br/><b>does:</b> kernel IPs via kallsyms, user IPs via PID maps/ELF<br/><b>why next:</b> flamegraph needs names and folded stacks<br/><b>state:</b> named call chains"]
+    Fold["folded stacks<br/><b>does:</b> formats 'a;b;c count' lines<br/><b>why next:</b> renderer consumes folded input<br/><b>state:</b> weighted stack strings"]
     Render["flamegraph / speedscope<br/><b>does:</b> turns weights into visual width<br/><b>state:</b> wide frames show where time accumulated"]
 
     Sample --> Hist --> Read --> Sym --> Fold --> Render

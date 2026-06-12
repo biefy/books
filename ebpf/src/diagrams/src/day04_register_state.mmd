@@ -1,5 +1,5 @@
 stateDiagram-v2
-    direction LR
+    direction TB
     [*] --> ScalarUnknown: program start
     ScalarUnknown --> CallReturned: call bpf_map_lookup_elem
     state CallReturned <<choice>>

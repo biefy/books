@@ -1,58 +1,19 @@
-direction: right
+direction: down
 
 title: |md
   ## ARP table (arp_tbl) layout
 | {near: top-center; shape: text}
 
-table: "struct neigh_table arp_tbl\n(net/ipv4/arp.c:152)" {
+table: "struct neigh_table arp_tbl\n(net/ipv4/arp.c:152)\n\nHash table of neighbour entries:\n- Key: IP address + dev pointer\n- Value: struct neighbour (MAC + state)\n\nMemory accounting:\n- gc_thresh1 (low water mark)\n- gc_thresh2 (soft limit)\n- gc_thresh3 (hard limit; refuse new entries)\n\nnet.ipv4.neigh.default.*\nDefaults: 128 / 512 / 1024.\nHeavy traffic often raises." {
   style.fill: "#dbeafe"
-  t_body: |md
-    Hash table of neighbour entries:
-    - Key: IP address + dev pointer
-    - Value: struct neighbour (MAC + state)
-
-    Memory accounting:
-    - net.ipv4.neigh.default.gc_thresh1 (low water mark)
-    - gc_thresh2 (soft limit)
-    - gc_thresh3 (hard limit; refuse new entries)
-
-    Default values: 128 / 512 / 1024.
-    Heavy-traffic systems often raise.
-  |
 }
 
-operations: "Operations" {
+operations: "Operations\n\n- neigh_lookup(arp_tbl, &ip, dev)\n   returns struct neighbour * (refcounted)\n- neigh_create()\n   inserts INCOMPLETE entry,\n   triggers ARP request\n- neigh_update()\n   on ARP reply, updates HA + state\n- neigh_event_send()\n   per-skb path; queues if not yet resolved\n- garbage collection (timer-driven)\n   reclaims old entries" {
   style.fill: "#fef3c7"
-  o_body: |md
-    - neigh_lookup(arp_tbl, &ip, dev)
-       returns struct neighbour * (refcounted)
-
-    - neigh_create()
-       inserts a new INCOMPLETE entry,
-       triggers ARP request
-
-    - neigh_update()
-       on ARP reply, updates HA + state
-
-    - neigh_event_send()
-       per-skb path; queues if not yet
-       resolved
-
-    - garbage collection (timer-driven)
-       reclaims old entries
-  |
 }
 
-userspace: "Inspect/manipulate" {
+userspace: "Inspect/manipulate\n\nip neigh show\nip neigh add 10.0.0.1\n   lladdr aa:bb:cc... dev eth0\nip neigh flush all\n\n/proc/net/arp (legacy view)\n/proc/sys/net/ipv4/neigh/eth0/*\n   (per-iface tunables)" {
   style.fill: "#dcfce7"
-  u_body: |md
-    ip neigh show
-    ip neigh add 10.0.0.1 lladdr aa:bb:cc... dev eth0
-    ip neigh flush all
-
-    /proc/net/arp (legacy view)
-    /proc/sys/net/ipv4/neigh/eth0/* (per-iface tunables)
-  |
 }
 
 table -> operations

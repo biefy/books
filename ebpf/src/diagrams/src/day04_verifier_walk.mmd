@@ -1,17 +1,17 @@
 flowchart TD
     Start(["BPF_PROG_LOAD"])
-    Walk["Verifier walks instructions\ninstruction-by-instruction"]
-    Branch{"Conditional jump?"}
-    Path1["Explore branch A\n(condition true)"]
-    Path2["Explore branch B\n(condition false)"]
-    Mark["Mark register types\non each branch"]
-    Conv{"Branches converge?"}
-    Merge["Merge register state\n(intersection of types)"]
-    Done["Reach exit\non every path"]
-    Pruned["State already explored?"]
+    Walk["Walk insns\none at a time"]
+    Branch{"Conditional\njump?"}
+    Path1["Branch A\n(true)"]
+    Path2["Branch B\n(false)"]
+    Mark["Mark reg\ntypes/branch"]
+    Conv{"Branches\nconverge?"}
+    Merge["Merge state\n(intersect)"]
+    Done["Reach exit\nevery path"]
+    Pruned{"State\nexplored?"}
     OK(["Accept"])
-    Limit{"Hit instruction limit\n(1M complexity)?"}
-    Reject(["Reject:\ncomplexity limit"])
+    Limit{"Insn limit?\n(1M)"}
+    Reject(["Reject:\ncomplexity"])
 
     Start --> Walk
     Walk --> Pruned

@@ -1,12 +1,12 @@
 flowchart TD
-    Frame["driver RX buffer<br/><b>does:</b> holds packet bytes before skb allocation<br/><b>why next:</b> XDP program gets first policy chance<br/><b>state:</b> xdp_buff points at DMA-backed data"]
-    XDP["XDP program<br/><b>does:</b> parses packet with data/data_end bounds checks<br/><b>why next:</b> return code selects owner of the buffer<br/><b>state:</b> packet may be modified in-place"]
+    Frame["driver RX buffer<br/><b>does:</b> holds packet bytes<br/>before skb allocation<br/><b>why next:</b> XDP gets first<br/>policy chance<br/><b>state:</b> xdp_buff points at<br/>DMA-backed data"]
+    XDP["XDP program<br/><b>does:</b> parses packet with<br/>data/data_end bounds checks<br/><b>why next:</b> return code<br/>selects buffer owner<br/><b>state:</b> packet may be<br/>modified in-place"]
     Action{"XDP action"}
-    Drop["XDP_DROP<br/><b>does:</b> frees/recycles RX buffer without skb<br/><b>state:</b> normal stack never sees packet"]
-    Tx["XDP_TX<br/><b>does:</b> sends same buffer back out the ingress device<br/><b>state:</b> driver owns buffer for transmit"]
-    Redirect["XDP_REDIRECT<br/><b>does:</b> queues buffer to devmap/cpumap/xskmap target<br/><b>state:</b> ownership transfers to redirect backend"]
-    Pass["XDP_PASS<br/><b>does:</b> tells driver to build skb from the buffer<br/><b>why next:</b> GRO/IP/netfilter/socket layers require skb<br/><b>state:</b> packet enters normal RX path"]
-    Stack["normal stack<br/><b>does:</b> GRO, tc ingress, Netfilter, route, transport<br/><b>state:</b> skb carries metadata through kernel stack"]
+    Drop["XDP_DROP<br/><b>does:</b> frees/recycles RX<br/>buffer without skb<br/><b>state:</b> stack never<br/>sees packet"]
+    Tx["XDP_TX<br/><b>does:</b> sends buffer back<br/>out ingress device<br/><b>state:</b> driver owns<br/>buffer for transmit"]
+    Redirect["XDP_REDIRECT<br/><b>does:</b> queues buffer to<br/>devmap/cpumap/xskmap target<br/><b>state:</b> ownership moves<br/>to redirect backend"]
+    Pass["XDP_PASS<br/><b>does:</b> driver builds skb<br/>from the buffer<br/><b>why next:</b> GRO/IP/netfilter/<br/>socket need skb<br/><b>state:</b> packet enters<br/>normal RX path"]
+    Stack["normal stack<br/><b>does:</b> GRO, tc ingress,<br/>Netfilter, route, transport<br/><b>state:</b> skb carries metadata<br/>through kernel stack"]
 
     Frame --> XDP --> Action
     Action --> Drop

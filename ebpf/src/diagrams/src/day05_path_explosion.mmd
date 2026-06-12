@@ -14,10 +14,8 @@ flowchart TD
     Choice -->|yes, n bounded| Yes
     Choice -->|no| No
     Yes --> Path1
-    Yes --> Path2
-    Yes --> PathN
-    Path1 --> Cost
-    Path2 --> Cost
+    Path1 --> Path2
+    Path2 --> PathN
     PathN --> Cost
     Cost --> Limit{"hit 1M instr<br/>complexity budget?"}
     Limit -->|yes| Reject(["REJECT:<br/>BPF program too large"])

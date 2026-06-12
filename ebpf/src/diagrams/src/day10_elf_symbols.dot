@@ -1,5 +1,5 @@
 digraph G {
-    rankdir=LR;
+    rankdir=TB;
     node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
 
     elf [label="/usr/bin/bash\n(ELF binary)\n\n- TEXT (executable code)\n- .symtab (may be stripped)\n- .dynsym (dynamic)\n- .plt + .got (lazy stubs)", fillcolor="#dbeafe"];

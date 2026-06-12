@@ -7,7 +7,7 @@ title: |md
 normal: "Normal BPF program (NOT sleepable)" {
   style.fill: "#fee2e2"
   n_body: |md
-    Runs in atomic / non-faultable context:
+    Atomic / non-faultable context:
     - kprobe in IRQ handler
     - tracepoint inside scheduler
     - XDP in NAPI softirq
@@ -18,23 +18,23 @@ normal: "Normal BPF program (NOT sleepable)" {
     - acquire normal mutexes
 
     **Cannot use:**
-    - bpf_copy_from_user (might fault)
-    - bpf_ima_inode_hash (calls into crypto)
-    - bpf_d_path (might fault on dentry)
+    - bpf_copy_from_user (faults)
+    - bpf_ima_inode_hash (crypto)
+    - bpf_d_path (faults on dentry)
   |
 }
 
 sleepable: "Sleepable BPF program (SEC suffix .s/)" {
   style.fill: "#dcfce7"
   s_body: |md
-    Runs in faultable context:
+    Faultable context:
     - fentry.s (sleepable trampoline)
     - lsm.s (sleepable LSM hook)
     - tracing iter
     - sk_lookup, cgroup{,_skb}.s
 
     **Can:**
-    - bpf_copy_from_user (page-fault if needed)
+    - bpf_copy_from_user (may fault)
     - bpf_d_path (may schedule)
     - longer-running operations
     - some allocators
@@ -55,5 +55,4 @@ decl: "Declaration adds .s/ to the SEC name" {
   |
 }
 
-normal -> decl
-sleepable -> decl
+normal -> sleepable -> decl

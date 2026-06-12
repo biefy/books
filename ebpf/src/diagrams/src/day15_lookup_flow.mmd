@@ -1,11 +1,11 @@
-flowchart LR
-    CLI["userspace add prefix<br/><b>does:</b> converts CIDR into LPM key {prefixlen, addr}<br/><b>why next:</b> map update persists policy for live XDP program<br/><b>state:</b> canonical key bytes"]
-    Update["bpf_map_update_elem<br/><b>does:</b> inserts/updates LPM trie node<br/><b>why next:</b> future packet lookups see new policy immediately<br/><b>state:</b> trie contains prefix and value"]
-    Packet["packet at XDP<br/><b>does:</b> extracts src/dst address into lookup key<br/><b>why next:</b> policy decision is map-driven<br/><b>state:</b> full-length key for longest-prefix search"]
-    Lookup["LPM trie lookup<br/><b>does:</b> walks from broad prefixes to most-specific match<br/><b>why next:</b> returned value determines verdict<br/><b>state:</b> best matching prefix or miss"]
+flowchart TD
+    CLI["userspace add prefix<br/><b>does:</b> converts CIDR into<br/>LPM key {prefixlen, addr}<br/><b>why next:</b> map update persists<br/>policy for live XDP program<br/><b>state:</b> canonical key bytes"]
+    Update["bpf_map_update_elem<br/><b>does:</b> inserts/updates<br/>LPM trie node<br/><b>why next:</b> future lookups<br/>see new policy immediately<br/><b>state:</b> trie has prefix and value"]
+    Packet["packet at XDP<br/><b>does:</b> extracts src/dst<br/>address into lookup key<br/><b>why next:</b> policy decision<br/>is map-driven<br/><b>state:</b> full-length key for<br/>longest-prefix search"]
+    Lookup["LPM trie lookup<br/><b>does:</b> walks from broad<br/>prefixes to most-specific match<br/><b>why next:</b> returned value<br/>determines verdict<br/><b>state:</b> best match or miss"]
     Verdict{"policy value?"}
-    Drop["XDP_DROP<br/><b>does:</b> consumes packet before skb allocation<br/><b>state:</b> denied prefix blocked"]
-    Pass["XDP_PASS<br/><b>does:</b> hands packet to normal stack<br/><b>state:</b> no deny match or allow value"]
+    Drop["XDP_DROP<br/><b>does:</b> consumes packet<br/>before skb allocation<br/><b>state:</b> denied prefix blocked"]
+    Pass["XDP_PASS<br/><b>does:</b> hands packet<br/>to normal stack<br/><b>state:</b> no deny match<br/>or allow value"]
 
     CLI --> Update
     Update -. shared map state .-> Lookup

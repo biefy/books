@@ -1,12 +1,20 @@
-direction: right
+vars: {
+  d2-config: {
+    layout-engine: elk
+  }
+}
+
+direction: down
 
 title: |md
-  ## BTF + CO-RE: compile once, run on any kernel
+  ## BTF + CO-RE
+  compile once,
+  run on any kernel
 | {near: top-center; shape: text}
 
 build: "Build host (kernel A)" {
   style.fill: "#fef3c7"
-  vmlinux_a: "/sys/kernel/btf/vmlinux\n(BTF for kernel A)" {shape: cylinder}
+  vmlinux_a: "/sys/kernel/btf/\nvmlinux\n(BTF for kernel A)" {shape: cylinder}
   bpftool_a: "bpftool btf dump\nformat c"
   vmlinux_h: "vmlinux.h\n(every kernel type)" {shape: document}
   src: "hello.bpf.c\n#include vmlinux.h"
@@ -17,11 +25,11 @@ build: "Build host (kernel A)" {
   src -> clang_a -> obj
 }
 
-target: "Target kernel B (different layout!)" {
+target: "Target kernel B\n(different layout!)" {
   style.fill: "#dbeafe"
-  vmlinux_b: "/sys/kernel/btf/vmlinux\n(BTF for kernel B)" {shape: cylinder}
+  vmlinux_b: "/sys/kernel/btf/\nvmlinux\n(BTF for kernel B)" {shape: cylinder}
   libbpf: "libbpf at load time"
-  relo: "for each CO-RE relo:\nfind field by name in B's BTF\npatch instruction with new offset"
+  relo: "for each CO-RE relo:\nfind field by name\nin B's BTF, patch\ninstruction with\nnew offset"
   loaded: "BPF program with\nB-correct field offsets" {shape: oval; style.fill: "#dcfce7"}
 
   vmlinux_b -> libbpf

@@ -1,7 +1,8 @@
 direction: down
 
 title: |md
-  ## BPF_MAP_TYPE_STACK_TRACE — store unique stacks once
+  ## BPF_MAP_TYPE_STACK_TRACE
+  store unique stacks once
 | {near: top-center; shape: text}
 
 call: "BPF program calls\n`bpf_get_stackid(ctx, &stacks, 0)`" {style.fill: "#dbeafe"}
@@ -15,19 +16,17 @@ hash: "Hash the frame array\n→ stackid (32-bit)" {style.fill: "#fef3c7"}
 map: "stacks map" {
   style.fill: "#dcfce7"
   m_layout: |md
-    Map (BPF_MAP_TYPE_STACK_TRACE):
-    ```
-    stackid → [ip0, ip1, ip2, ...]
-    ```
-    - Stored only once per unique stack
-    - Subsequent calls with same stack → same stackid
-    - Memory bounded by max_entries (unique stacks)
-    - You typically use stackid as a key in another map
-      (e.g., a histogram of "stackid → count")
+    Map type: STACK_TRACE
+    `stackid → [ip0, ip1, ...]`
+    - Stored once per unique stack
+    - Same stack → same stackid
+    - Bounded by max_entries
+    - Use stackid as a key in another map
+    - e.g. a histogram of "stackid → count"
   |
 }
 
 call -> walk -> frames -> hash -> map: "store"
-hash -> use: "return stackid"
+map -> use: "return stackid"
 
 use: "Use stackid as key\nin counter/histogram map" {style.fill: "#dcfce7"}
