@@ -57,45 +57,57 @@ DSQs are kernel-managed FIFO queues that hold runnable tasks waiting to be dispa
 - **`scx_bpf_create_dsq(id, node)`** — create a new DSQ with the given numeric id, on NUMA node `node`.
 
 Built-in DSQs:
-- **`SCX_DSQ_GLOBAL`** — single shared queue, all CPUs pull from it. Used by `scx_simple`.
+- **`SCX_DSQ_GLOBAL`** — single shared queue, all CPUs pull from it. (Note: a built-in DSQ like `SCX_DSQ_GLOBAL` *cannot* be used as a vtime priority queue — you can't `scx_bpf_dsq_insert_vtime` into it. That's why `scx_simple` creates its own custom shared DSQ instead; see below.)
 - **`SCX_DSQ_LOCAL`** — per-CPU queue. Each CPU has its own.
 
 Custom DSQs (created via `scx_bpf_create_dsq`) let you implement more complex policies: per-cgroup queues, priority queues, NUMA-local queues, etc.
 
 ## The lab — run scx_simple
 
-`scx_simple` is the "hello world" of sched_ext: a BPF scheduler that dispatches everything to a single global queue.
+`scx_simple` is the "hello world" of sched_ext: a BPF scheduler that dispatches everything to a single shared queue. (It creates its own custom DSQ with ID 0 — named `SHARED_DSQ` in the source — rather than using the built-in `SCX_DSQ_GLOBAL`, because its default mode orders that queue by vtime, which the built-in global DSQ doesn't support.)
 
 ### Build
 
 ```bash
 cd ~/code/linux/tools/sched_ext
 make
-ls
-# scx_simple  scx_central  scx_flatcg  scx_userland  ...
+ls build/bin
+# scx_central  scx_cpu0  scx_flatcg  scx_pair  scx_qmap  scx_sdt  scx_simple  scx_userland
 ```
+
+Note: the compiled scheduler binaries are emitted under `build/bin/`, not in the source directory — a bare `ls` in `tools/sched_ext` shows only the `.c`/`.bpf.c` sources, the `Makefile`, `include/`, and the `build/` directory.
 
 ### Run
 
 ```bash
-sudo ./scx_simple
+sudo ./build/bin/scx_simple
 ```
 
-Output:
+Output (the line reprints about once per second with cumulative counts that climb under load):
 ```
-local=12345 global=0
+local=842 global=58
+local=1577 global=141
 ```
+
+`local` counts tasks dispatched straight to a CPU's local DSQ (because `select_cpu` found an idle CPU for them); `global` counts tasks that went through the shared, vtime-ordered DSQ via `ops.enqueue`. On a busy system `global` is normally non-zero. That climbing counter *is* the proof tasks are flowing through scx_simple's enqueue/dispatch cycle.
 
 That's it. **Your system is now scheduled by BPF.**
 
-Run something that exercises scheduling:
+Run something that exercises scheduling. `stress-ng` isn't part of a base install — install it first (`sudo apt-get install -y stress-ng` on Debian/Ubuntu, `sudo dnf install -y stress-ng` on Fedora/RHEL). If you can't install a package, a portable fallback is `for i in $(seq $(nproc)); do yes >/dev/null & done` (stop it later with `pkill yes`).
 
 ```bash
 # In another terminal:
 stress-ng --cpu 4 --timeout 30
 ```
 
-Watch system responsiveness. With `scx_simple`, basic responsiveness is preserved (it's a working scheduler, just simple) but you're not getting CFS's fair-share guarantees — it's literally a global queue, FIFO-ish.
+While it runs, confirm scx_simple is actually in control:
+
+```bash
+cat /sys/kernel/sched_ext/state
+# enabled
+```
+
+(When no BPF scheduler is loaded this reads `disabled`.) Watch the `local=N global=M` line scx_simple prints each second — both counters should climb as stress-ng's workers cycle through the scheduler. With `scx_simple`, basic responsiveness is preserved (it's a working scheduler, just simple) but you're not getting CFS's fair-share guarantees — it's literally a shared queue, FIFO-ish.
 
 ### Read the source
 
@@ -127,7 +139,7 @@ The userspace component (`scx_simple.c`) is ~200 lines and handles:
 
 ### Stop it
 
-Ctrl-C in the `scx_simple` terminal. The watchdog's not needed — scx_simple exits cleanly, the kernel detects the link drop, CFS takes over. Re-run `stress-ng` to confirm CFS's fairness restored.
+Ctrl-C in the `scx_simple` terminal. The watchdog's not needed — scx_simple exits cleanly, the kernel detects the link drop, CFS takes over. Confirm: `cat /sys/kernel/sched_ext/state` now reads `disabled`. Re-run `stress-ng` and watch per-thread CPU share with `pidstat -t 1` or `top -H` — under CFS the worker threads converge to roughly equal CPU%, in contrast to scx_simple's single shared FIFO-ish queue. (Stop the `yes` fallback, if you used it, with `pkill yes`.)
 
 ## What to break
 
@@ -136,8 +148,8 @@ Ctrl-C in the `scx_simple` terminal. The watchdog's not needed — scx_simple ex
 Comment out `scx_bpf_dsq_move_to_local(SHARED_DSQ, 0)` in `simple_dispatch`. Run; CPUs have nothing to run; tasks pile up in the queue. After ~30s, watchdog ejects:
 
 ```
-sched_ext: BPF scheduler "simple" errored, disabling
-   stress-ng[12345] failed to run for 30.000s
+sched_ext: BPF scheduler "simple" disabled (runnable task stall)
+sched_ext: simple: stress-ng[12345] failed to run for 30.000s
 ```
 
 Check `dmesg`. The system recovers automatically. **Don't break dispatch in production. Production sched_ext schedulers all have safety paths to fall back if their custom logic can't dispatch.**
