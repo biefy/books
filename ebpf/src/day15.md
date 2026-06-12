@@ -151,8 +151,8 @@ static int parse_cidr(const char *s, struct ipv4_lpm_key *out) {
 }
 
 int main(int argc, char **argv) {
-    /* attach skel, get FD ... */
-    int fd = bpf_map__fd(skel->maps.deny);
+    /* the loader (block.c) pinned the maps; open them by path */
+    int fd = bpf_obj_get("/sys/fs/bpf/deny");
 
     if (!strcmp(argv[1], "add")) {
         struct ipv4_lpm_key k;
@@ -164,23 +164,79 @@ int main(int argc, char **argv) {
         parse_cidr(argv[2], &k);
         bpf_map_delete_elem(fd, &k);
     } else if (!strcmp(argv[1], "stats")) {
-        /* dump pass/drop from stats map */
+        int sfd = bpf_obj_get("/sys/fs/bpf/stats");
+        int ncpu = libbpf_num_possible_cpus();
+        __u64 vals[ncpu];
+        __u32 k0 = 0, k1 = 1; __u64 pass = 0, drop = 0;
+        bpf_map_lookup_elem(sfd, &k0, vals);    /* index 0 = pass */
+        for (int i = 0; i < ncpu; i++) pass += vals[i];
+        bpf_map_lookup_elem(sfd, &k1, vals);    /* index 1 = drop */
+        for (int i = 0; i < ncpu; i++) drop += vals[i];
+        printf("pass=%llu drop=%llu\n", pass, drop);
     }
 }
 ```
 
+### `block.c` — loader
+
+Neither artifact above attaches the program. Add a tiny loader (built by `make` as `./xdp_block`) that loads the object, **pins both maps** so the separate `blockcli` process can reach them, attaches the XDP program, and parks:
+
+```c
+/* block.c — built as ./xdp_block. Usage: sudo ./xdp_block <iface> */
+int main(int argc, char **argv) {
+    struct block_bpf *skel = block_bpf__open_and_load();
+    /* pin the maps under /sys/fs/bpf so blockcli can open them by path */
+    bpf_map__pin(skel->maps.deny,  "/sys/fs/bpf/deny");
+    bpf_map__pin(skel->maps.stats, "/sys/fs/bpf/stats");
+    bpf_program__attach_xdp(skel->progs.xdp_block,
+                            if_nametoindex(argv[1]));
+    pause();   /* hold the bpf_link open until the process is killed */
+}
+```
+
+The pin is what lets two processes share one trie: `xdp_block` owns the skeleton and the attachment; `blockcli` just opens `/sys/fs/bpf/deny` and `/sys/fs/bpf/stats` with `bpf_obj_get`. Killing `xdp_block` drops its `bpf_link` and auto-detaches the program.
+
 ### Run
+
+First stand up an isolated peer at `10.0.0.2` so there is actually something to ping — otherwise `ping` times out whether or not XDP is dropping, and the experiment proves nothing:
+
+```bash
+sudo ip netns add peer
+sudo ip link add veth0 type veth peer name veth1
+sudo ip link set veth1 netns peer
+sudo ip addr add 10.0.0.1/24 dev veth0 && sudo ip link set veth0 up
+sudo ip -n peer addr add 10.0.0.2/24 dev veth1 && sudo ip -n peer link set veth1 up
+```
+
+XDP runs on **RX (ingress)**, so the drop must happen on the echo *reply* — whose source address is `10.0.0.2`. Attach the program on `veth0`, the host side that *receives* those replies:
 
 ```bash
 make
-sudo ./xdp_block veth1 &
-sudo ./blockcli add 10.0.0.0/8
+sudo ./xdp_block veth0 &        # host side that receives the replies
 
-ping -c 3 10.0.0.2     # SHOULD time out, packets dropped
-sudo ./blockcli stats   # see drop count
+ping -c 3 10.0.0.2              # replies arrive on veth0 ingress -> PASS, works
+sudo ./blockcli add 10.0.0.0/8
+ping -c 3 10.0.0.2              # replies (saddr 10.0.0.2) match 10.0.0.0/8 -> XDP_DROP -> 100% loss
+sudo ./blockcli stats          # drop count climbs
 
 sudo ./blockcli del 10.0.0.0/8
-ping -c 3 10.0.0.2      # works again
+ping -c 3 10.0.0.2             # works again
+```
+
+The observation is the **before/after contrast**: the first ping gets replies (0% loss), and after `add 10.0.0.0/8` the replies are dropped on `veth0` ingress so ping reports 100% loss. `blockcli stats` confirms it with a non-zero drop count:
+
+```
+pass=<some number> drop=3
+```
+
+(`drop` should be 3 — one per dropped echo reply. Attaching to the in-netns `veth1` instead would *not* drop the replies, because they leave that side on TX, not RX.)
+
+Clean up when you're done — stop the loader (killing it drops the `bpf_link` and auto-detaches XDP) and remove the veth pair and namespace:
+
+```bash
+sudo pkill xdp_block          # stops the loader, auto-detaches the program
+sudo ip link del veth0        # removes the veth pair
+sudo ip netns del peer
 ```
 
 Now you have a userspace-controlled, line-rate firewall. Every API call updates the trie atomically; no XDP restart needed.
@@ -211,7 +267,13 @@ out->addr = htonl(a.s_addr);   /* WRONG — already big-endian */
 sudo bpftool map dump name deny
 ```
 
-The keys should look like `prefixlen 16 key 0x0a010000`. If you see `0x0001010a`, you double-byte-swapped.
+`bpftool` dumps a non-BTF LPM map as raw little-endian hex byte arrays — *not* as a decoded `prefixlen N key 0xN` string. For `10.1.0.0/16` you'll see:
+
+```
+key: 10 00 00 00 0a 01 00 00  value: 01 00 00 00
+```
+
+The first u32 is `prefixlen` in little-endian (`10 00 00 00` = 16); the next 4 bytes are the address in network order — `0a 01 00 00` = 10.1.0.0 (correct). If you double-swapped, the address bytes come out reversed: `00 00 01 0a`. (Add `-j` for decoded JSON.)
 
 ### Break 3 — Block your own SSH
 
