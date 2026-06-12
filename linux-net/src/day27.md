@@ -92,13 +92,25 @@ You can attach both to the same interface. They don't interfere — XDP runs at 
 ## Today's experiment
 
 ```bash
-# See if your driver supports native XDP
-ethtool -i eth0 | grep driver
-# Then check the corresponding documentation; or attach a no-op and see if generic-mode falls back
+# See if your driver supports native XDP. Find your NIC first — on most modern
+# distros and cloud VMs the primary NIC is enp0s3/ens5/eno1, not eth0.
+ip -br link                       # list interfaces, pick your NIC
+ethtool -i <iface> | grep driver  # e.g. virtio_net, mlx5_core, ixgbe
+# virtio_net and veth support native XDP; many cloud NICs only do generic mode.
 
-# Quick test on veth (always supports XDP)
+# Quick test on veth (always supports XDP). Put the peer in its OWN netns so the
+# frame is forced across the wire and is actually *received* on veth0's RX path.
+# If both ends share the root namespace, the kernel short-circuits via the
+# loopback fast-path, the frame never crosses the link, and the XDP program on
+# veth0 never runs (the ping would simply succeed and teach you nothing).
 sudo ip link add veth0 type veth peer name veth1
-sudo ip link set veth0 up; sudo ip link set veth1 up
+sudo ip netns add ns1
+sudo ip link set veth1 netns ns1
+sudo ip addr add 10.99.0.1/24 dev veth0
+sudo ip link set veth0 up
+sudo ip netns exec ns1 ip addr add 10.99.0.2/24 dev veth1
+sudo ip netns exec ns1 ip link set veth1 up
+sudo ip netns exec ns1 ip link set lo up
 
 # Tiny XDP program: drop everything
 cat << 'EOF' > /tmp/xdp_drop.bpf.c
@@ -109,28 +121,50 @@ int xdp_drop(struct xdp_md *ctx) { return XDP_DROP; }
 char _license[] SEC("license") = "GPL";
 EOF
 clang -O2 -target bpf -c /tmp/xdp_drop.bpf.c -o /tmp/xdp_drop.o
+# If clang errors with "'asm/types.h' file not found", add your arch include
+# path, e.g.: clang -O2 -target bpf -I/usr/include/x86_64-linux-gnu -c ...
 
 # Attach to veth0
 sudo ip link set veth0 xdp obj /tmp/xdp_drop.o sec xdp
 
-# Try to send packets through it
-sudo ip addr add 10.99.0.1/24 dev veth0
-sudo ip addr add 10.99.0.2/24 dev veth1
-ping -c 1 -I 10.99.0.2 10.99.0.1     # fails — XDP drops on veth0
+# Send traffic FROM ns1 so it is received on veth0's RX/XDP path. XDP_DROP kills
+# every frame — even the ARP request — so the echo requests never reach the
+# stack and get no replies. Expect 100% packet loss. Without -W 1, ping would
+# hang ~10 s on each unanswered probe before reporting the loss.
+sudo ip netns exec ns1 ping -c 3 -W 1 10.99.0.1
+#   3 packets transmitted, 0 received, 100% packet loss
 
-# Detach
+# Inspect while the program is STILL attached — before the detach/cleanup below.
+# Once you detach and delete veth0 there is nothing left for bpftool to show.
+sudo bpftool net show
+sudo bpftool prog show
+
+# Detach and ping again to confirm the contrast: now it succeeds.
 sudo ip link set veth0 xdp off
+sudo ip netns exec ns1 ping -c 3 -W 1 10.99.0.1
+#   3 packets transmitted, 3 received, 0% packet loss
 
 # Cleanup
 sudo ip link del veth0
+sudo ip netns del ns1
 ```
 
-Watch with `bpftool`:
+The two `bpftool` commands (run above, while the program is still attached) confirm the attachment. `bpftool net show` lists per-interface BPF attachments — look for an `xdp` entry under veth0, which confirms the program is bound at the **driver RX hook** (not tc/ingress):
 
-```bash
-sudo bpftool net show
-sudo bpftool prog show
 ```
+xdp:
+veth0(N) driver id M
+```
+
+`bpftool prog show` lists every loaded program; find the one of type `xdp` named `xdp_drop` whose `id` matches the `M` shown by `net show`:
+
+```
+M: xdp  name xdp_drop  tag <hex>  gpl
+	loaded_at ...  uid 0
+	xlated ...B  jited ...B  memlock 4096B
+```
+
+Your `N` and `M` will differ — the point is that the **same id appears in both outputs**, proving the loaded program is the one bound to veth0's RX path. Run these *before* the `xdp off` / `ip link del` step: once veth0 is gone, `net show` lists no XDP attachment for it.
 
 ## What to read in the kernel
 
