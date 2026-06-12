@@ -129,6 +129,20 @@ ip route show
 sudo ip route del 10.99.0.0/16
 ```
 
+The add is silent on success; `ip route show` confirms it by listing the new prefix:
+
+```
+10.99.0.0/16 dev lo scope link
+```
+
+To connect this back to the FIB lookup, leave the `fentry:fib_table_lookup` trace from the previous section running, then in another terminal:
+
+```bash
+ping -c 1 10.99.0.1
+```
+
+The trace prints `lookup daddr=10.99.0.1 table_id=254` — the LC-trie in the main table (254) now resolves the prefix you just added. Remember to run the `ip route del` above when you're done so your host table is left clean.
+
 ### Trace `ip_route_output_flow`
 
 ```bash
@@ -136,9 +150,18 @@ sudo bpftrace -e '
 fentry:ip_route_output_flow {
   printf("out: daddr=%s oif=%d\n", ntop(args->flp4->daddr), args->flp4->__fl_common.flowic_oif);
 }'
+
+# in another terminal:
+ping -c 1 8.8.8.8
 ```
 
-This is the outbound counterpart to `ip_route_input`.
+This is the outbound counterpart to `ip_route_input` — it fires for every locally-originated packet. You'll see one line per outbound route lookup:
+
+```
+out: daddr=8.8.8.8 oif=0
+```
+
+`oif=0` means the caller did not pin an egress interface, so the lookup is free to choose one. (A box that talks to the network constantly will print background lookups too, e.g. DNS resolvers and the like.) Press Ctrl-C to stop.
 
 ## What to break
 
@@ -149,13 +172,16 @@ Do not replace your host's real default route. Put the failure in a disposable n
 ```bash
 sudo ip netns add fibbreak
 sudo ip -n fibbreak link set lo up
-sudo ip -n fibbreak route add default via 10.99.99.99 dev lo
-sudo ip netns exec fibbreak ping -c 1 8.8.8.8   # fails inside the namespace only
+# onlink: tell the kernel to trust this gateway even though it is
+# not on any subnet configured on lo (lo carries only 127.0.0.1/8).
+sudo ip -n fibbreak route add default via 10.99.99.99 dev lo onlink
+sudo ip -n fibbreak route show                  # default via 10.99.99.99 dev lo onlink
+sudo ip netns exec fibbreak ping -c 1 8.8.8.8   # 100% packet loss, namespace only
 
 sudo ip netns del fibbreak
 ```
 
-The next-hop is unreachable, so the lookup succeeds but transmission cannot resolve a usable path. Your host routing table never changes.
+With `onlink` the route installs, so the FIB lookup succeeds and resolves a next-hop — but 10.99.99.99 answers no ARP, so transmission has nowhere to go and the ping reports 100% packet loss. (Without `onlink` the kernel rejects the off-subnet gateway outright with `Error: Nexthop has invalid gateway.` and the route is never added at all.) Either way your host routing table never changes, and `ip netns del` tears down the namespace and its routes completely.
 
 ### Inspect rt cache stats (legacy)
 
