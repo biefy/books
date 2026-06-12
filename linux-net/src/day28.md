@@ -141,14 +141,16 @@ Adoption is real but slower than the engineering benefits suggest. Notable users
 ## Today's experiment
 
 ```bash
-# Verify io_uring support
-ls /proc/kallsyms | grep io_uring_enter || cat /proc/version
+# Verify io_uring support (grep the file directly — /proc/kallsyms is a
+# regular file, so `ls | grep` would only ever match the path string).
+# The syscall wrappers show up as __x64_sys_io_uring_enter / __do_sys_io_uring_enter.
+grep -q io_uring_enter /proc/kallsyms && echo "io_uring: supported" || cat /proc/version
 
 # Install liburing if not present
 sudo apt install liburing-dev liburing2
 
-# Look at the examples
-ls /usr/share/doc/liburing/examples/
+# Look at the examples (the -dev package installs them under liburing-dev/)
+ls /usr/share/doc/liburing-dev/examples/
 
 # A trivial async-accept loop
 cat << 'EOF' > /tmp/iour_accept.c
@@ -175,10 +177,33 @@ int main() {
     io_uring_submit(&ring);
 
     struct io_uring_cqe *cqe;
-    io_uring_wait_cqe(&ring, &cqe);
+    io_uring_wait_cqe(&ring, &cqe);   /* CQE for the accept */
     int conn = cqe->res;
-    if (conn >= 0) { send(conn, "hi via io_uring\n", 16, 0); close(conn); }
     io_uring_cqe_seen(&ring, cqe);
+
+    if (conn >= 0) {
+        /* Reply through io_uring with a ZERO-COPY send so this experiment
+         * actually exercises the day's headline op (IORING_OP_SEND_ZC).
+         * io_uring_prep_send_zc(sqe, sockfd, buf, len, msg_flags, zc_flags). */
+        const char msg[] = "hi via io_uring\n";
+        sqe = io_uring_get_sqe(&ring);
+        io_uring_prep_send_zc(sqe, conn, msg, sizeof msg - 1, 0, 0);
+        io_uring_submit(&ring);
+
+        /* CQE 1: send result, carries IORING_CQE_F_MORE (more to come) */
+        io_uring_wait_cqe(&ring, &cqe);
+        printf("send  res=%d more=%d\n", cqe->res,
+               !!(cqe->flags & IORING_CQE_F_MORE));
+        io_uring_cqe_seen(&ring, cqe);
+
+        /* CQE 2: notification, carries IORING_CQE_F_NOTIF — buffer is now
+         * free to reuse (the NIC is done with the pinned pages). */
+        io_uring_wait_cqe(&ring, &cqe);
+        printf("notif flag=%d\n", !!(cqe->flags & IORING_CQE_F_NOTIF));
+        io_uring_cqe_seen(&ring, cqe);
+
+        close(conn);
+    }
 
     io_uring_queue_exit(&ring);
     close(s);
@@ -191,14 +216,37 @@ cc /tmp/iour_accept.c -o /tmp/iour_accept -luring && /tmp/iour_accept &
 nc localhost 7777
 ```
 
-Watch the kernel side:
+The server handles exactly one accept (one `io_uring_prep_accept` + one CQE) and then exits. You should see the single greeting line, after which `nc` exits because the server closes the connection:
+
+```
+hi via io_uring
+```
+
+If nothing prints, the accept op never completed. The server's own stdout shows the two-CQE zero-copy pattern from the prose — the send result (with `F_MORE`) followed by the buffer-free notification (with `F_NOTIF`):
+
+```
+send  res=16 more=1
+notif flag=1
+```
+
+**Cleanup:** the server self-exits after one connection. If you start the bpftrace watch first and skip (or fail) the `nc` step, the backgrounded server stays blocked in `io_uring_wait_cqe` holding port 7777 — stop it with `pkill -f iour_accept`.
+
+Watch the kernel side. Trace the ops this program actually submits — the async accept and the zero-copy send — and bound it with an `exit()` so it does not run forever (the original probes traced `io_send`/`io_recvmsg`, ops this workload never issues, so they would stay permanently blank):
 
 ```bash
-sudo bpftrace -e '
-fentry:io_send { @send = count(); }
-fentry:io_recvmsg { @recv = count(); }
-interval:s:5 { print(@send); print(@recv) }'
+sudo bpftrace -e 'fentry:io_accept  { @accept = count(); }
+fentry:io_send_zc { @zc = count(); }
+interval:s:5 { print(@accept); print(@zc); exit(); }'
 ```
+
+After running `/tmp/iour_accept` and connecting once with `nc localhost 7777`, expect one of each (connect again for higher counts):
+
+```
+@accept: 1
+@zc: 1
+```
+
+Probe names must match the submitted op: a plain `recv` goes through `io_recv`, `recvmsg` through `io_recvmsg`, `send` through `io_send`, and ZC send through `io_send_zc`.
 
 ## What to read in the kernel
 
