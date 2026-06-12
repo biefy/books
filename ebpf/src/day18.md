@@ -61,9 +61,20 @@ This is the densest lab so far; budget the full 90 minutes.
 ### Setup
 
 ```bash
-sudo apt install libxdp-dev libbpf-dev linux-headers-$(uname -r)
+# BPF + userspace build toolchain: clang/llvm compile the BPF object,
+# bpftool generates vmlinux.h, libxdp/libbpf supply the AF_XDP ring + loader helpers.
+sudo apt install clang llvm bpftool libxdp-dev libbpf-dev linux-headers-$(uname -r)
+# On some distros bpftool ships in linux-tools-$(uname -r) / linux-tools-common instead.
+
 git clone https://github.com/xdp-project/xdp-tutorial
-# Use xdp-tutorial/advanced03-AF_XDP as a reference
+# We build and run xdp-tutorial/advanced03-AF_XDP below; the listings in this
+# chapter are an annotated walk-through of what that example does.
+```
+
+The BPF object includes `vmlinux.h`. If you compile it yourself rather than using the tutorial Makefile, generate that header first with bpftool:
+
+```bash
+bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h
 ```
 
 ### `xsk.bpf.c`
@@ -91,7 +102,9 @@ int xsk_redirect(struct xdp_md *ctx)
 }
 ```
 
-### `xsk_recv.c` — userspace receiver (skeleton)
+### `xsk_recv.c` — userspace receiver (annotated walk-through)
+
+> This listing is **reference-only** — read it to understand the AF_XDP lifecycle, don't compile it verbatim. It deliberately elides glue: it never loads the BPF object, so `xsks_map_fd` and `exiting` have no source here, and the `stdio.h`/`unistd.h`/`stdlib.h`/`signal.h` includes are omitted. To actually **Run**, build the complete `xdp-tutorial/advanced03-AF_XDP` example below — it wires all of this up (loading the object and obtaining the XSKMAP fd through `xsk_socket__create`, installing a SIGINT handler to set `exiting`).
 
 ```c
 #include <bpf/libbpf.h>
@@ -184,13 +197,40 @@ The important lifecycle is: create UMEM, bind an AF_XDP socket to `(ifname, queu
 
 ### Run
 
+First build a topology. XDP/AF_XDP on `veth1` only ever sees frames arriving **into** `veth1`, so the traffic has to originate from the peer end — we put that peer in its own namespace:
+
 ```bash
-sudo ./xsk_recv veth1
-# Other terminal: send packets
-ping -c 5 10.0.0.2
+# Topology: veth0 (in lab netns) <-> veth1 (host, runs the AF_XDP receiver)
+sudo ip netns add lab
+sudo ip link add veth0 type veth peer name veth1
+sudo ip link set veth0 netns lab
+sudo ip netns exec lab ip addr add 10.0.0.1/24 dev veth0
+sudo ip netns exec lab ip link set veth0 up
+sudo ip addr add 10.0.0.2/24 dev veth1
+sudo ip link set veth1 up
 ```
 
-You should see raw frame bytes printed. On veth, stop there: it proves the redirect/ring lifecycle. Use a supported physical NIC and driver before making zero-copy throughput claims with packet generators (`pktgen`, `trafgen`).
+Now build and run the complete example (the chapter listings are a walk-through of it):
+
+```bash
+cd xdp-tutorial/advanced03-AF_XDP
+make
+sudo ./af_xdp_user -d veth1
+```
+
+In another terminal, drive ingress **into** `veth1` from the peer side:
+
+```bash
+sudo ip netns exec lab ping -c 5 10.0.0.2
+```
+
+You should see raw frame bytes / per-packet stats printed by the receiver. The XDP program redirects the ICMP echo requests to the AF_XDP socket *before* they reach the stack, so `ping` itself gets no replies — that's expected; all you care about is that the receiver prints the frames it pulled off the RX ring. On veth, stop there: it proves the redirect/ring lifecycle. Use a supported physical NIC and driver before making zero-copy throughput claims with packet generators (`pktgen`, `trafgen`).
+
+Tear down the lab when you're done (this also removes the veth pair):
+
+```bash
+sudo ip netns del lab
+```
 
 ---
 
@@ -198,11 +238,17 @@ You should see raw frame bytes printed. On veth, stop there: it proves the redir
 
 ### Break 1 — Forget the FILL ring
 
-Skip the pre-fill. Driver has no buffers to DMA into. RX ring stays empty; you observe nothing. The FILL ring is your handshake to the driver.
+Skip the pre-fill. The driver has no buffers to DMA into, so the RX ring stays empty and the receiver prints nothing. Confirm the pings are actually arriving with `sudo tcpdump -ni veth1 icmp` in another terminal — when tcpdump shows the echo requests but the receiver still prints nothing, you know the empty RX ring is caused by the missing FILL pre-fill, not by absent traffic. The FILL ring is your handshake to the driver.
 
 ### Break 2 — Don't recycle
 
-Skip the "refill FILL ring" step in the polling loop. After 4096 packets, the FILL ring is empty; the driver drops new packets. Watch a `ethtool -S veth1` counter increment.
+Skip the "refill FILL ring" step in the polling loop. After 4096 packets, the FILL ring is empty and the driver has nowhere to DMA new frames, so it drops them. Watch the per-queue drop counter climb in another terminal:
+
+```bash
+watch -n1 "ethtool -S veth1 | grep xdp_drops"
+```
+
+`rx_queue_0_xdp_drops` increments once the FILL ring drains (veth exposes per-queue `rx_queue_N_xdp_*` stats — pick the queue you bound to). A more direct, driver-independent check is to poll the socket's own counters with `getsockopt(xsk_fd, SOL_XDP, XDP_STATISTICS, &stats, &len)` and watch `stats.rx_dropped` rise, since redirect-to-a-starved-socket drops are accounted at the socket layer rather than always surfacing in a generic ethtool stat.
 
 ### Break 3 — Multi-queue
 
