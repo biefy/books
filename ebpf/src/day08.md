@@ -54,14 +54,43 @@ ls /sys/kernel/tracing/events/
 ls /sys/kernel/tracing/events/sched/
 
 # Format of a specific tracepoint (the struct you'd get from raw):
-cat /sys/kernel/tracing/events/sched/sched_switch/format
+sudo cat /sys/kernel/tracing/events/sched/sched_switch/format
 ```
 
-Or, less ergonomically but BPF-aware:
+The two `ls` commands run fine unprivileged — the event directories are mode `0755`. But each `format` file is mode `0440 root:root`, so reading one needs `sudo` even though the directory above it is world-traversable. You'll see the struct layout, e.g.:
+
+```
+name: sched_switch
+ID: 310
+format:
+	field:char prev_comm[16];	offset:8;	size:16;	signed:0;
+	field:pid_t prev_pid;	offset:24;	size:4;	signed:1;
+	field:int prev_prio;	offset:28;	size:4;	signed:1;
+	field:long prev_state;	offset:32;	size:8;	signed:1;
+	field:char next_comm[16];	offset:40;	size:16;	signed:0;
+	field:pid_t next_pid;	offset:56;	size:4;	signed:1;
+	field:int next_prio;	offset:60;	size:4;	signed:1;
+...
+```
+
+Those `prev_*`/`next_*` fields are exactly the *copied* struct a regular `tracepoint/...` program receives.
+
+For a BPF-aware view of what your kernel exposes, `perf` lists every registered tracepoint by name:
 
 ```bash
-sudo bpftool perf list  # tracepoints active on this system
+sudo perf list 'sched:*'   # all sched tracepoints
 ```
+
+```
+  sched:sched_migrate_task                           [Tracepoint event]
+  sched:sched_process_exec                           [Tracepoint event]
+  sched:sched_process_fork                           [Tracepoint event]
+  sched:sched_switch                                 [Tracepoint event]
+  sched:sched_wakeup                                 [Tracepoint event]
+  ...
+```
+
+(Note: `sudo bpftool perf list` is *not* a way to discover tracepoints — it lists BPF programs currently attached to perf events, so on an idle box with nothing loaded it prints nothing at all.)
 
 Common families you should know about:
 
