@@ -83,7 +83,7 @@ Two effects:
 - **Lower vtime** = pushed earlier in the vtime-ordered DSQ; runs sooner.
 - **Longer slice** = more CPU time per scheduling round before being preempted.
 
-The hierarchy walk uses `bpf_cgroup_ancestor()` rather than a hand-rolled `cg = cg->parent` loop. There's a reason: `struct cgroup` has **no `parent` field** — the parent link lives at `cgrp->self.parent` as a `cgroup_subsys_state *`, not a `cgroup *`. Dereferencing a nonexistent `cg->parent` won't even compile against the real headers, and a manual pointer-chasing walk is hard to make the verifier accept. `bpf_cgroup_ancestor(cgrp, level)` is the idiomatic kfunc: it returns the ancestor at a given depth as an acquired reference (release it with `bpf_cgroup_release`). We drive it with `bpf_for(lvl, 0, owned->level + 1)` — the same pattern `scx_flatcg.bpf.c` uses. `bpf_for()` (from `bpf_experimental.h`) gives the verifier a provable iteration bound even though the limit (`owned->level`) is a runtime value read from memory; a plain `for` comparing against `owned->level` would be rejected.
+The hierarchy walk uses `bpf_cgroup_ancestor()` rather than a hand-rolled `cg = cg->parent` loop. There's a reason: `struct cgroup` has **no `parent` field** — the parent link lives at `cgrp->self.parent` as a `cgroup_subsys_state *`, not a `cgroup *`. Dereferencing a nonexistent `cg->parent` won't even compile against the real headers, and a manual pointer-chasing walk is hard to make the verifier accept. `bpf_cgroup_ancestor(cgrp, level)` is the idiomatic kfunc: it returns the ancestor at a given depth as an acquired reference (release it with `bpf_cgroup_release`). We drive it with `bpf_for(lvl, 0, owned->level + 1)` — the same pattern `scx_flatcg.bpf.c` uses. `bpf_for()` gives the verifier a provable iteration bound even though the limit (`owned->level`) is a runtime value read from memory; a plain `for` comparing against `owned->level` would be rejected. You don't need to add any include for it: `<scx/common.bpf.h>` (already included by `scx_simple.bpf.c`) pulls `bpf_for` in transitively — exactly as `scx_flatcg.bpf.c` uses it with no `bpf_experimental.h` include. (Adding `#include <bpf/bpf_experimental.h>` yourself actually breaks the scx build: that header isn't on the sched_ext include path and clang fails with `'bpf/bpf_experimental.h' file not found`.)
 
 ### Userspace side: pass the cgroup ID
 
@@ -116,43 +116,122 @@ fprintf(stderr, "priority cgroup id = %llu\n", skel->rodata->priority_cgroup_id)
 
 (`rodata->priority_cgroup_id` is the userspace handle for the BPF program's `const volatile __u64 priority_cgroup_id` — settable before load, read-only after.)
 
+**Confirm the printed id is NON-ZERO** — it should look like:
+
+```
+priority cgroup id = 12046204
+```
+
+If it prints `0`, `name_to_handle_at()` failed (wrong path, or the directory isn't on cgroup2). Verify `/sys/fs/cgroup/priority` exists and `mount | grep cgroup2` lists `/sys/fs/cgroup`. A `0` here silently disables the entire feature, because the BPF side gates everything behind `if (priority_cgroup_id)` — you'd see no scheduling effect and be unable to tell "my change didn't help" from "the code never ran." To fail loudly instead, add before `scx_simple__attach()`:
+
+```c
+if (skel->rodata->priority_cgroup_id == 0) {
+    fprintf(stderr, "FATAL: could not read priority cgroup id; "
+                    "create /sys/fs/cgroup/priority first\n");
+    return 1;
+}
+```
+
 ### Build and run
+
+**Prerequisites.** This step needs three non-default tools — install them first:
+
+```bash
+sudo apt-get install -y stress-ng sysbench   # load generator + CPU benchmark
+```
+
+(It also assumes the kernel built at `~/code/linux` with sched_ext enabled, established on earlier days.)
 
 ```bash
 cd ~/code/linux/tools/sched_ext
 make
 sudo ./scx_simple &
 
-# Heavy load (no cgroup membership):
+# The "Setting up" section moved THIS shell into /priority. Move it back to the
+# root cgroup first, so the heavy load below inherits root (NOT /priority) —
+# otherwise BOTH the load and the benchmark run in /priority and there is no
+# contrast to observe.
+echo $$ | sudo tee /sys/fs/cgroup/cgroup.procs
+
+# Heavy load (root cgroup, NOT /priority):
 stress-ng --cpu 8 --timeout 60 &
 
-# In the priority cgroup, run a benchmark:
+# Prove the split before benchmarking:
+cat /proc/$(pgrep -n stress-ng)/cgroup    # expect 0::/   (stress-ng in root)
+cat /proc/$$/cgroup                        # expect 0::/   (shell still in root)
+
+# NOW move this shell into the priority cgroup and run the benchmark:
 echo $$ | sudo tee /sys/fs/cgroup/priority/cgroup.procs
+cat /proc/$$/cgroup                        # expect 0::/priority
 sysbench --threads=1 --cpu-max-prime=20000 cpu run
 
 # Compare to running WITHOUT the priority modification (revert and re-test).
 ```
 
-Your sysbench in the priority cgroup should complete faster than baseline despite the competing stress-ng.
+The two `cat /proc/.../cgroup` lines are the contrast check: the load shows `0::/` while the benchmark shell shows `0::/priority`. Your sysbench in the priority cgroup should complete faster than baseline despite the competing stress-ng.
 
 ### Measure
 
-```bash
-# Latency / fairness measurement
-schedtool -p 0 -- sysbench --threads=8 --cpu-max-prime=20000 cpu run
+Measure throughput directly — run the same benchmark once from inside `/priority` and once from the root cgroup, both while `stress-ng` loads the box, and compare the `events per second` lines. (Don't wrap it in `schedtool -p N`: that sets a real-time policy, which moves the task OUT of the sched_ext class entirely, so it would no longer exercise your cgroup-priority logic.)
 
-# Per-cgroup CPU usage
+```bash
+stress-ng --cpu 8 --timeout 60 &
+
+# Run A — inside the priority cgroup:
+echo $$ | sudo tee /sys/fs/cgroup/priority/cgroup.procs
+sysbench --threads=8 --cpu-max-prime=20000 cpu run | grep -E 'events per second|total time'
+
+# Run B — back in the root cgroup:
+echo $$ | sudo tee /sys/fs/cgroup/cgroup.procs
+sysbench --threads=8 --cpu-max-prime=20000 cpu run | grep -E 'events per second|total time'
+```
+
+Under contention, Run A (in `/priority`) should report a noticeably higher `events per second` than Run B. Cross-check with the per-cgroup CPU accounting:
+
+```bash
 cat /sys/fs/cgroup/priority/cpu.stat
 cat /sys/fs/cgroup/cpu.stat
 ```
 
-Compute the throughput ratio. With the priority modification, the priority cgroup should get noticeably more CPU under contention.
+Compare the `usage_usec` fields — `/priority` should have accumulated more CPU time:
+
+```
+usage_usec 20946205000
+user_usec 16795163000
+system_usec 4151042000
+...
+```
+
+With the priority modification, the priority cgroup gets noticeably more CPU under contention; without it the two runs should be roughly equal.
 
 ## What to break, in order
 
 ### Walk the cgroup hierarchy correctly
 
-If your priority cgroup contains *child* cgroups (e.g., `/priority/work` and `/priority/play`), tasks in those children should also count. The `bpf_cgroup_ancestor` walk above handles this — it checks every ancestor from the task's own cgroup up to the root, so a match at the `/priority` level still triggers for tasks nested below it. **Test with a child cgroup**: create `/priority/work`, put a task there, verify the priority logic still triggers.
+If your priority cgroup contains *child* cgroups (e.g., `/priority/work` and `/priority/play`), tasks in those children should also count. The `bpf_cgroup_ancestor` walk above handles this — it checks every ancestor from the task's own cgroup up to the root, so a match at the `/priority` level still triggers for tasks nested below it.
+
+**To *verify* it triggers, give the matched branch a direct observable.** Throughput alone is too noisy to confirm a nested match. Add a `bpf_printk` inside the matched-ancestor branch in `simple_enqueue`, right before the `break`:
+
+```c
+if (anc->kn->id == priority_cgroup_id) {
+    vtime -= 1000000;
+    slice *= 2;
+    bpf_printk("prio match: comm=%s\n", p->comm);   /* observe the hit */
+    bpf_cgroup_release(anc);
+    break;
+}
+```
+
+Then create the child cgroup, run a task in it, and watch the trace:
+
+```bash
+sudo mkdir -p /sys/fs/cgroup/priority/work
+echo $$ | sudo tee /sys/fs/cgroup/priority/work/cgroup.procs
+sudo cat /sys/kernel/debug/tracing/trace_pipe &
+sysbench --threads=1 --cpu-max-prime=20000 cpu run
+```
+
+Expect `trace_pipe` to print a line like `prio match: comm=sysbench` for the task spawned in `/priority/work`, confirming the ancestor walk matched at the parent (`/priority`) level for the nested task. (`p->comm` is the right field for the task name.) If you'd rather not print on the hot path, increment a file-scope counter — `u64 prio_hits = 0;` then `prio_hits++;` in the branch — and read it with `sudo bpftool map dump name scx_simp.bss`; the count should climb once the nested task is enqueued.
 
 ### Negative vtime
 
@@ -161,6 +240,20 @@ vtime -= 1000000000;     /* huge decrement */
 ```
 
 Decrementing by a large value can underflow `u64`. The vtime is a u64; signed math doesn't apply. Symptom: tasks in the priority cgroup get insanely-low vtime, scheduled forever to the exclusion of others; watchdog ejects after 30s.
+
+**To confirm the watchdog actually fired** (rather than the box just being slow), watch two things. The backgrounded `scx_simple` process exits on its own and prints an exit reason to its terminal. On the kernel side, run this in another terminal to catch the disable message:
+
+```bash
+sudo dmesg -w | grep sched_ext
+```
+
+Within ~30s of the stall you'll see a line of the form:
+
+```
+sched_ext: BPF scheduler "simple" disabled (runnable task stall ...)
+```
+
+The exact reason text varies by kernel version (a non-stall fault shows `(runtime error)` instead), but the `BPF scheduler "..." disabled` shape is constant. If `scx_simple` is still running and no such line appears, the watchdog has *not* ejected — the box is just slow.
 
 Bound your decrement to reasonable values, or use a separate priority queue. (See "alternative: per-cgroup DSQs" below.)
 
@@ -180,6 +273,15 @@ Instead of vtime tricks, give the priority cgroup its own DSQ that you consume f
  * won't load. */
 s32 BPF_STRUCT_OPS_SLEEPABLE(simple_init)
 {
+    /* This snippet REPLACES the stock simple_init, so it must still create
+     * SHARED_DSQ. SHARED_DSQ (#defined as 0 in scx_simple.bpf.c) is a
+     * user-created DSQ — id 0 routes through find_user_dsq, not a built-in
+     * global DSQ — so inserting into it without creating it first triggers a
+     * scx_bpf_error and the scheduler is ejected on the first non-priority
+     * enqueue. Create both. */
+    s32 ret = scx_bpf_create_dsq(SHARED_DSQ, -1);
+    if (ret)
+        return ret;
     return scx_bpf_create_dsq(PRIO_DSQ, -1);
 }
 
