@@ -107,20 +107,25 @@ Modern code uses **tcx** (`bpf link`-based) instead, which doesn't need `clsact`
 
 Without AQM, big buffers hide loss until they overflow. TCP keeps probing for more bandwidth; the buffer fills; latency explodes; only then does TCP see drops and back off. By the time TCP reacts, every packet in the queue has been delayed.
 
-Test it:
+Test it (needs `iperf3`: `sudo apt install -y iperf3`; replace `some-server` with a host you can saturate):
 
 ```bash
+# Capture the current qdisc so we can put it back exactly.
+orig=$(tc qdisc show dev eth0 | head -1); echo "was: $orig"
+
 # Default: fq_codel
 ping -c 5 8.8.8.8                  # baseline RTT, say 30ms
 iperf3 -c some-server -t 60 &      # saturate uplink
 ping -c 5 8.8.8.8                  # should stay close to 30ms — fq_codel keeps queue short
+pkill -f 'iperf3 -c'               # stop this saturator BEFORE changing qdiscs (clean contrast)
 
 # Force pfifo_fast (drop-tail, no AQM)
 sudo tc qdisc replace dev eth0 root pfifo_fast
 iperf3 -c some-server -t 60 &
 ping -c 5 8.8.8.8                  # may shoot up to seconds
+pkill -f 'iperf3 -c'               # stop the saturator
 
-# Restore whatever qdisc your interface had before this test.
+# Restore the qdisc your interface had before this test (commonly fq_codel).
 sudo tc qdisc replace dev eth0 root fq_codel
 ```
 
@@ -133,43 +138,74 @@ The contrast is stark on home networks with cable modems. Better routers ship `f
 tc qdisc show
 tc -s qdisc show dev eth0     # with stats
 
-# Trace qdisc enqueue/dequeue
+# Count qdisc pump invocations (the dequeue/transmit loop, __qdisc_run).
+# __qdisc_run is the DEQUEUE side, not enqueue — enqueue is the qdisc's
+# ->enqueue op called from __dev_xmit_skb, which this probe does not count.
+# Your own SSH egress keeps it firing, so expect a small non-zero count every
+# 5s (~6-40 on an idle box). Generate traffic (ping -f, iperf3) to watch it
+# climb. Runs until you press Ctrl-C.
 sudo bpftrace -e '
 fentry:__qdisc_run { @ = count(); }
 interval:s:5 { print(@); clear(@) }'
 
-# Add a token-bucket rate limit (lab on lo). Save the old qdisc first.
-tc qdisc show dev lo > /tmp/lo.qdisc.before
-trap 'sudo tc qdisc replace dev lo root noqueue 2>/dev/null || true; rm -f /tmp/lo.qdisc.before' EXIT
+# Add a token-bucket rate limit (lab on lo). lo's default qdisc is `noqueue`,
+# so that is what we restore to.
+trap 'sudo tc qdisc replace dev lo root noqueue 2>/dev/null || true; pkill -f "iperf3 -s" 2>/dev/null || true' EXIT
 sudo tc qdisc replace dev lo root tbf rate 1mbit burst 32kbit latency 50ms
 
-# Test: should be slow
+# Test: should be slow (~1 Mbit/s). Needs iperf3: `sudo apt install -y iperf3`.
 iperf3 -s -p 5201 &
-iperf3 -c 127.0.0.1 -p 5201 -t 5
-# ~1 Mbit/s
+sleep 0.5                                   # let the server start listening
+iperf3 -c 127.0.0.1 -p 5201 -t 30 &         # run long enough to sample the queue
 
-# Watch the qdisc backlog grow
+# While it runs, sample the qdisc. This tbf (1mbit / 32kbit burst / 50ms) is
+# tight enough that it mostly DROPS rather than deeply queues, so the reliable
+# observables are the CUMULATIVE counters, not the instantaneous backlog:
 tc -s qdisc show dev lo
-# (look for backlog: NNNNb XXp)
+# qdisc tbf 8001: root refcnt 2 rate 1Mbit burst ... lat 50ms
+#  Sent <bytes> bytes <pkt> pkt (dropped <N>, overlimits <N> requeues 0)
+#  backlog 0b 0p requeues 0
+# `dropped`/`overlimits`/`Sent` climb as the tbf rate-limits and SURVIVE after
+# the transfer ends; `backlog` is instantaneous and drains back to `0b 0p` once
+# the client stops, so don't expect to "watch it grow" on this tight limit.
+
+wait                                        # let the client finish
+pkill -f 'iperf3 -s'                        # stop the background server
 
 # Restore loopback's usual noqueue qdisc
 sudo tc qdisc replace dev lo root noqueue
 ```
 
-### Switch CC to BBR; observe with default qdisc vs fq
+### Switch CC to BBR and confirm `fq` pacing is active
 
 ```bash
 old_cc=$(cat /proc/sys/net/ipv4/tcp_congestion_control)
-trap 'sudo sysctl -w net.ipv4.tcp_congestion_control=$old_cc; sudo tc qdisc replace dev lo root noqueue 2>/dev/null || true' EXIT
+trap 'sudo sysctl -w net.ipv4.tcp_congestion_control=$old_cc; sudo tc qdisc replace dev lo root noqueue 2>/dev/null || true; pkill -f "iperf3 -s" 2>/dev/null || true' EXIT
 sudo modprobe tcp_bbr
 sudo sysctl -w net.ipv4.tcp_congestion_control=bbr
 
-# With default fq_codel, BBR's pacing is approximate
-# With fq, BBR's pacing is honored:
+# BBR needs fq (or hardware pacing) for its sk_pacing_rate to be honored.
 sudo tc qdisc replace dev lo root fq
 
-iperf3 -c 127.0.0.1 -p 5201 -t 5
-ss -tin       # look for 'ca:bbr' and check cwnd
+# Self-contained server for this block (needs iperf3: `sudo apt install -y iperf3`).
+iperf3 -s -p 5201 &
+sleep 0.5
+iperf3 -c 127.0.0.1 -p 5201 -t 20 &        # background it so we can sample mid-flight
+sleep 2
+
+# Congestion control must be sampled WHILE the transfer is in flight.
+# ss prints the cc as a BARE token (`bbr`), NOT `ca:bbr`; cwnd and pacing_rate
+# are on the same per-socket info line:
+ss -tin dst 127.0.0.1:5201 | grep -E 'bbr|cwnd'
+# Example (from a real bbr socket):
+#   bbr wscale:6,10 ... cwnd:37 ... bbr:(bw:...,pacing_gain:2.88672,cwnd_gain:2.88672) pacing_rate 21003088bps
+wait
+pkill -f 'iperf3 -s' 2>/dev/null || true
+
+# NOTE: loopback has no bandwidth bottleneck, so this confirms BBR is *active*
+# (the `bbr` token + a live pacing_rate) and that `fq` is installed — but you
+# cannot measure an fq-vs-fq_codel pacing *difference* here. For a real contrast
+# you need an actual NIC or a veth+netem bottleneck (see Day 16).
 
 sudo sysctl -w net.ipv4.tcp_congestion_control=$old_cc
 sudo tc qdisc replace dev lo root noqueue    # restore
