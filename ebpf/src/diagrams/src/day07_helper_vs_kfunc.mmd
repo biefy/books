@@ -1,11 +1,11 @@
-flowchart LR
-    Call["<b>BPF call site</b><br/>source names either a helper or a __ksym kfunc<br/><b>handoff:</b> loader/verifier resolves the callable target<br/><b>state:</b> call instruction is in BPF bytecode"]
+flowchart TD
+    Call["<b>BPF call site</b><br/>source names a helper or a __ksym kfunc<br/><b>handoff:</b> loader/verifier resolves the target<br/><b>state:</b> call instruction in BPF bytecode"]
 
-    Helper["<b>helper path</b><br/>compiler encodes a stable BPF_FUNC_* UAPI number<br/><b>verification:</b> program-type helper table supplies arg and return prototypes<br/><b>state:</b> runtime dispatches through the fixed helper table"]
+    Helper["<b>helper path</b><br/>compiler encodes a stable BPF_FUNC_* UAPI number<br/><b>verification:</b> program-type helper table<br/>supplies arg and return prototypes<br/><b>state:</b> runtime dispatches via fixed helper table"]
 
-    Kfunc["<b>kfunc path</b><br/>libbpf resolves a BTF symbol name from __ksym relocation<br/><b>verification:</b> BTF signature, flags, acquire/release rules must match<br/><b>state:</b> program calls an in-kernel function whose availability can vary"]
+    Kfunc["<b>kfunc path</b><br/>libbpf resolves a BTF symbol<br/>from __ksym relocation<br/><b>verification:</b> BTF signature, flags,<br/>acquire/release rules must match<br/><b>state:</b> calls in-kernel function;<br/>availability can vary"]
 
-    Result["<b>same instruction shape, different contract</b><br/>helpers are stable UAPI, kfuncs are typed kernel extension points<br/><b>state:</b> load succeeds only if the target is allowed for this program"]
+    Result["<b>same instruction shape, different contract</b><br/>helpers are stable UAPI;<br/>kfuncs are typed kernel extension points<br/><b>state:</b> load succeeds only if target<br/>is allowed for this program"]
 
     Call --> Helper --> Result
     Call --> Kfunc --> Result

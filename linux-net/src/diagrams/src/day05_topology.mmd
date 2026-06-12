@@ -1,23 +1,21 @@
 flowchart TD
-    Init["init_net (default ns)"]
-    A["netns A (created via 'ip netns add A')"]
+    Init["init_net<br/>(default ns)"]
+    A["netns A<br/>(ip netns add A)"]
     B["netns B"]
 
-    Init -- "physical eth0 here" --> Eth0["eth0 (physical NIC)"]
+    Init -- "veth peer" --> VethB["vethA1<br/>(peer)"]
+    Init -- "physical here" --> Eth0["eth0<br/>(physical NIC)"]
+
+    Br["bridge br0<br/>(in init_net)"] --> VethB
+    Br --> Eth0
 
     A -- "veth pair" --> VethA["vethA0"]
     A -- "loopback" --> LoA["lo"]
-    Init -- "veth peer" --> VethB["vethA1 (peer)"]
+    Init --- A
+    A --- B
 
-    Br["bridge br0 (in init_net)"] --> VethB
-    Br --> Eth0
-
-    Note1["Movement:<br/>ip link set vethA0 netns A<br/>ip netns exec A bash<br/>(unshare CLONE_NEWNET)"]
-
-    Note2["Each ns has own:<br/>- routing table (ip route)<br/>- iptables rules (sudo nft list ruleset)<br/>- /proc/net/* views<br/>- sockets/listeners<br/>- conntrack zone"]
-
-    A -.- Note1
-    A -.- Note2
+    LoA -.- Note1["Movement:<br/>ip link set vethA0 netns A<br/>ip netns exec A bash<br/>(unshare CLONE_NEWNET)"]
+    Note1 -.- Note2["Each ns has own:<br/>- routing table (ip route)<br/>- iptables rules<br/>&nbsp;&nbsp;(sudo nft list ruleset)<br/>- /proc/net/* views<br/>- sockets/listeners<br/>- conntrack zone"]
 
     classDef ns fill:#dbeafe,stroke:#2563eb
     classDef phys fill:#fef3c7,stroke:#d97706

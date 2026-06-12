@@ -1,4 +1,4 @@
-flowchart LR
+flowchart TD
     Pick["<b>1. choose one packet</b><br/>fix a concrete 5-tuple and direction<br/><b>handoff:</b> every probe needs the same packet identity<br/><b>state:</b> expected src, dst, proto, ports"]
 
     Entry["<b>2. RX entry</b><br/>driver, optional XDP, skb creation, GRO, RX core dispatch<br/><b>handoff:</b> accepted skb reaches the IP handler<br/><b>state:</b> skb has protocol metadata and possible GRO aggregate"]

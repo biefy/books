@@ -1,4 +1,4 @@
-flowchart LR
+flowchart TD
     App["Application<br/><b>does:</b> calls socket(..., IPPROTO_MPTCP)<br/><b>why next:</b> explicit opt-in requests MPTCP<br/><b>state:</b> app still sees one SOCK_STREAM"]
     Msk["MPTCP master socket (msk)<br/><b>does:</b> owns the app-visible byte stream<br/><b>why next:</b> needs TCP subflows to carry bytes<br/><b>state:</b> Data Sequence Number space"]
     Primary["Primary subflow<br/><b>does:</b> TCP connection with MP_CAPABLE<br/><b>why next:</b> proves peer supports MPTCP<br/><b>state:</b> token/key identify the MPTCP connection"]

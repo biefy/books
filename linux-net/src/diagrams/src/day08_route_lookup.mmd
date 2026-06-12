@@ -1,12 +1,12 @@
-flowchart LR
-    Pkt["skb enters ip_rcv_finish<br/><b>does:</b> brings L3 header and flow keys<br/><b>why next:</b> skb needs dst before local/forward decision<br/><b>state:</b> no usable skb_dst yet"]
-    Cache{"dst already cached?<br/><b>does:</b> checks skb_dst from earlier processing<br/><b>why next:</b> cached dst can skip FIB work<br/><b>state:</b> fast path or lookup required"}
-    Lookup["ip_route_input_noref<br/><b>does:</b> builds flowi key from src/dst/iif/tos/mark<br/><b>why next:</b> fib_rules choose which table sees this key<br/><b>state:</b> route lookup request"]
-    Rules["fib_rules<br/><b>does:</b> walks priority-ordered policy rules<br/><b>why next:</b> matched rule names the routing table/action<br/><b>state:</b> table ID selected or fall-through"]
-    Table["fib_table_lookup<br/><b>does:</b> longest-prefix match in trie<br/><b>why next:</b> nexthop/type metrics are needed to build dst<br/><b>state:</b> fib_result"]
-    Rtable["build rtable<br/><b>does:</b> converts fib_result to dst operations and cacheable route<br/><b>why next:</b> skb carries dst to later stack stages<br/><b>state:</b> struct rtable with input/output callbacks"]
-    Set["skb_dst_set<br/><b>does:</b> attaches route reference to skb<br/><b>why next:</b> dst->input tells IP where to send packet<br/><b>state:</b> skb owns route decision"]
-    Input["dst->input<br/><b>does:</b> calls ip_local_deliver or ip_forward<br/><b>state:</b> local-vs-transit path chosen"]
+flowchart TD
+    Pkt["skb enters ip_rcv_finish<br/><b>does:</b> brings L3 header<br/>and flow keys<br/><b>why next:</b> skb needs dst before<br/>local/forward decision<br/><b>state:</b> no usable skb_dst yet"]
+    Cache{"dst already cached?<br/><b>does:</b> checks skb_dst from<br/>earlier processing<br/><b>why next:</b> cached dst can<br/>skip FIB work<br/><b>state:</b> fast path or<br/>lookup required"}
+    Lookup["ip_route_input_noref<br/><b>does:</b> builds flowi key from<br/>src/dst/iif/tos/mark<br/><b>why next:</b> fib_rules choose which<br/>table sees this key<br/><b>state:</b> route lookup request"]
+    Rules["fib_rules<br/><b>does:</b> walks priority-ordered<br/>policy rules<br/><b>why next:</b> matched rule names<br/>the routing table/action<br/><b>state:</b> table ID selected<br/>or fall-through"]
+    Table["fib_table_lookup<br/><b>does:</b> longest-prefix<br/>match in trie<br/><b>why next:</b> nexthop/type metrics<br/>are needed to build dst<br/><b>state:</b> fib_result"]
+    Rtable["build rtable<br/><b>does:</b> converts fib_result to dst<br/>operations and cacheable route<br/><b>why next:</b> skb carries dst to<br/>later stack stages<br/><b>state:</b> struct rtable with<br/>input/output callbacks"]
+    Set["skb_dst_set<br/><b>does:</b> attaches route<br/>reference to skb<br/><b>why next:</b> dst->input tells IP<br/>where to send packet<br/><b>state:</b> skb owns route decision"]
+    Input["dst->input<br/><b>does:</b> calls ip_local_deliver<br/>or ip_forward<br/><b>state:</b> local-vs-transit<br/>path chosen"]
 
     Pkt --> Cache
     Cache -->|yes: route already known| Input

@@ -2,16 +2,16 @@ flowchart TD
     Bpf["BPF program emits<br/>at high rate"]
     Reserve["bpf_ringbuf_reserve(sz)"]
     Check{Reserve<br/>returned NULL?}
-    Drop["increment 'drops' counter<br/>(BPF_MAP_TYPE_PERCPU_ARRAY)"]
+    Drop["increment<br/>'drops' counter<br/>(BPF_MAP_TYPE<br/>_PERCPU_ARRAY)"]
     Submit["bpf_ringbuf_submit"]
     Done["return 0"]
 
-    User["Userspace consumer<br/>periodically reads drops counter"]
+    User["Userspace consumer<br/>periodically reads<br/>drops counter"]
     Diag["log: 'dropped N events<br/>since last sample'"]
 
     Bpf --> Reserve
     Reserve --> Check
-    Check -->|yes ringbuf full| Drop
+    Check -->|yes, full| Drop
     Drop --> Done
     Check -->|no| Submit
     Submit --> Done

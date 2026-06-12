@@ -1,4 +1,9 @@
-flowchart LR
+---
+config:
+  flowchart:
+    wrappingWidth: 520
+---
+flowchart TD
     Proc["process in cgroup A<br/><b>does:</b> creates/connects TCP socket<br/><b>why next:</b> cgroup membership selects attached sock_ops programs<br/><b>state:</b> socket associated with cgroup"]
     Callback["sock_ops callback<br/><b>does:</b> runs at events such as TCP_CONNECT_CB or ACTIVE_ESTABLISHED_CB<br/><b>why next:</b> callback timing determines which socket options are still useful<br/><b>state:</b> bpf_sock_ops exposes skops fields and op code"]
     Policy["BPF policy lookup<br/><b>does:</b> reads cgroup/socket tuple or maps to choose tuning<br/><b>why next:</b> only matching sockets should be changed<br/><b>state:</b> desired TCP options or no-op"]

@@ -1,4 +1,4 @@
-flowchart LR
+flowchart TD
     App["<b>1. userspace → socket</b><br/>send/write resolves fd to socket<br/><b>handoff:</b> TCP sendmsg owns stream bytes<br/><b>state:</b> locked sock + msg iterator"]
 
     TCP["<b>2. TCP write queue</b><br/>copy/zerocopy user bytes into skbs<br/><b>handoff:</b> push policy and windows permit send<br/><b>state:</b> skbs have sequence numbers"]

@@ -1,4 +1,4 @@
-flowchart LR
+flowchart TD
     PreRouting["PRE_ROUTING<br/><b>does:</b> first IP-policy point after header validation<br/><b>why next:</b> routing must see any DNAT result<br/><b>typical work:</b> conntrack, defrag, DNAT"]
     Routing{"route lookup<br/><b>does:</b> decides local vs transit<br/><b>state:</b> dst->input chosen"}
     LocalIn["LOCAL_IN / INPUT<br/><b>does:</b> final policy for packets to this host<br/><b>why next:</b> accepted packets can reach sockets"]

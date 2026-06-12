@@ -4,14 +4,14 @@ flowchart TD
 
     Build["Build minimal version"]
     Verify{"Verifier rejects?"}
-    Read["Read verifier log<br/>identify type/lifetime issue"]
+    Read["Read verifier log<br/>find type/lifetime issue"]
     Fix["Adjust code"]
 
     Test["Run on test load"]
-    Measure["Measure: throughput,<br/>overhead, correctness"]
+    Measure["Measure:<br/>throughput,<br/>overhead,<br/>correctness"]
     OK{"Acceptable?"}
 
-    Polish["Polish:<br/>drop counters, README,<br/>build instructions"]
+    Polish["Polish:<br/>drop counters,<br/>README,<br/>build instructions"]
     Done(["Capstone complete"])
 
     Idea --> Outline --> Build --> Verify

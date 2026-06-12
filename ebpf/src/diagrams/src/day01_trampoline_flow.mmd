@@ -1,13 +1,13 @@
-flowchart LR
-    Patch["<b>1. patched function entry</b><br/>architecture ftrace/BPF machinery turns NOP space into an entry call path<br/><b>handoff:</b> trampoline must run before the function body<br/><b>state:</b> original arguments are still available"]
+flowchart TD
+    Patch["<b>1. patched function entry</b><br/>arch ftrace/BPF machinery turns<br/>NOP space into an entry call path<br/><b>handoff:</b> trampoline runs<br/>before the function body<br/><b>state:</b> original args still available"]
 
-    Tramp["<b>2. BPF trampoline</b><br/>saves argument registers and builds the BPF calling convention<br/><b>handoff:</b> verifier-approved program expects typed args/ctx<br/><b>state:</b> BPF-visible arguments are ready"]
+    Tramp["<b>2. BPF trampoline</b><br/>saves argument registers, builds<br/>the BPF calling convention<br/><b>handoff:</b> verifier-approved program<br/>expects typed args/ctx<br/><b>state:</b> BPF-visible args ready"]
 
-    Prog["<b>3. fentry program</b><br/>observes filename_unlinkat arguments before unlink logic runs<br/><b>handoff:</b> return 0 continues kernel execution<br/><b>state:</b> optional event data is prepared"]
+    Prog["<b>3. fentry program</b><br/>observes filename_unlinkat args<br/>before unlink logic runs<br/><b>handoff:</b> return 0 continues<br/>kernel execution<br/><b>state:</b> optional event data prepared"]
 
-    Event["<b>4. tracing side effect</b><br/>ringbuf or map update exposes observation to userspace<br/><b>handoff:</b> trampoline can restore normal execution<br/><b>state:</b> event is recorded without changing syscall behavior"]
+    Event["<b>4. tracing side effect</b><br/>ringbuf or map update exposes<br/>observation to userspace<br/><b>handoff:</b> trampoline can restore<br/>normal execution<br/><b>state:</b> event recorded without<br/>changing syscall behavior"]
 
-    Body["<b>5. original function body</b><br/>registers restored, filename_unlinkat performs lookup, permission checks, unlink<br/><b>state:</b> caller sees the normal kernel return value"]
+    Body["<b>5. original function body</b><br/>registers restored, filename_unlinkat<br/>performs lookup, permission checks, unlink<br/><b>state:</b> caller sees the normal<br/>kernel return value"]
 
     Patch --> Tramp --> Prog --> Event --> Body
 

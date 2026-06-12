@@ -1,11 +1,11 @@
-flowchart LR
-    Alloc["allocate skb head<br/><b>does:</b> alloc_skb/napi_build_skb creates metadata and data pointers<br/><b>why next:</b> stack needs a mutable packet descriptor<br/><b>state:</b> refcnt=1, head/data/tail/end initialized"]
-    Fill["attach packet bytes<br/><b>does:</b> driver or protocol code sets headers, length, checksum state<br/><b>why next:</b> protocol layers consume offsets and metadata<br/><b>state:</b> skb describes one packet or GRO aggregate"]
-    Share["clone / share data<br/><b>does:</b> skb_clone copies metadata while sharing data area<br/><b>why next:</b> taps/retransmit/segmentation may need another owner<br/><b>state:</b> cloned bit and dataref protect shared bytes"]
-    Mutate{"need to mutate shared bytes?<br/><b>does:</b> checks writability/headroom<br/><b>why next:</b> writers must not corrupt another clone<br/><b>state:</b> copy-on-write or safe in-place edit"}
-    Use["RX/TX protocol path<br/><b>does:</b> updates marks, dst, nfct, socket owner, queues<br/><b>why next:</b> final consumer decides delivery or transmit<br/><b>state:</b> skb ownership moves between subsystems"]
-    Drop["free with reason<br/><b>does:</b> kfree_skb_reason records drop/free cause and releases refs<br/><b>why next:</b> destructor releases dst, nfct, socket, frag refs<br/><b>state:</b> metadata returned to skb cache"]
-    Cache["slab/fclone cache<br/><b>does:</b> recycles skb heads for future packets<br/><b>state:</b> memory available for next allocation"]
+flowchart TD
+    Alloc["allocate skb head<br/><b>does:</b> alloc_skb/napi_build_skb<br/>creates metadata and data pointers<br/><b>why next:</b> stack needs a mutable<br/>packet descriptor<br/><b>state:</b> refcnt=1,<br/>head/data/tail/end initialized"]
+    Fill["attach packet bytes<br/><b>does:</b> driver/protocol code sets<br/>headers, length, checksum state<br/><b>why next:</b> protocol layers consume<br/>offsets and metadata<br/><b>state:</b> skb describes one packet<br/>or GRO aggregate"]
+    Share["clone / share data<br/><b>does:</b> skb_clone copies metadata<br/>while sharing data area<br/><b>why next:</b> taps/retransmit/segmentation<br/>may need another owner<br/><b>state:</b> cloned bit and dataref<br/>protect shared bytes"]
+    Mutate{"need to mutate shared bytes?<br/><b>does:</b> checks writability/headroom<br/><b>why next:</b> writers must not<br/>corrupt another clone<br/><b>state:</b> copy-on-write or<br/>safe in-place edit"}
+    Use["RX/TX protocol path<br/><b>does:</b> updates marks, dst, nfct,<br/>socket owner, queues<br/><b>why next:</b> final consumer decides<br/>delivery or transmit<br/><b>state:</b> skb ownership moves<br/>between subsystems"]
+    Drop["free with reason<br/><b>does:</b> kfree_skb_reason records<br/>drop/free cause and releases refs<br/><b>why next:</b> destructor releases<br/>dst, nfct, socket, frag refs<br/><b>state:</b> metadata returned to skb cache"]
+    Cache["slab/fclone cache<br/><b>does:</b> recycles skb heads<br/>for future packets<br/><b>state:</b> memory available<br/>for next allocation"]
 
     Alloc --> Fill --> Use
     Use --> Share --> Mutate --> Use

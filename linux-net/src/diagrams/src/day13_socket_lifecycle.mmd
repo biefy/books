@@ -1,15 +1,15 @@
-flowchart LR
-    Socket["<b>1. socket()</b><br/>allocates struct socket plus TCP struct sock<br/><b>handoff:</b> app chooses passive listen or active connect<br/><b>state:</b> initialized, unbound TCP socket"]
+flowchart TD
+    Socket["<b>1. socket()</b><br/>allocates struct socket<br/>plus TCP struct sock<br/><b>handoff:</b> app chooses passive<br/>listen or active connect<br/><b>state:</b> initialized,<br/>unbound TCP socket"]
 
-    Passive["<b>2a. passive open</b><br/>bind reserves local port, listen inserts listener, SYN creates request_sock<br/><b>handoff:</b> completed handshake moves child to accept queue<br/><b>state:</b> listener and half-open requests are indexed"]
+    Passive["<b>2a. passive open</b><br/>bind reserves local port,<br/>listen inserts listener,<br/>SYN creates request_sock<br/><b>handoff:</b> completed handshake<br/>moves child to accept queue<br/><b>state:</b> listener and<br/>half-open requests are indexed"]
 
-    Active["<b>2b. active open</b><br/>connect selects source port, routes, sends SYN<br/><b>handoff:</b> SYN-ACK completes the 4-tuple<br/><b>state:</b> client socket moves through SYN_SENT to established hash"]
+    Active["<b>2b. active open</b><br/>connect selects source port,<br/>routes, sends SYN<br/><b>handoff:</b> SYN-ACK completes<br/>the 4-tuple<br/><b>state:</b> client socket moves<br/>through SYN_SENT to established hash"]
 
-    Established["<b>3. established stream</b><br/>4-tuple lookup finds the owner socket on RX<br/><b>handoff:</b> application I/O can use TCP queues<br/><b>state:</b> full-duplex stream with cwnd/rwnd state"]
+    Established["<b>3. established stream</b><br/>4-tuple lookup finds<br/>the owner socket on RX<br/><b>handoff:</b> application I/O<br/>can use TCP queues<br/><b>state:</b> full-duplex stream<br/>with cwnd/rwnd state"]
 
-    IO["<b>4. sendmsg / recvmsg</b><br/>move bytes between user buffers and TCP queues<br/><b>handoff:</b> more I/O or close depends on stream state<br/><b>state:</b> write queue, receive queue, timers, and ACK state evolve"]
+    IO["<b>4. sendmsg / recvmsg</b><br/>move bytes between user<br/>buffers and TCP queues<br/><b>handoff:</b> more I/O or close<br/>depends on stream state<br/><b>state:</b> write queue, receive queue,<br/>timers, and ACK state evolve"]
 
-    Close["<b>5. close</b><br/>drives FIN/RST/TIME_WAIT and unhashes when safe<br/><b>state:</b> fd is gone, protocol state may outlive it"]
+    Close["<b>5. close</b><br/>drives FIN/RST/TIME_WAIT<br/>and unhashes when safe<br/><b>state:</b> fd is gone,<br/>protocol state may outlive it"]
 
     Socket --> Passive --> Established --> IO --> Close
     Socket --> Active --> Established

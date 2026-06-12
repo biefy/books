@@ -1,25 +1,31 @@
+---
+config:
+  flowchart:
+    defaultRenderer: elk
+---
 flowchart TD
     Send["TX path: ip_finish_output2"]
-    Lookup["neigh_lookup(arp_tbl, &nexthop_ip, dev)<br/>net/core/neighbour.c:625"]
+    Lookup["neigh_lookup(arp_tbl,<br/>&nexthop_ip, dev)<br/>net/core/neighbour.c:625"]
     Found{Entry exists?}
     State{neigh state?}
-
+    None["No entry → neigh_create"]
     Reachable["NUD_REACHABLE<br/>has dst_ha (MAC)<br/>fresh recent confirmation"]
     Stale["NUD_STALE<br/>has MAC but old<br/>kicks off probe"]
-    None["No entry → neigh_create"]
     Incomplete["NUD_INCOMPLETE<br/>resolving (sent ARP req)<br/>queue skbs while waiting"]
-    Failed["NUD_FAILED<br/>ARP timed out<br/>drop or generate ICMP unreachable"]
-
+    Failed["NUD_FAILED<br/>ARP timed out<br/>drop or generate<br/>ICMP unreachable"]
     BuildL2["build Ethernet header<br/>(eth_header) with neigh->ha"]
     Xmit["dev_queue_xmit"]
-
     Send --> Lookup --> Found
-    Found -->|yes| State
     Found -->|no| None --> Incomplete
-    State -->|REACHABLE| BuildL2 --> Xmit
-    State -->|STALE| BuildL2
+    Found -->|yes| State
+    State -->|REACHABLE| Reachable
+    State -->|STALE| Stale
     State -->|INCOMPLETE| Incomplete
     State -->|FAILED| Failed
+    Reachable --> BuildL2 --> Xmit
+    Stale --> BuildL2
+    Reachable ~~~ Stale
+    Incomplete ~~~ Failed
 
     classDef ok fill:#dcfce7,stroke:#16a34a
     classDef bad fill:#fee2e2,stroke:#dc2626

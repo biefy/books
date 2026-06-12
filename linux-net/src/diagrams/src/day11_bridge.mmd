@@ -1,13 +1,13 @@
-flowchart LR
-    In["<b>1. frame enters bridge port</b><br/>skb carries src/dst MAC, VLAN, and ingress port<br/><b>handoff:</b> bridge must learn before it forwards<br/><b>state:</b> skb is associated with a br_port"]
+flowchart TD
+    In["<b>1. frame enters bridge port</b><br/>skb carries src/dst MAC,<br/>VLAN, and ingress port<br/><b>handoff:</b> bridge must<br/>learn before it forwards<br/><b>state:</b> skb associated<br/>with a br_port"]
 
-    Learn["<b>2. learn source</b><br/>record src MAC/VLAN to ingress port and refresh age<br/><b>handoff:</b> destination decision can use the updated FDB<br/><b>state:</b> reverse traffic can become known unicast"]
+    Learn["<b>2. learn source</b><br/>record src MAC/VLAN to<br/>ingress port, refresh age<br/><b>handoff:</b> dst decision<br/>can use updated FDB<br/><b>state:</b> reverse traffic<br/>can become known unicast"]
 
-    Policy["<b>3. bridge policy</b><br/>check port state, STP, VLAN filtering, and local delivery cases<br/><b>handoff:</b> only forwarding ports may send frames onward<br/><b>state:</b> frame is allowed, locally consumed, or dropped"]
+    Policy["<b>3. bridge policy</b><br/>check port state, STP,<br/>VLAN filtering, local delivery<br/><b>handoff:</b> only forwarding<br/>ports may send onward<br/><b>state:</b> allowed, locally<br/>consumed, or dropped"]
 
-    Lookup["<b>4. destination lookup</b><br/>search FDB for dst MAC/VLAN<br/><b>handoff:</b> hit selects one port, miss/broadcast selects flood set<br/><b>state:</b> egress port list is known"]
+    Lookup["<b>4. destination lookup</b><br/>search FDB for dst MAC/VLAN<br/><b>handoff:</b> hit selects one port,<br/>miss/broadcast selects flood set<br/><b>state:</b> egress port list known"]
 
-    Egress["<b>5. egress copies</b><br/>queue one skb for known unicast or clones for flood<br/><b>handoff:</b> selected ports pass frames to qdisc/driver<br/><b>state:</b> one or many egress skbs"]
+    Egress["<b>5. egress copies</b><br/>queue one skb for known<br/>unicast or clone for flood<br/><b>handoff:</b> selected ports<br/>pass frames to qdisc/driver<br/><b>state:</b> one or many egress skbs"]
 
     Drop["<b>drop / consume</b><br/>no egress frame"]
 

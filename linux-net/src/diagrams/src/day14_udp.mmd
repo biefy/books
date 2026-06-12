@@ -1,15 +1,15 @@
-flowchart LR
-    Send["sendmsg(fd, buf)<br/><b>does:</b> hands datagram to UDP socket<br/><b>why next:</b> UDP must build one skb per datagram<br/><b>state:</b> user bytes + destination"]
-    UdpSend["udp_sendmsg<br/><b>does:</b> validates size, corking, checksum mode, route<br/><b>why next:</b> IP output owns L3 headers and routing<br/><b>state:</b> skb with UDP header/payload"]
-    IpOut["ip_send_skb / ip_local_out<br/><b>does:</b> applies LOCAL_OUT, route output, POST_ROUTING<br/><b>why next:</b> accepted skb can be queued to device<br/><b>state:</b> dst, marks, NAT/checksum updates"]
-    Wire["wire<br/><b>state:</b> independent datagram; no stream state"]
-    UdpRcv["udp_rcv<br/><b>does:</b> validates checksum and UDP header<br/><b>why next:</b> socket lookup decides owner or ICMP error<br/><b>state:</b> skb ready for UDP demux"]
-    Lookup["__udp4_lib_lookup<br/><b>does:</b> hashes by port/address with reuse rules<br/><b>why next:</b> matching socket gets receive queue ownership<br/><b>state:</b> selected sk or no listener"]
+flowchart TD
+    Send["sendmsg(fd, buf)<br/><b>does:</b> hands datagram to UDP socket<br/><b>why next:</b> UDP builds one skb per datagram<br/><b>state:</b> user bytes + destination"]
+    UdpSend["udp_sendmsg<br/><b>does:</b> validates size, corking,<br/>checksum mode, route<br/><b>why next:</b> IP output owns L3 + routing<br/><b>state:</b> skb with UDP header/payload"]
+    IpOut["ip_send_skb / ip_local_out<br/><b>does:</b> LOCAL_OUT, route output,<br/>POST_ROUTING<br/><b>why next:</b> skb can queue to device<br/><b>state:</b> dst, marks, NAT/checksum"]
+    Wire["wire<br/><b>state:</b> independent datagram;<br/>no stream state"]
+    UdpRcv["udp_rcv<br/><b>does:</b> validates checksum + UDP header<br/><b>why next:</b> lookup decides owner or ICMP<br/><b>state:</b> skb ready for UDP demux"]
+    Lookup["__udp4_lib_lookup<br/><b>does:</b> hashes by port/address,<br/>reuse rules<br/><b>why next:</b> match gets recv queue<br/><b>state:</b> selected sk or no listener"]
     Found{"listener found?"}
-    Drop["ICMP port unreachable / drop<br/><b>does:</b> reports no owner when policy allows<br/><b>state:</b> skb consumed"]
-    Queue["socket receive queue<br/><b>does:</b> enqueues skb and charges socket memory<br/><b>why next:</b> sleeping reader must be notified<br/><b>state:</b> datagram waits intact"]
-    Wake["sk_data_ready<br/><b>does:</b> wakes poll/recvmsg waiters<br/><b>why next:</b> app can copy exactly one datagram<br/><b>state:</b> userspace observable readiness"]
-    Recv["recvmsg(fd)<br/><b>does:</b> dequeues one skb and copies payload<br/><b>state:</b> datagram delivered or truncated per flags"]
+    Drop["ICMP port unreachable / drop<br/><b>does:</b> reports no owner if policy allows<br/><b>state:</b> skb consumed"]
+    Queue["socket receive queue<br/><b>does:</b> enqueues skb, charges sk memory<br/><b>why next:</b> sleeping reader notified<br/><b>state:</b> datagram waits intact"]
+    Wake["sk_data_ready<br/><b>does:</b> wakes poll/recvmsg waiters<br/><b>why next:</b> app copies one datagram<br/><b>state:</b> userspace readiness"]
+    Recv["recvmsg(fd)<br/><b>does:</b> dequeues one skb, copies payload<br/><b>state:</b> delivered or truncated per flags"]
 
     Send --> UdpSend --> IpOut --> Wire --> UdpRcv --> Lookup --> Found
     Found -->|no| Drop

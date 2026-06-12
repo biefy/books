@@ -1,4 +1,4 @@
-flowchart LR
+flowchart TD
     Inner["inner Ethernet frame<br/><b>does:</b> carries tenant src/dst MAC/IP<br/><b>why next:</b> VXLAN device must map overlay destination<br/><b>state:</b> skb belongs to overlay netdev"]
     FDB["VXLAN FDB / VNI lookup<br/><b>does:</b> maps inner dst MAC + VNI to remote VTEP<br/><b>why next:</b> underlay needs an outer IP destination<br/><b>state:</b> selected VNI and VTEP IP"]
     Encap["encapsulation<br/><b>does:</b> prepends outer Ethernet/IP/UDP + VXLAN header<br/><b>why next:</b> underlay routers only understand outer packet<br/><b>state:</b> skb now contains tunnel metadata and outer headers"]
