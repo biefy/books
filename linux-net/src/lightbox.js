@@ -1,8 +1,18 @@
 (function () {
   function classify(img) {
-    var ratio = img.naturalWidth / Math.max(img.naturalHeight, 1);
+    var w = img.naturalWidth, h = img.naturalHeight;
+    var ratio = w / Math.max(h, 1);
+    // A genuinely small diagram (narrow intrinsic width) renders lost in
+    // whitespace because `max-width: 100%` never upscales. Give it a sane
+    // floor instead. This takes priority over the tall class so a small,
+    // tallish image (e.g. 432x756) is sized by width, not stretched by height.
+    var small = w < 560;
+    img.classList.toggle("diagram-small", small);
     img.classList.toggle("diagram-wide", ratio >= 2.2);
-    img.classList.toggle("diagram-tall", ratio <= 0.55 && img.naturalHeight > 700);
+    // Tall: cap the rendered height so the page doesn't scroll forever. The
+    // 0.62 gate (was 0.55) catches near-portrait diagrams like day04_verifier_walk
+    // (0.59) that would otherwise render ~720x1200 at the column width.
+    img.classList.toggle("diagram-tall", !small && ratio <= 0.62 && h > 700);
 
     if (img.classList.contains("diagram-wide") && !img.parentElement.classList.contains("diagram-scroll")) {
       var wrapper = document.createElement("div");
