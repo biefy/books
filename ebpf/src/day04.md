@@ -103,6 +103,8 @@ if (reject_bpf__load(skel)) {
 
 Or load with `bpftool prog load reject.bpf.o /sys/fs/bpf/x` and the log goes to stderr.
 
+> A successful load **pins** the program at `/sys/fs/bpf/x`. Rejected loads don't pin, but the ones that load clean (the base program, Rejection 5's first snippet, Rejection 3 with a compile-time-constant key) do — so the next successful load to the same path fails with `Error: failed to pin program: File exists`, which is *not* a verifier problem. Remove the pin before re-loading: `sudo rm -f /sys/fs/bpf/x`.
+
 ---
 
 ### Rejection 1 — The bare deref
@@ -123,8 +125,8 @@ Expected log (essence):
 4: (18) r1 = 0xffff...   ; map fd
 6: (85) call bpf_map_lookup_elem#1
 7: R0=map_value_or_null(id=2,off=0,ks=4,vs=8) R10=fp0
-8: (79) r1 = *(u64 *)(r0 +0)
-R0 invalid mem access 'mem_or_null'
+7: (79) r1 = *(u64 *)(r0 +0)
+R0 invalid mem access 'map_value_or_null'
 
 processed 8 insns ...
 ```
@@ -132,8 +134,8 @@ processed 8 insns ...
 **How to read this:**
 - Lines 0–6 are the instruction trace.
 - Line 7 shows register state right after the call: `R0` is `map_value_or_null` with id=2, offset 0, key size 4, value size 8.
-- Line 8 attempts `r1 = *(u64 *)(r0 + 0)` — deref of `r0`.
-- The line below states the violation: `R0 invalid mem access 'mem_or_null'`.
+- Line 7 attempts `r1 = *(u64 *)(r0 + 0)` — deref of `r0`.
+- The line below states the violation: `R0 invalid mem access 'map_value_or_null'`.
 
 The Verifier did exactly what the diagram showed. You skipped the `mark_ptr_or_null_regs` transition. Fix: add `if (!v) return 0;`.
 
@@ -167,7 +169,15 @@ Verifier rejects. Why? Inside `if (key == 0)`, you proved `v` non-NULL. But the 
 - `key == 0` branch: `v` is checked, then `*v += 1` runs with `v` proven non-NULL. OK.
 - `key != 0` branch: skips the inner `if`, falls through to `*v += 1`. `v` is still `map_value_or_null`. **Reject.**
 
-The error message points at the deref instruction, with state showing R0 is still or-null. The Verifier is right — your code is buggy. Fix:
+The error message points at the deref instruction, with state showing R0 is still or-null:
+
+```
+N: R0=map_value_or_null(id=2,off=0,ks=4,vs=8) ...
+N: (79) r1 = *(u64 *)(r0 +0)
+R0 invalid mem access 'map_value_or_null'
+```
+
+The failing instruction number `N` is higher than Rejection 1 (the extra `if (key == 0)` branch adds instructions), but the violation line is identical: on the `key != 0` fall-through path R0 never made the `OR_NULL → MAP_VALUE` transition. (Exact instruction numbers and the `id=` value vary by kernel version and path.) The Verifier is right — your code is buggy. Fix:
 
 ```c
 if (!v) return 0;
@@ -187,7 +197,15 @@ v = bpf_map_lookup_elem(&m, &key);  // re-lookup
 *v += 1;                             // does the second result need a new check?
 ```
 
-Yes. Each call to `bpf_map_lookup_elem` returns a fresh `PTR_TO_MAP_VALUE_OR_NULL` with a *new* reference id. The first check resolved the *first* lookup. The second lookup is unrelated. Verifier rejects the deref of the second result.
+Yes. Each call to `bpf_map_lookup_elem` returns a fresh `PTR_TO_MAP_VALUE_OR_NULL` with a *new* reference id. The first check resolved the *first* lookup. The second lookup is unrelated. Verifier rejects the deref of the second result:
+
+```
+N: R0=map_value_or_null(id=3,off=0,ks=4,vs=8) ...   ; note id=3 — a NEW id
+N: (79) r1 = *(u64 *)(r0 +0)
+R0 invalid mem access 'map_value_or_null'
+```
+
+Compare the `id=` to Rejection 1's `id=2`: the second `bpf_map_lookup_elem` minted a brand-new reference the first `if (!v)` never resolved, and it fails at a higher instruction number than Rejection 1's deref. That fresh id is the concrete signal of "new check needed per call." (Exact id values and instruction numbers vary by kernel version.)
 
 Lesson: **null state is per-call, not per-variable name.** Re-check after every lookup, even if you wrote the same code.
 
@@ -205,18 +223,27 @@ for (int i = 0; i < 3; i++) {
 return 0;
 ```
 
-This usually loads on modern verifiers (bounded loop, all paths check `v`). But try:
+This loads on a modern verifier: `v` is assigned once, and every iteration `continue`s past the deref when `v` is NULL, so the single check dominates the loop body. Now move the lookup *inside* the loop so each iteration mints a fresh `OR_NULL` that a once-only check can't cover:
 
 ```c
-__u64 *v = bpf_map_lookup_elem(&m, &key);
+__u64 *v;
 for (int i = 0; i < 3; i++) {
-    if (i == 0 && !v) return 0;
-    *v += 1;       // is v non-NULL on the second iteration?
+    v = bpf_map_lookup_elem(&m, &key);  // fresh OR_NULL each iteration
+    if (i == 0 && !v) return 0;         // only checked on iteration 0
+    *v += 1;                            // iterations 1, 2: v unchecked
 }
 return 0;
 ```
 
-Verifier may reject. The path "`i == 1`" doesn't visit the check, so on that path the deref sees `v` as `map_value_or_null`. The Verifier explores the loop iteration-by-iteration and on iteration 2, `v` was never checked.
+This is rejected. The `if (i == 0 && !v)` guard only covers the first iteration; on iterations 1 and 2 the re-lookup hands back a fresh `PTR_TO_MAP_VALUE_OR_NULL` that nothing checked before `*v += 1`:
+
+```
+N: R0=map_value_or_null(id=N,off=0,ks=4,vs=8) ...
+N: (79) r1 = *(u64 *)(r0 +0)
+R0 invalid mem access 'map_value_or_null'
+```
+
+Contrast the two snippets: the first loads because `v` is checked-then-used with no reassignment, so the check dominates every unrolled iteration; the second rejects because the per-iteration re-lookup creates an unchecked `OR_NULL` on the `i > 0` paths. (Exact instruction numbers and `id=` values vary by kernel version.)
 
 Lesson: **the check must dominate the use on *every* execution path.** Loops, branches, retries — all paths.
 
