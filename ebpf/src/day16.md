@@ -110,45 +110,101 @@ int tc_egress(struct __sk_buff *skb)
 }
 ```
 
-### Attach the classic way
+### Setup: build the object and a namespaced veth pair
+
+First build the object (Days 14–15 drove this with `make`; here is the explicit compile):
 
 ```bash
-sudo tc qdisc add dev veth1 clsact
+clang -O2 -g -target bpf -c tc.bpf.c -o tc.bpf.o   # or: make
+```
 
-sudo tc filter add dev veth1 ingress \
+Now the topology. Unlike Day 14 we put one end of the veth pair in its **own network namespace**. This matters for the egress demo: if both ends live in the root namespace, a packet sent to `veth1`'s own address (`10.0.0.2`) is routed over loopback and **never traverses `veth1`'s egress hook** — so the egress drop below would silently never fire. A namespace forces the packet out through `veth1`.
+
+```bash
+sudo ip netns add ns1
+sudo ip link add veth0 type veth peer name veth1
+sudo ip link set veth1 netns ns1
+sudo ip addr add 10.0.0.1/24 dev veth0
+sudo ip link set veth0 up
+sudo ip netns exec ns1 ip addr add 10.0.0.2/24 dev veth1
+sudo ip netns exec ns1 ip link set veth1 up
+sudo ip netns exec ns1 ip link set lo up
+```
+
+(If a `veth0`/`ns1` from a previous run is lying around, run the Detach/cleanup at the bottom first.)
+
+### Attach the classic way
+
+`veth1` lives in `ns1`, so every `tc` command runs inside that namespace with `ip netns exec ns1`:
+
+```bash
+sudo ip netns exec ns1 tc qdisc add dev veth1 clsact
+
+sudo ip netns exec ns1 tc filter add dev veth1 ingress \
      bpf da obj tc.bpf.o sec tc_ingress
 
-sudo tc filter add dev veth1 egress \
+sudo ip netns exec ns1 tc filter add dev veth1 egress \
      bpf da obj tc.bpf.o sec tc_egress
 
 # verify:
-sudo tc filter show dev veth1 ingress
-sudo tc filter show dev veth1 egress
+sudo ip netns exec ns1 tc filter show dev veth1 ingress
+sudo ip netns exec ns1 tc filter show dev veth1 egress
 ```
 
 `clsact` is a special qdisc that exists solely to provide ingress and egress hook points for tc-bpf. It doesn't shape traffic; it's a scaffold.
 
 ### Run
 
+Generate traffic from **inside** `ns1` so it egresses `veth1`:
+
 ```bash
-ping -c 3 10.0.0.2
-nc -u 10.0.0.2 9999 <<< "hi"   # should fail — egress UDP dropped
+# ICMP passes — the egress program only drops UDP:
+sudo ip netns exec ns1 ping -c 3 10.0.0.1
+
+# UDP is dropped on veth1's egress. A `nc -u` send never reports an
+# application error even when the datagram is silently dropped, so don't
+# wait for nc to "fail" — confirm via the egress action's drop counter:
+sudo ip netns exec ns1 nc -u 10.0.0.1 9999 <<< "hi"
+sudo ip netns exec ns1 tc -s filter show dev veth1 egress
 ```
 
-Verify the mark in iptables:
-```bash
-sudo iptables -A INPUT -m mark --mark 0xCAFE -j LOG
-dmesg | tail
+The `tc -s` output ends with a stats line whose `dropped` counter ticks up by **one per UDP datagram** you sent (ICMP and everything else show `TC_ACT_OK`, so they don't count):
+
+```
+filter protocol all pref 49152 bpf chain 0 handle 0x1 tc.bpf.o:[tc_egress] direct-action ...
+ ...
+	Sent 0 bytes 0 pkt (dropped 1, overlimits 0 requeues 0)
 ```
 
-You'll see TCP/ICMP marked but UDP dropped on egress.
+### Verify the mark in iptables
 
-### Detach
+The ingress program stamps `skb->mark = 0xCAFE` on incoming IP packets. To see it, install the LOG rule **before** generating traffic — a LOG rule only matches packets that arrive *after* it exists, so adding it afterward shows nothing:
 
 ```bash
-sudo tc filter del dev veth1 ingress
-sudo tc filter del dev veth1 egress
-sudo tc qdisc del dev veth1 clsact
+sudo ip netns exec ns1 iptables -A INPUT -m mark --mark 0xCAFE -j LOG --log-prefix 'TCMARK: '
+sudo ip netns exec ns1 ping -c 3 10.0.0.1
+sudo dmesg | tail
+```
+
+The `LOG` target writes to the global kernel ring buffer, so `dmesg` shows the marked inbound ICMP echo-reply packets (note the kernel prints the mark lowercase):
+
+```
+TCMARK: IN=veth1 OUT= ... SRC=10.0.0.1 DST=10.0.0.2 ... PROTO=ICMP ... MARK=0xcafe
+```
+
+Only ICMP appears here: the UDP probe is dropped on egress (`TC_ACT_SHOT`) so it never leaves `veth1`, never gets a reply, and so nothing inbound carries its mark. (Want a TCP flow marked too? Start a listener in the root ns — `nc -l -p 8080 &` on `10.0.0.1` — and run `sudo ip netns exec ns1 curl -s --max-time 1 http://10.0.0.1:8080/ >/dev/null`; the inbound SYN-ACK gets marked on `veth1` ingress.)
+
+### Detach and clean up
+
+```bash
+sudo ip netns exec ns1 tc filter del dev veth1 ingress
+sudo ip netns exec ns1 tc filter del dev veth1 egress
+sudo ip netns exec ns1 tc qdisc del dev veth1 clsact
+# remove the LOG rule we added above so it stops polluting the kernel log:
+sudo ip netns exec ns1 iptables -D INPUT -m mark --mark 0xCAFE -j LOG --log-prefix 'TCMARK: '
+# tear down the topology (deleting the namespace also removes veth1, and
+# that removes its peer veth0):
+sudo ip netns del ns1
 ```
 
 Three commands to undo. If your test process crashes mid-test, you have to remember to clean up. **No FD-based ownership.** This is the pain point tcx fixes.
@@ -160,15 +216,30 @@ Three commands to undo. If your test process crashes mid-test, you have to remem
 ### Break 1 — Forget `clsact`
 
 ```bash
-sudo tc filter add dev veth1 ingress bpf da obj ...
-# error: Cannot find device "ingress"
+# Skip `tc qdisc add ... clsact` and jump straight to the filter:
+sudo ip netns exec ns1 tc filter add dev veth1 ingress bpf da obj tc.bpf.o sec tc_ingress
+# Error: Parent Qdisc doesn't exists.
 ```
 
-Without `clsact`, there are no ingress/egress slots. Add it first.
+`ingress` here is the parent-*direction* keyword, not a device name — so the kernel reports a missing parent qdisc, not a missing device. (The exact text is iproute2-version-specific: 6.x prints `Error: Parent Qdisc doesn't exists.`; older iproute2 prints `RTNETLINK answers: No such file or directory`.) Without `clsact` there are no ingress/egress slots. Add it first.
 
 ### Break 2 — Try a BPF helper that doesn't work in tc
 
-Try `bpf_xdp_adjust_head` from a tc program. Verifier rejects — that helper is XDP-only. Each program type has its own helper allowance table.
+Add an XDP-only helper inside `tc_ingress`, rebuild, and re-attach:
+
+```c
+/* inside tc_ingress() — bpf_xdp_adjust_head's real signature is
+   (struct xdp_md *, int), so this is the wrong program type for it */
+bpf_xdp_adjust_head(skb, 0);
+```
+
+```bash
+clang -O2 -g -target bpf -c tc.bpf.c -o tc.bpf.o
+sudo ip netns exec ns1 tc filter add dev veth1 ingress bpf da obj tc.bpf.o sec tc_ingress 2>&1 | tail
+# program of this type cannot use helper bpf_xdp_adjust_head#44
+```
+
+Note this is a *disallowed-helper* rejection, not an "unknown func" — the helper exists, but each program type has its own helper allowance table, and `bpf_xdp_adjust_head` is XDP-only.
 
 ### Break 3 — Set `skb->len`
 
@@ -181,11 +252,12 @@ Verifier rejects — `__sk_buff` is read-only for most fields. For tc programs t
 ### Break 4 — Multiple programs at one priority
 
 ```bash
-sudo tc filter add dev veth1 ingress pref 100 bpf da obj p1.o sec tc
-sudo tc filter add dev veth1 ingress pref 100 bpf da obj p2.o sec tc  # FAIL
+sudo ip netns exec ns1 tc filter add dev veth1 ingress pref 100 handle 1 bpf da obj tc.bpf.o sec tc_ingress
+sudo ip netns exec ns1 tc filter add dev veth1 ingress pref 100 handle 1 bpf da obj tc.bpf.o sec tc_ingress
+# Error: Filter already exists.
 ```
 
-Two filters at the same priority fail. You'd use distinct prefs (`pref 100`, `pref 200`). Replacing requires del+add. **This is exactly what tcx fixes.**
+The collision is on the **priority + handle** pair, not the priority alone. A second `pref 100` add with *no* explicit handle does **not** fail — it gets auto-handle `0x2` and both filters chain, running in handle order. Only reusing the same `pref`+`handle` errors. To run programs in a controlled order you use distinct prefs (`pref 100`, `pref 200`); replacing an existing filter requires del+add (or `tc filter replace`). Inspect with `sudo ip netns exec ns1 tc -s filter show dev veth1 ingress`. **This clumsiness is exactly what tcx's mprog API fixes.**
 
 ---
 
