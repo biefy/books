@@ -83,34 +83,76 @@ Each `recvmsg` returns *exactly one* datagram. If the user buffer is smaller tha
 
 ## Today's experiment
 
+Order matters: the probes must be **attached before** any datagram is sent, or the trace shows nothing. Use two terminals.
+
+**Terminal 1** — start a UDP listener, then attach the trace and wait for `Attached 3 probes`:
 ```bash
-# Server side:
 nc -ul 9999 &
 
-# Client side:
-echo "hello" | nc -u 127.0.0.1 9999
-echo "world" | nc -u 127.0.0.1 9999
-
-# Trace
 sudo bpftrace -e '
-fentry:udp_sendmsg { printf("send %d bytes from sk=%p\n", args->len, args->sk); }
-fentry:udp_rcv     { printf("recv at sk-lookup\n"); }
-fentry:__udp_queue_rcv_skb { printf("queue to sk=%p\n", args->sk); }
+fentry:udp_sendmsg           { printf("send %d bytes from sk=%p\n", args->len, args->sk); }
+fentry:udp_rcv               { printf("recv at sk-lookup\n"); }
+fentry:udp_queue_rcv_one_skb { printf("queue to sk=%p\n", args->sk); }
 '
 ```
 
-You'll see one send → one rcv → one queue per datagram. No state-machine churn.
+**Terminal 2** — only once the trace prints `Attached 3 probes`, send two datagrams from a *single* client process so they share one source port:
+```bash
+{ echo hello; sleep 1; echo world; } | nc -u -q1 127.0.0.1 9999
+```
+
+`-q1` makes the client exit 1 s after EOF instead of hanging on the open UDP socket. Watch Terminal 1; you'll see one send → one rcv → one queue per datagram, then Ctrl-C the trace:
+```text
+Attached 3 probes
+send 6 bytes from sk=0xffff8bf601ed5400
+recv at sk-lookup
+queue to sk=0xffff8bf61237f380
+send 6 bytes from sk=0xffff8bf601ed5400
+recv at sk-lookup
+queue to sk=0xffff8bf61237f380
+```
+
+No state-machine churn — every datagram takes the identical, stateless three-step path.
+
+When done, stop the listener: `kill %1`  # (or: `pkill nc`)
+
+**Two pitfalls this layout avoids:**
+
+- **Why one client process, not two `echo | nc`?** With the OpenBSD `nc` used here, an unconnected `nc -ul 9999` `connect()`s to the *first* sender's address after the first datagram. A second, separate `echo | nc` is a new process with a fresh ephemeral source port, so it fails the connected-socket 4-tuple match in `__udp4_lib_lookup` and is **not** delivered to the listener — you'd see its `recv` but no `queue` line. That is exactly the connected-UDP behavior described above. Driving both writes from one process keeps the source port stable so both datagrams match. (Don't collapse them into `printf 'hello\nworld\n' | nc` — a single pipe read becomes one `sendto`, i.e. one datagram.)
+- **Why `udp_queue_rcv_one_skb` and not `__udp_queue_rcv_skb`?** The static `__udp_queue_rcv_skb` (the symbol named in the RX diagram above) is inlined into `udp_queue_rcv_one_skb` on most builds — `grep __udp_queue_rcv_skb /proc/kallsyms` returns nothing, and `fentry:__udp_queue_rcv_skb` fails to attach, which makes bpftrace abort the *whole* program (you'd get zero output). The non-inlined wrapper `udp_queue_rcv_one_skb` is reliably attachable and carries the same `args->sk`. Verify with `bpftrace -l 'fentry:udp_queue_rcv_one_skb'` before running.
 
 ### Watch UDP drops
 
+On an idle box every drop counter reads 0, so first **provoke a drop** to have something to watch. Sending to a closed UDP port bumps the `NoPorts` (NO_SOCKET) counter — the simplest reliably-demonstrable UDP delivery failure:
 ```bash
-# UDP receive errors (queue full, no socket, csum bad):
-nstat | grep -i Udp
-cat /proc/net/snmp | grep -A1 ^Udp
+# Baseline:
+grep -E '^Udp:' /proc/net/snmp
+
+# Trigger: 50 datagrams to a closed port (each is dropped with NO_SOCKET):
+for i in $(seq 1 50); do echo x | nc -u -w0 127.0.0.1 1; done
+
+# Read again — NoPorts climbs by ~50:
+grep -E '^Udp:' /proc/net/snmp
+nstat -az | grep -i '^Udp'
 
 # Per-socket drops:
 ss -uam   # u=UDP, a=all, m=memory
 ```
+
+Expected — the `NoPorts` column (2nd value) jumps by exactly the 50 datagrams sent:
+```text
+Udp: InDatagrams NoPorts InErrors OutDatagrams RcvbufErrors SndbufErrors InCsumErrors IgnoredMulti MemErrors
+Udp: 1547 88 0 1636 0 0 0 1 0      # before
+Udp: 1547 138 0 1686 0 0 0 1 0     # after (NoPorts 88 → 138)
+```
+
+**Reading the output:**
+
+- `grep -E '^Udp:' /proc/net/snmp` prints two rows: the first lists counter *names*, the second lists *values*; the Nth value belongs to the Nth name. The `:` in `^Udp:` excludes the separate `UdpLite:` block. Watch **`NoPorts`** (no socket at the destination port — the case triggered above), **`InErrors`** (general receive errors), and **`RcvbufErrors`** (`sk_rcvbuf` full — the lesson just below).
+- `nstat -az` shows the same counters by name (`UdpNoPorts`, `UdpInErrors`, `UdpRcvbufErrors`). Use `-az` — **`-a`** gives absolute (cumulative-since-boot) values and **`-z`** includes zero-valued counters; bare `nstat` prints only counters that *changed* since its last run and rewrites its history file, so a second run shows nothing.
+- `ss -uam` reports per-socket drops as the `d<N>` token at the end of each `skmem:(...)` line; on an idle socket it reads `d0` (and `rb<bytes>` is that socket's `sk_rcvbuf`), which is why the trigger matters.
+
+`NoPorts` is a *delivery* failure (no listener) rather than a queue overflow; the `RcvbufErrors` case below needs a slow receiver with a small `SO_RCVBUF` being flooded to provoke.
 
 A common cause of UDP drops on busy servers: **too small sk_rcvbuf**. The default is `net.core.rmem_default` (often 212KB). For a high-throughput UDP receiver:
 ```bash
