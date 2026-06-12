@@ -192,11 +192,29 @@ int via_tp(struct trace_event_raw_sys_enter *ctx)
 }
 ```
 
-Build with verifier verbose logging:
+First generate the type header if you don't already have it from Day 1, then build the object. The `-D__TARGET_ARCH_x86` is required: `BPF_KPROBE` expands to the arch-specific `PT_REGS_PARM*` macros, and without it the compile fails.
+
+```bash
+# once per kernel, if you don't already have vmlinux.h from Day 1:
+sudo bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h
+
+clang -g -O2 -D__TARGET_ARCH_x86 -target bpf -c inspect.bpf.c -o inspect.bpf.o
+```
+
+The verifier only runs when a program is *loaded*, and the detailed per-instruction register state only prints at **log level 2**. Copy Day 6's loader to `inspect.c`, point it at `inspect.bpf.o`, and raise the log level in the open options — the `LIBBPF_OPTS` line below is wired into the object-open call, which is what makes it take effect:
 
 ```c
-LIBBPF_OPTS(bpf_object_open_opts, opts, .kernel_log_level = 1);
+LIBBPF_OPTS(bpf_object_open_opts, opts, .kernel_log_level = 2);
+struct bpf_object *obj = bpf_object__open_file("inspect.bpf.o", &opts);
+bpf_object__load(obj);   /* verifier runs here; its log prints to stderr */
 ```
+
+```bash
+make
+sudo ./inspect 2>&1 | less
+```
+
+If you have `veristat` (it ships in the kernel tree under `tools/bpf/`, so you may need to build it), you can skip the loader entirely and dump the same per-instruction log: `sudo veristat -v -l 2 inspect.bpf.o 2>&1 | less` — `-v` is what emits the log and `-l 2` is the log level that prints the `R1_w=...` register-state lines.
 
 ### Inspect the verifier log for each program
 
@@ -223,7 +241,7 @@ For `via_kprobe`:
 For `via_tp`:
 
 ```
-0: R1=ctx(off=0,imm=0)
+0: R1=ctx()
 1: (61) r2 = *(u32 *)(r1 +16)
 2: R2_w=scalar(...)
 ```
@@ -232,12 +250,49 @@ The tp ctx is a typed struct (provided by `vmlinux.h`); reads are scalar values 
 
 ### Inspect what `BPF_PROG` actually generated
 
+Disassemble the same `inspect.bpf.o` you built above:
+
 ```bash
-clang -g -O2 -target bpf -c inspect.bpf.c -o inspect.bpf.o
-llvm-objdump -dS inspect.bpf.o | head -80
+llvm-objdump -dr inspect.bpf.o | head -40
 ```
 
-Look at `via_fentry`. You'll see the outer function load `*ctx[0]` into r1 and call into the inner function. Run the same for `via_kprobe` and observe how the `BPF_KPROBE` macro instead loads from `pt_regs` offsets.
+```
+0000000000000000 <via_fentry>:
+       0:	r4 = *(u64 *)(r1 + 0x10)
+       1:	r3 = *(u64 *)(r1 + 0x0)
+       2:	r1 = 0xa ll
+       4:	w2 = 0x13
+       5:	call 0x6
+       6:	w0 = 0x0
+       7:	exit
+```
+
+Because the inner `____via_fentry` is `static __always_inline` and we compile at `-O2`, it is inlined into the single emitted function `via_fentry` — there is **no** separate inner function and **no** `call` to it. The only `call` is the `bpf_trace_printk` helper (`call 0x6`). You'll see `via_fentry` load `f` from `*(u64 *)(r1 + 0x0)` (ctx[0]) into r3 and `n` from `*(u64 *)(r1 + 0x10)` (ctx[2]) into r4 — the `buf`/ctx[1] slot at +0x8 is dead and elided. Run the same for `via_kprobe` and you'll see it load from `pt_regs` offsets instead: `*(u64 *)(r1 + 0x70)` is `di` = `PT_REGS_PARM1` = `f` (and +0x60 is `dx`). The two-function shape the macro creates collapses into one function in the object — the macro is purely a source-level code generator.
+
+### Observe all three reach the same read
+
+The three programs each print via `bpf_printk`. Attach them and watch one `vfs_read` flow through all three paths. Auto-attach the object, then read the trace buffer while you trigger a read:
+
+```bash
+sudo bpftool prog loadall inspect.bpf.o /sys/fs/bpf/insp autoattach
+sudo cat /sys/kernel/tracing/trace_pipe &
+dd if=/etc/hostname of=/dev/null bs=64 count=1
+```
+
+You'll see three lines for the same call (addresses differ on your box; the point is the two `f=` values **match**):
+
+```
+             dd-20461   [001] ...21  9183.441: bpf_trace_printk: tp: fd=3
+             dd-20461   [001] ...21  9183.441: bpf_trace_printk: fentry: f=ffff8e0c1a3b4500 n=64
+             dd-20461   [001] ...21  9183.441: bpf_trace_printk: kprobe: f=ffff8e0c1a3b4500 n=64
+```
+
+`fentry` and `kprobe` both hook `vfs_read`, so the `f=` pointer for the same call is identical — even though `fentry` got it from BTF (ctx[0]) and `kprobe` from `pt_regs->di`. Same data, two paths. The tracepoint sits one layer up (the `read()` syscall entry, which later calls `vfs_read`), which is why it prints `fd` rather than `f`. Clean up:
+
+```bash
+sudo kill %1 2>/dev/null
+sudo rm -rf /sys/fs/bpf/insp
+```
 
 ---
 
@@ -254,7 +309,14 @@ int BPF_KPROBE(p, struct file *f) {
 }
 ```
 
-Verifier rejects:
+Drop this into `inspect.bpf.c`, rebuild, and try to load it — `bpftool prog loadall` runs the verifier and prints its log to stderr on failure:
+
+```bash
+clang -g -O2 -D__TARGET_ARCH_x86 -target bpf -c inspect.bpf.c -o inspect.bpf.o
+sudo bpftool prog loadall inspect.bpf.o /sys/fs/bpf/x
+```
+
+The verifier rejects it (no pin is created on failure, so there's nothing to clean up):
 
 ```
 R1 invalid mem access 'scalar'
@@ -274,7 +336,7 @@ SEC("kprobe/vfs_read")
 int BPF_PROG(p, struct file *f) { ... }
 ```
 
-Loads, but the argument access is wrong. `BPF_PROG` reads `ctx[0]` — but kprobe's ctx is `pt_regs *`, not the trampoline ctx array. You'll get the value of `pt_regs->ip` (or whatever field is at offset 0 of pt_regs) cast as `struct file *`. Garbage. Use `BPF_KPROBE` for kprobes.
+This one loads (verify with `sudo bpftool prog loadall inspect.bpf.o /sys/fs/bpf/x` — no verifier error — then `sudo rm -rf /sys/fs/bpf/x`), but the argument access is wrong. `BPF_PROG` reads `ctx[0]` — but kprobe's ctx is `pt_regs *`, not the trampoline ctx array. You'll get whatever sits at offset 0 of `struct pt_regs` (on x86_64 that's the saved `r15`, not the first function argument) cast as `struct file *`. Garbage. Use `BPF_KPROBE` for kprobes.
 
 ### Break 3 — Direct deref in a regular tracepoint
 
@@ -285,7 +347,7 @@ int p(struct trace_event_raw_sched_switch *ctx) {
 }
 ```
 
-Works. The `ctx->prev_comm` is a copied char array embedded in the event struct, not a pointer. No deref needed.
+Works — `sudo bpftool prog loadall inspect.bpf.o /sys/fs/bpf/x` reports the program loaded with no verifier error (clean up with `sudo rm -rf /sys/fs/bpf/x`). The `ctx->prev_comm` is a copied char array embedded in the event struct, not a pointer. No deref needed.
 
 But:
 
