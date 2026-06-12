@@ -63,10 +63,19 @@ This tells you what kfuncs exist and their flags (`KF_ACQUIRE`, `KF_RELEASE`, `K
 
 ```bash
 sudo bpftool btf dump file /sys/kernel/btf/vmlinux \
-    | grep "FUNC.*name=bpf_" | head -20
+    | grep "FUNC 'bpf_" | head -20
 ```
 
-Filters all `FUNC` BTF kinds where the name starts with `bpf_`. You'll see thousands. Many are kfuncs; many are helpers; many are internal kernel functions exposed for other reasons. To narrow down to kfuncs, cross-reference with the source method.
+The **raw** (non-`format c`) dump prints each function as a single line with the name in single quotes — there is no `name=` token, so match the quoted name:
+
+```
+[98739] FUNC 'bpf_address_lookup' type_id=59431 linkage=static
+[98740] FUNC 'bpf_adj_branches' type_id=59432 linkage=static
+[98744] FUNC 'bpf_arch_text_copy' type_id=59434 linkage=static
+...
+```
+
+This filters all `FUNC` BTF kinds whose name starts with `bpf_` — on this kernel there are ~1666 of them. Many are kfuncs; many are helpers; many are internal kernel functions exposed for other reasons. The `type_id=` points at the `FUNC_PROTO` entry that holds the argument types (a separate, earlier entry — not the line shown here). To narrow down to kfuncs, cross-reference with the source method. (If you prefer JSON, `bpftool btf dump -j ... | grep '"name": "bpf_'` matches the `name` key instead.)
 
 ### 3. Documentation
 
@@ -89,14 +98,18 @@ struct bpf_cpumask *bpf_cpumask_create(void) __ksym;
 
 That's exactly what you'd write in your BPF source.
 
-For more complex signatures (multiple args, struct returns):
+For more complex signatures (multiple args, struct returns), use the same `format c` approach — it resolves the `FUNC_PROTO` for you and prints a complete C declaration:
 
 ```bash
-sudo bpftool btf dump file /sys/kernel/btf/vmlinux \
-    | awk '/FUNC.*name=bpf_dynptr_from_skb/{f=1} f{print; if(/^$/){exit}}'
+sudo bpftool btf dump file /sys/kernel/btf/vmlinux format c \
+    | grep 'bpf_dynptr_from_skb('
 ```
 
-(Show the FUNC line and the lines describing its prototype.)
+```c
+extern int bpf_dynptr_from_skb(struct __sk_buff *s, u64 flags, struct bpf_dynptr *ptr__uninit) __weak __ksym;
+```
+
+The `__weak __ksym` form lets the program still load on a kernel that lacks the kfunc (the symbol resolves to NULL instead of failing the load). Don't try to read args from the *raw* dump: a `FUNC` entry there is a single line and its argument types live in a separate `FUNC_PROTO` entry referenced by `type_id`, so there's no adjacent block to print. For the definitive signature, read the `__bpf_kfunc int bpf_dynptr_from_skb(...)` definition in `net/core/filter.c`.
 
 ## A complete example: `bpf_cpumask_*`
 
