@@ -63,7 +63,7 @@ void BPF_PROG(bpf_dctcp_update_alpha, struct sock *sk, __u32 flags)
         e->srtt_us   = tp->srtt_us >> 3;          /* srtt is stored in eighths of a us */
         e->cwnd      = tp->snd_cwnd;              /* see note: kernel C uses tcp_snd_cwnd(tp) */
         e->in_flight = tp->packets_out - (tp->sacked_out + tp->lost_out) + tp->retrans_out;
-        e->sk_cookie = bpf_get_socket_cookie(sk);
+        e->sk_cookie = (__u64)(unsigned long)sk;  /* per-flow id; see note below */
         bpf_ringbuf_submit(e, 0);
     }
 
@@ -72,6 +72,8 @@ void BPF_PROG(bpf_dctcp_update_alpha, struct sock *sk, __u32 flags)
 ```
 
 If you prefer a wrapper, rename the original body to a helper and call it from the wrapper after emitting the event. Either way, the original alpha update must still run.
+
+> **Why not `bpf_get_socket_cookie(sk)`?** It is **not** available to `tcp_congestion_ops` programs. The helper set for this program type is whatever `bpf_tcp_ca_get_func_proto()` (`net/ipv4/bpf_tcp_ca.c`) exposes — `tcp_send_ack`, `bpf_sk_storage_get`/`_delete`, `bpf_{set,get}sockopt`, `ktime_get_coarse_ns` — plus the base helpers; `get_socket_cookie` is only offered to skb/sock_ops/sock_addr program types. The verifier rejects it at load (`program of this type cannot use helper bpf_get_socket_cookie`), so the program never attaches. We instead cast the trusted `struct sock *sk` to a scalar: under root/CAP_PERFMON (`allow_ptr_leaks` is on, the normal case for loading struct_ops) the trusted `PTR_TO_BTF_ID` casts cleanly, giving a stable per-flow id for the life of the connection. `sk_cookie` then prints the kernel socket address rather than an SO_COOKIE id. If you need a true SO_COOKIE-style identity, stash one in a `BPF_MAP_TYPE_SK_STORAGE` via `bpf_sk_storage_get(&map, sk, &init, BPF_SK_STORAGE_GET_F_CREATE)` — that helper *is* in the tcp_ca set.
 
 ### Step 3: keep the callback slot, change only the algorithm name
 
@@ -82,44 +84,83 @@ SEC(".struct_ops")
 struct tcp_congestion_ops dctcp = {
     /* existing entries... */
     .in_ack_event = (void *)bpf_dctcp_update_alpha,
-    .name = "bpf_dctcp_logged",
+    .name = "bpf_dctcp_log",
 };
 ```
+
+> **Name length matters.** Congestion-control names are capped at `TCP_CA_NAME_MAX - 1` = **15 usable characters**. The struct field is `char name[16]`, and the `setsockopt(TCP_CONGESTION)` path copies at most 15 bytes plus a NUL. A 16-character name like `bpf_dctcp_logged` registers fine but can never be *selected* — the client's request is silently truncated to `bpf_dctcp_logge` (15 chars), the lookup fails, and you get `ENOENT` ("No such file or directory"). Keep the name short: `bpf_dctcp_log` is 13 characters.
 
 > **Two field-access notes.** (1) We read `tp->snd_cwnd` directly, which works in BPF (the real `bpf_dctcp.c` does the same). Kernel C convention, however, is the `tcp_snd_cwnd(tp)` accessor (`include/net/tcp.h`) — don't be surprised when the C source uses the helper instead of the bare field. (2) The full kernel formula is `tcp_packets_in_flight(tp) = packets_out - (sacked_out + lost_out) + retrans_out`; we include `retrans_out` above. Omitting it (as a simplification) undercounts in-flight bytes during loss recovery.
 
 ## Userspace consumer
 
-Standard ringbuf consumer + skeleton load + struct_ops attach. Print per event:
+`logged_dctcp` is a **new, out-of-tree libbpf program** — not something `make` inside `selftests/bpf` produces (that builds `test_progs`). Copy your edited `bpf_dctcp.c` into your own project, generate the skeleton with `bpftool gen skeleton bpf_dctcp.bpf.o > bpf_dctcp.skel.h`, and build the loader against `libbpf` (reuse the Day 22 struct_ops loader and the Day 13 ringbuf consumer — this is just those two stitched together).
+
+The load is a struct_ops attach (distinct from a normal program attach), then a standard ringbuf poll loop:
+
+```c
+struct bpf_dctcp *skel = bpf_dctcp__open_and_load();
+/* struct_ops-specific attach — registers the CC in the kernel */
+struct bpf_link *link = bpf_map__attach_struct_ops(skel->maps.dctcp);
+
+struct ring_buffer *rb =
+    ring_buffer__new(bpf_map__fd(skel->maps.rb), handle_event, NULL, NULL);
+while (!stop)
+    ring_buffer__poll(rb, 100 /* ms */);
+```
+
+In `handle_event`, print per event:
 
 ```c
 printf("[sk=%llu t=%lluns] cwnd=%u in_flight=%u srtt=%uus\n",
        e->sk_cookie, e->ts_ns, e->cwnd, e->in_flight, e->srtt_us);
 ```
 
+Build it with your project's libbpf `Makefile` so `make` produces the `logged_dctcp` binary the Run section uses.
+
 ## Run
 
 ```bash
-make
-sudo ./logged_dctcp &
+sudo ./logged_dctcp &              # loads + attaches the struct_ops CC (job %1)
+
+# Verify it registered
+cat /proc/sys/net/ipv4/tcp_available_congestion_control   # should now list bpf_dctcp_log
+
+# Selecting a non-default CC needs CAP_NET_ADMIN or membership in the allowed list.
+# A freshly registered struct_ops CC is added to *available* but NOT *allowed*, so an
+# unprivileged client gets EPERM ("Operation not permitted"). Either run the client with
+# sudo, or add the algorithm to the allowed list (keep cubic so other sockets still work):
+sudo sysctl -w net.ipv4.tcp_allowed_congestion_control="cubic bpf_dctcp_log"
 
 # Server
-iperf3 -s &
+iperf3 -s &                        # job %2
 
 # Client (in another terminal)
-iperf3 -c 127.0.0.1 -C bpf_dctcp_logged
+iperf3 -c 127.0.0.1 -C bpf_dctcp_log
 ```
 
-Output:
+Output (the `sk=` value is now the kernel socket address — a stable per-flow id for the life of the connection, not an SO_COOKIE id):
 
 ```
-[sk=11234 t=12345...] cwnd=10  in_flight=0   srtt=0us
-[sk=11234 t=12346...] cwnd=11  in_flight=10  srtt=152us
-[sk=11234 t=12348...] cwnd=22  in_flight=21  srtt=148us
+[sk=18446612345678900 t=12345...] cwnd=10 in_flight=0  srtt=24us
+[sk=18446612345678900 t=12346...] cwnd=11 in_flight=10 srtt=31us
+[sk=18446612345678900 t=12348...] cwnd=14 in_flight=12 srtt=29us
 ...
 ```
 
-You're now seeing TCP's internal CC decisions in real-time, per ACK, in a flow that runs through your custom BPF-defined algorithm. Cwnd grows, RTT changes are visible, in_flight tracks how full the pipe is.
+You're now seeing TCP's internal CC decisions in real time, per ACK, in a flow that runs through your custom BPF-defined algorithm. `cwnd` grows, `srtt` updates per ACK, and `in_flight` tracks how full the pipe is.
+
+> **Loopback caveat.** Over `127.0.0.1` there is no packet loss and the RTT is microseconds, so you only ever see `cwnd` grow monotonically — you will **not** see the loss-driven `cwnd` collapse and RTT spikes that the anomaly-detection use case below depends on. To make those dynamics observable, run the transfer across a `netem`-delayed `veth` pair: create a `veth` pair in a separate netns and apply `sudo tc qdisc add dev <veth> root netem delay 20ms loss 1%`, then `iperf3 -c <veth-peer-ip> -C bpf_dctcp_log`.
+
+### Cleanup
+
+```bash
+kill %2 2>/dev/null              # iperf3 -s
+sudo pkill -f logged_dctcp       # exiting the loader detaches the struct_ops link
+                                 # and unregisters bpf_dctcp_log from the CC framework
+# restore the default allowed list (the sysctl change is not persistent across reboot anyway)
+sudo sysctl -w net.ipv4.tcp_allowed_congestion_control="reno cubic"
+```
 
 ## What to do with this data
 
@@ -178,7 +219,7 @@ Add `.pkts_acked = (void *)my_pkts_acked` to the vtable. Now you have two BPF pr
 
 - **`net/ipv4/tcp_input.c`** — search `in_ack_event`. The C call site that invokes your BPF callback per incoming ACK. Trace the call path from `tcp_v4_rcv` down to the `in_ack_event` invocation. Note that the kernel calls *only the socket's selected* CC's callback — a single indirect call through `icsk->icsk_ca_ops->in_ack_event` — so your callback runs only for connections actually using your algorithm, not for every registered CC.
 
-- **`include/uapi/linux/tcp.h`** — `struct tcp_info`. The fields available via `bpf_get_socket_cookie` and similar are also in this struct (used by `getsockopt(TCP_INFO)`). When you wonder "what other state can I expose?" — this is the catalog.
+- **`include/uapi/linux/tcp.h`** — `struct tcp_info`. The same per-connection fields you read off the BTF `struct tcp_sock` pointer are also surfaced to userspace here via `getsockopt(TCP_INFO)`. When you wonder "what other state can I expose?" — this is the catalog. (`bpf_get_socket_cookie` is unrelated: it returns a `u64` SO_COOKIE id, not a `tcp_info`, and as noted in the instrumentation step it isn't even available to `tcp_congestion_ops` programs.)
 
 - **`include/linux/tcp.h`** — the kernel-internal `struct tcp_sock`. ~150 fields. Read once. The relationship: `struct tcp_info` (UAPI) is a curated subset of `struct tcp_sock` (internal); BPF programs can read either by casting `struct sock *sk → struct tcp_sock * = (void *)sk`.
 
