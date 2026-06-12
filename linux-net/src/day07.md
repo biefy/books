@@ -61,6 +61,17 @@ If the lookup hits FAILED, the skb is dropped and the kernel may send an ICMP "D
 
 ## Today's experiment
 
+> **Before you start:** the commands below use `eth0` and the gateway `192.168.1.1` as examples. Replace them with *your* interface and default gateway — derive both from `ip route show default`:
+>
+> ```bash
+> IFACE=$(ip route show default | awk '{print $5; exit}')
+> GW=$(ip route show default | awk '{print $3; exit}')
+> echo "iface=$IFACE gateway=$GW"
+> # iface=eth0 gateway=10.0.0.1
+> ```
+>
+> Run verbatim against a machine whose interface is `ens3`/`enp0s3` or whose gateway is different, and `ip neigh flush dev eth0` fails with "Cannot find device" and `ping 192.168.1.1` goes nowhere. Substitute `$IFACE`/`$GW` (or your real values) wherever you see `eth0`/`192.168.1.1` below.
+
 ### See your ARP table
 
 ```bash
@@ -84,9 +95,10 @@ ip neigh show
 sudo tcpdump -i eth0 -n arp -e &
 sudo ip neigh flush dev eth0
 ping -c 1 192.168.1.1
+sudo pkill tcpdump   # stop the background capture
 ```
 
-You'll see the ARP request (broadcast) and reply (unicast).
+You'll see the ARP request (broadcast) and reply (unicast). The `pkill` is essential: a backgrounded `tcpdump` with no count/timeout otherwise runs forever, spamming your terminal with every later ARP on the link.
 
 ### Trace neighbour state changes
 
@@ -98,38 +110,58 @@ fentry:neigh_update {
 }'
 ```
 
+The numbers are NUD bitmask values (`include/uapi/linux/neighbour.h`): `1`=INCOMPLETE, `2`=REACHABLE, `4`=STALE, `8`=DELAY, `16`=PROBE, `32`=FAILED. In another terminal, flush and re-ping the gateway to drive transitions. A fresh resolution fires several `neigh_update` calls, so you'll see lines like:
+
+```
+# update: state=1 new_state=2   (INCOMPLETE -> REACHABLE, first resolution)
+# update: state=4 new_state=8   (STALE -> DELAY, a packet hits an aged entry)
+```
+
+These tie directly back to the state machine at the top of the chapter. (Swap `%d` for `%x` in the `printf` if you'd rather see the raw hex `#define` values.)
+
 ### Probe gc thresholds
 
 ```bash
-sysctl net.ipv4.neigh.default.gc_thresh1
-sysctl net.ipv4.neigh.default.gc_thresh2
-sysctl net.ipv4.neigh.default.gc_thresh3
+sysctl net.ipv4.neigh.default.gc_thresh1   # default 128
+sysctl net.ipv4.neigh.default.gc_thresh2   # default 512
+sysctl net.ipv4.neigh.default.gc_thresh3   # default 1024
 
 # bump for high-fanout servers:
 sudo sysctl -w net.ipv4.neigh.default.gc_thresh3=8192
+
+# restore the default when you're done (this change is non-persistent —
+# it's lost on reboot and not written to sysctl.conf):
+sudo sysctl -w net.ipv4.neigh.default.gc_thresh3=1024
 ```
 
 ## What to break
 
 ### Statically pin a wrong MAC
 
+> **Warning:** do **not** pin a wrong MAC for the gateway on the interface you're SSH-ing in over — it drops your session before you can run the undo, locking you out. Pin a non-gateway LAN peer instead, or run this from the local console.
+
 ```bash
 sudo ip neigh add 192.168.1.1 lladdr aa:bb:cc:00:00:00 dev eth0 nud permanent
-ping 192.168.1.1   # times out — packets sent to wrong MAC
+ping -c 3 -W 1 192.168.1.1   # no replies — packets sent to a MAC nobody owns
 
 # undo:
 sudo ip neigh del 192.168.1.1 dev eth0
 ```
 
-This shows the cache is authoritative until the kernel re-resolves.
+This shows the cache is authoritative until the kernel re-resolves. The `-c 3 -W 1` is important: a bare `ping` runs until you Ctrl-C, and until you do, the `del` line never executes and the entry stays poisoned.
 
 ### Watch FAILED state
 
+To actually watch INCOMPLETE → FAILED you must (a) target an address that is *directly connected* — pick an **unused** IP inside your `eth0` subnet, not an off-subnet one like `10.99.99.99` (those route via the gateway, so the kernel never ARPs for them) — and (b) send real traffic to kick off resolution. Note too that a bare `ip neigh add IP dev eth0` with no `lladdr`/`nud` is rejected by modern iproute2 ("No link layer address given") and creates no entry at all.
+
 ```bash
-sudo ip neigh add 10.99.99.99 dev eth0   # nonexistent host
-sleep 5
-ip neigh show 10.99.99.99
-# 10.99.99.99 dev eth0 INCOMPLETE / FAILED after retries
+# pick an unused IP in your eth0 subnet, e.g. 192.168.1.250
+sudo ip neigh flush 192.168.1.250 dev eth0 2>/dev/null
+ping -c1 -W1 192.168.1.250 || true   # queues a packet -> kernel starts ARPing
+sleep 8                              # past 3 multicast probes @ retrans_time 1s
+ip neigh show 192.168.1.250
+# 192.168.1.250 dev eth0  FAILED     (briefly INCOMPLETE first)
+sudo ip neigh del 192.168.1.250 dev eth0   # cleanup
 ```
 
 ---
