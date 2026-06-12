@@ -84,14 +84,16 @@ Five constants you can return:
 ### Setup: a veth pair to play with
 
 ```bash
+sudo ip netns add ns1
 sudo ip link add veth0 type veth peer name veth1
-sudo ip link set veth0 up
-sudo ip link set veth1 up
+sudo ip link set veth1 netns ns1
 sudo ip addr add 10.0.0.1/24 dev veth0
-sudo ip addr add 10.0.0.2/24 dev veth1
+sudo ip link set veth0 up
+sudo ip netns exec ns1 ip addr add 10.0.0.2/24 dev veth1
+sudo ip netns exec ns1 ip link set veth1 up
 ```
 
-We'll attach our program to `veth1`. Sending traffic to `10.0.0.2` (e.g., `ping 10.0.0.2`) routes through `veth0`, into `veth1`'s RX path, where XDP runs.
+`veth1` lives in its own namespace, `ns1`, and this matters: if both ends shared the root namespace, `10.0.0.2` would be a *local* address, and the kernel would short-circuit `ping 10.0.0.2` through `lo` — the packet would never leave `veth0`, and XDP on `veth1` would never fire. Putting `veth1` in `ns1` forces traffic to cross the wire. We attach our program to `veth1` inside `ns1`; pinging `10.0.0.2` from the host sends echo requests out `veth0`, across the link into `veth1`'s RX path, where XDP runs.
 
 ### `xdp_count.bpf.c`
 
@@ -145,7 +147,13 @@ What's new:
 ```c
 #include <bpf/libbpf.h>
 #include <net/if.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <signal.h>
 #include "xdp_count.skel.h"
+
+static volatile sig_atomic_t exiting = 0;
+static void on_sigint(int sig) { exiting = 1; }
 
 int main(int argc, char **argv) {
     if (argc < 2) { fprintf(stderr, "usage: %s <iface>\n", argv[0]); return 1; }
@@ -157,6 +165,8 @@ int main(int argc, char **argv) {
 
     struct bpf_link *link = bpf_program__attach_xdp(skel->progs.xdp_count, ifindex);
     if (!link) { fprintf(stderr, "attach failed\n"); return 1; }
+
+    signal(SIGINT, on_sigint);
 
     while (!exiting) {
         sleep(2);
@@ -182,8 +192,8 @@ int main(int argc, char **argv) {
 
 ```bash
 make
-sudo ./xdp_count veth1 &
-# In another terminal:
+sudo ip netns exec ns1 ./xdp_count veth1 &
+# From the host (root namespace):
 ping -c 5 10.0.0.2
 nc -u 10.0.0.2 9999 <<< "hello"
 ```
@@ -197,6 +207,16 @@ proto  17: 1      # UDP
 
 You're now counting every packet that hits `veth1`. Now redirect this same program at a real NIC (`eno1` or whatever) and you've got line-rate counters with effectively zero overhead.
 
+### Cleanup
+
+```bash
+sudo kill %1                 # stop the loader; closing its bpf_link fd auto-detaches the XDP program
+sudo ip link del veth0       # deletes the pair (veth1 goes with it)
+sudo ip netns del ns1        # remove the namespace
+```
+
+The XDP program stays attached only as long as the loader runs — the link is never pinned, so `bpf_link__destroy` (or simply the process exiting) detaches it. If you stopped the loader some other way and the program is still attached, detach it explicitly with `sudo ip netns exec ns1 ip link set dev veth1 xdp off`.
+
 ---
 
 ## What to break, in order
@@ -208,13 +228,13 @@ struct iphdr *ip = (void *)(eth + 1);
 __u32 key = ip->protocol;     /* no bounds check */
 ```
 
-Verifier rejects:
+Verifier rejects at load time. libbpf prints the log to stderr when `xdp_count_bpf__open_and_load()` fails (the `if (!skel) return 1;` path — the userspace program prints nothing of its own):
 
 ```
-invalid access to packet, off=14 size=1, R1(id=0,off=0,r=14)
+invalid access to packet, off=23 size=1, R1(id=0,off=0,r=14)
 ```
 
-The Verifier's per-byte tracking doesn't know the byte at `eth+1+offsetof(protocol)` is reachable.
+`off=23` because `protocol` sits 9 bytes into the IP header and the IP header starts 14 bytes (one Ethernet header) into the frame; only those first 14 bytes were bounds-checked (`r=14`). The Verifier's per-byte tracking doesn't know the byte at `eth+1+offsetof(protocol)` is reachable. The exact wording and offsets are kernel- and clang-version dependent.
 
 ### Break 2 — Pre-bound the index, then atomic
 
@@ -224,19 +244,35 @@ Switch from per-CPU to a regular hash:
 __uint(type, BPF_MAP_TYPE_HASH);
 ```
 
-Now concurrent updates need atomics:
+A `PERCPU_ARRAY` pre-allocates all 256 indices, so `bpf_map_lookup_elem(&counts, &key)` always returns a (zeroed) slot. A `HASH` map starts empty — the lookup returns `NULL` for every protocol it hasn't seen yet, so `if (c) ...` never fires and the counter stays at zero. You have to create the entry on first sight, and because a shared (not per-CPU) map can be touched by several CPUs at once, the increment now needs an atomic:
 
 ```c
-if (c) __sync_fetch_and_add(c, 1);
+__u64 *c = bpf_map_lookup_elem(&counts, &key);
+if (c) {
+    __sync_fetch_and_add(c, 1);          /* shared map: atomic now required */
+} else {
+    __u64 one = 1;
+    bpf_map_update_elem(&counts, &key, &one, BPF_NOEXIST);  /* create on first sight */
+}
 ```
 
-Run on a multi-CPU NIC. Compare throughput to the per-CPU version (perf top will show contention on the bucket lock if you stress it).
+(The first concurrent update for a brand-new key can still race on a non-preallocated hash; `BPF_NOEXIST` plus the atomic add on the existing-entry path is the standard mitigation.)
+
+The throughput lesson — a shared hash contends on a per-bucket lock where the per-CPU array does not — is **not observable on this veth**: a 5-packet ping over a single-queue virtual link generates no contention. To see it you need a real multi-queue NIC and parallel load that spreads RX across CPUs (e.g. `iperf3 -u -P 16` to a peer, or `pktgen` across queues), then `sudo perf top -e cycles -g`. With the hash you'll see time in `queued_spin_lock_slowpath`/`_raw_spin_lock` under `htab_map_update_elem`/`bpf_map_lookup_elem`; with the per-CPU array those frames are absent.
 
 ### Break 3 — Return `XDP_DROP` instead of `XDP_PASS`
 
-Change the return. Run on `veth1`. `ping 10.0.0.2` no longer responds — packets are dropped before reaching the IP stack. SSH from another host into your box still works (it's on a different interface). Lesson: XDP is the literal first hop. Be careful which iface you attach to.
+Change the return to `XDP_DROP`, then rebuild and re-attach — editing the program does nothing until you reload it:
 
-### Break 4 — Try to follow a NULL chain
+```bash
+make
+sudo ip netns exec ns1 ./xdp_count veth1 &
+ping -c 5 10.0.0.2
+```
+
+The ping now reports `100% packet loss` (0 received): the echo requests cross the wire, hit `veth1`'s RX inside `ns1`, and XDP drops them before they reach the IP stack, so no replies come back. SSH into your box still works (it's on a different interface). Lesson: XDP is the literal first hop. Be careful which iface you attach to. (This break is invisible without the namespace separation from the setup above — a same-namespace `10.0.0.2` is delivered locally over `lo` and never reaches `veth1`'s XDP hook.)
+
+### Break 4 — Forget a per-layer bounds check
 
 ```c
 struct iphdr *ip = (void *)(eth + 1);
@@ -246,7 +282,7 @@ if (tcp + 1 > end) return XDP_PASS;
 __u16 dport = tcp->dest;
 ```
 
-Each layer needs its own bounds check. Forget any one and the Verifier rejects with the same `invalid access to packet` error pointing at the offending instruction.
+As written this compiles and loads — every layer is bounds-checked. Now **delete** the `if (tcp + 1 > end) return XDP_PASS;` line and rebuild. The Verifier rejects the load with the same `invalid access to packet` error, this time pointing at the `tcp->dest` read: each header layer needs its own check, and Break 1's lesson generalizes from one header to a multi-layer chain.
 
 ---
 
