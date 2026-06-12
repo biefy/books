@@ -172,23 +172,70 @@ For real symbolization, link against `libblazesym` (modern, fast) or write a `ka
 
 ```bash
 make
-sudo ./stacks &
-# Generate work:
+sudo ./stacks &        # job %1; prints a dump every 5s
+# Generate work, then wait for the next 5-second dump to see it:
 find /usr -name "*.so" > /dev/null
 cat /etc/passwd > /dev/null
+sleep 5
 ```
 
-You'll see the addresses. Resolve a few manually with `addr2line` (for user) or `cat /proc/kallsyms | grep <addr>` (for kernel) to confirm they make sense.
+Output is interval-driven — nothing prints until the next 5-second tick. When you're done, stop the background dumper (otherwise it keeps printing as root forever):
+
+```bash
+kill %1        # or: sudo pkill stacks
+```
+
+You'll see frames printed as raw hex (`K <addr>` / `U <addr>`). Resolving them by hand is fiddly — two real pitfalls:
+
+- **Kernel frames.** Don't `cat /proc/kallsyms | grep <addr>` as a normal user: with the default `kptr_restrict=1` every address reads back as `0000000000000000`, so you'd grep zeros and find nothing. You must read it as root. Worse, the captured value is a *return address inside* a function, but kallsyms lists only symbol *start* addresses, so an exact grep almost never matches. Find the nearest preceding symbol instead (note kallsyms is **not** address-sorted, so sort it first):
+
+  ```bash
+  # ADDR is one of the K <addr> values, e.g. ffffffff9a0ea100
+  sudo sort /proc/kallsyms | awk -v a=ADDR '$1 <= a {s=$0} END {print s}'
+  # ffffffff9a0ea0e0 T vfs_read
+  ```
+
+- **User frames.** `addr2line` needs the target object *and a file offset*, not the runtime virtual address. For a frame at runtime address `A` in object `/path/bin` loaded at base `B` (the left column of the matching line in `/proc/PID/maps`), run `addr2line -f -e /path/bin $((A-B))`. The base subtraction is **mandatory** for PIE executables and all shared libraries (e.g. libc); only for a non-PIE `ET_EXEC` can you pass `A` directly. A bare `addr2line <addr>` just prints `??:0`.
+
+This hand-resolution is exactly the plumbing `libblazesym` / `bpftool` automate for you — which is why we deferred symbolization above.
 
 ### Pipe to a flame graph
+
+Get `flamegraph.pl` once (it isn't packaged on any distro — grab it from Brendan Gregg's repo):
+
+```bash
+git clone https://github.com/brendangregg/FlameGraph
+export PATH="$PATH:$PWD/FlameGraph"
+```
+
+Then:
 
 ```bash
 sudo ./stacks --folded > out.folded
 flamegraph.pl < out.folded > out.svg
-firefox out.svg
+# Open out.svg in any browser. On a headless box, copy it to your laptop,
+# or just drag out.folded onto https://speedscope.app (no local browser needed).
+# firefox out.svg   # only if you actually have a desktop browser
 ```
 
-(You'll need `--folded` mode you implement; output one line per stack.)
+`--folded` is **required reader work** — the lab's `stacks.c` only prints the `%llx` debug dump above. You need to parse `argv`, symbolize each frame, and emit one line per unique stack in *root-to-leaf* order (process at the base, leaf on top), with the count last. Building on the loop at lines 158–161, that's roughly:
+
+```c
+printf("%s", comm);                       /* process name at the base */
+for (int i = u_n - 1; i >= 0; i--)        /* user frames, outermost first */
+    printf(";%s", sym_user(uframes[i]));
+for (int i = k_n - 1; i >= 0; i--)        /* then kernel frames */
+    printf(";%s", sym_kernel(kframes[i]));
+printf(" %llu\n", val);                   /* count */
+```
+
+A correct folded line for the `cat /etc/passwd` workload looks like this — the same kernel path from the Sharpen-your-pencil answer, leaf (`vfs_read`) on top:
+
+```
+cat;__libc_read;entry_SYSCALL_64;do_syscall_64;__x64_sys_read;ksys_read;vfs_read 137
+```
+
+In the resulting SVG: the wide base is the common process / syscall-entry frames shared by every sample, narrow towers are the divergent call paths, each frame's width is proportional to its count, and `vfs_read` sits near the top of every tower (it's the function you traced).
 
 ---
 
@@ -198,7 +245,14 @@ firefox out.svg
 
 If your binary has frame-pointer-omitted libraries (most older distros), you'll see `uid < 0` for many calls. Workaround: trace `fentry` of a userspace-heavy function in a frame-pointer-enabled binary. Or, on Fedora/Ubuntu 24+, modern libc *has* frame pointers and user stacks resolve.
 
-To debug: `bpftool prog tracelog` while running. Or check `bpf_get_stackid`'s return value.
+To debug, check `bpf_get_stackid`'s return value directly: the program already guards on `uid < 0` (lines 106–112), and that negative value is the errno explaining the failed user-stack walk. `bpftool prog tracelog` is empty by default here — this lab emits nothing to the trace pipe — so to use it you must add a printk on the failure path, e.g. in `on_read`:
+
+```c
+if (uid < 0)
+    bpf_printk("user-stack walk failed: uid=%lld\n", uid);
+```
+
+Then watch `sudo bpftool prog tracelog` (or `sudo cat /sys/kernel/debug/tracing/trace_pipe`) to see the negative errno fire when a frame-pointer-omitted library breaks the walk.
 
 ### Break 2 — Forgetting `MAX_STACK_DEPTH`
 
