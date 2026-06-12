@@ -110,17 +110,20 @@ while (!exiting) {
 }
 ```
 
-`lookup_ksym(addr)` is a few-line function that scans `/proc/kallsyms` for the closest symbol below `addr`.
+`lookup_ksym(addr)` is a **sketch, not supplied code** — it's a few-line function you write that scans `/proc/kallsyms` for the closest symbol at or below `addr`: parse each `addr type name` line, keep the entry with the largest address `<= addr`. Without it the program won't link. To skip writing a symbolizer, print the raw IP with `%llx` instead and pipe each value through `grep <hex> /proc/kallsyms` by hand. Note `/proc/kallsyms` only exposes real addresses to root (`kptr_restrict` zeroes them otherwise), so run the binary with `sudo`.
 
 ### Run
 
+> **Prerequisite:** `kprobe.multi` is fprobe-backed, so the kernel must be built with `CONFIG_FPROBE=y` (kernel >= 5.18), plus `CONFIG_DEBUG_INFO_BTF=y` for the `vmlinux.h` include. Check with `grep -E 'CONFIG_FPROBE|CONFIG_DEBUG_INFO_BTF' /boot/config-$(uname -r)` (or `zgrep` on `/proc/config.gz`). Without `CONFIG_FPROBE` the attach fails outright.
+
 ```bash
-sudo ./multi
+make
+sudo ./multi &
 # Generate work in another terminal:
 find /etc -type f | xargs cat > /dev/null
 ```
 
-Expected:
+Expected (assuming you wrote the `lookup_ksym` sketch above — otherwise the left column is raw hex IPs):
 
 ```
 vfs_read       12453
@@ -130,7 +133,36 @@ vfs_close       2914
 ...
 ```
 
-You attached to ~50 functions in one syscall, watched all of them for 2 seconds, and aggregated by function — without writing 50 separate handlers.
+Row order is **arbitrary**: the userspace loop walks the map with `bpf_map_get_next_key`, which returns keys in hash order, not ranked by count — so your rows may appear shuffled (the counts above aren't sorted either). Only the per-function counts matter; pipe through `sort -k2 -rn` if you want them ranked.
+
+You attached to ~50 functions in one syscall, watched all of them, and aggregated by function — without writing 50 separate handlers.
+
+#### Same lesson as a one-liner
+
+If you'd rather not assemble the C glue (in particular the `lookup_ksym` symbolizer), `bpftrace` gives you the whole lesson in one copy-pasteable program. The `vfs_*` glob is expanded and attached via `kprobe.multi` — the same path as `SEC("kprobe.multi/vfs_*")` in `multi.bpf.c` — and the `func` builtin plays the role of `bpf_get_func_ip`, telling you which of the `vfs_*` functions fired:
+
+```bash
+# Terminal 1 — one program, many functions, attributed by func():
+sudo bpftrace -e 'kprobe:vfs_* { @[func] = count(); } interval:s:5 { exit(); }'
+# Terminal 2 — generate VFS load:
+find /etc -type f | xargs cat > /dev/null
+```
+
+Expected (counts vary run to run; the highest-traffic VFS paths dominate, and `bpftrace` prints `@`-maps sorted ascending by value):
+
+```
+Attached 78 probes
+
+@[vfs_write]: 524
+@[vfs_fstatat]: 1744
+@[vfs_statx]: 2823
+@[vfs_open]: 4719
+@[vfs_fstat]: 4897
+@[vfs_getattr_nosec]: 7742
+@[vfs_read]: 20960
+```
+
+`bpftrace` resolves the names directly via `func`, so this version sidesteps the `lookup_ksym` glue entirely.
 
 ---
 
