@@ -102,32 +102,41 @@ sudo ip netns add green
 ls /var/run/netns/        # one entry per ns
 
 # nsfs link to /proc/<pid>/ns/net:
-readlink /proc/$$/ns/net   # current shell's netns
-sudo ip netns exec green readlink /proc/$$/ns/net
+readlink /proc/$$/ns/net           # current shell's netns (init_net)
+sudo ip netns exec green readlink /proc/self/ns/net   # green's netns
 ```
 
-The two readlinks differ — that's how the kernel knows which ns a process is in.
+```
+net:[4026531833]    # init_net (your number differs)
+net:[4026532243]    # green — a different inode
+```
+
+Note the use of `/proc/self` in the second command, not `/proc/$$`. `$$` is expanded by your *outer* interactive shell (which lives in init_net) *before* `ip netns exec` runs, so it would resolve the symlink for a process still in init_net and print the same inode twice. `/proc/self` is resolved by the `readlink` process that `ip netns exec` actually placed inside green, so the two inodes genuinely differ — that's how the kernel knows which ns a process is in.
 
 ### Per-ns sysctl
 
 ```bash
-# In init_net:
+# In init_net — show YOUR actual value (don't assume a specific one):
 cat /proc/sys/net/ipv4/tcp_congestion_control
-# bbr (or whatever)
+# cubic (whatever your box uses — often cubic)
+
+# What's even compiled in? (reno is always built in)
+cat /proc/sys/net/ipv4/tcp_available_congestion_control
+# reno cubic dctcp bbr htcp
 
 # In green:
 sudo ip netns exec green cat /proc/sys/net/ipv4/tcp_congestion_control
-# bbr (a new ns inherits init_net's congestion control, here bbr)
+# cubic (a new ns inherits init_net's congestion control)
 
-# Set independently — pick a DIFFERENT algorithm so the change is visible:
-sudo ip netns exec green sysctl -w net.ipv4.tcp_congestion_control=cubic
+# Set green to reno — always built in, so guaranteed distinct from a default-cubic box:
+sudo ip netns exec green sysctl -w net.ipv4.tcp_congestion_control=reno
 
 # Confirm green changed but init_net did NOT:
-sudo ip netns exec green cat /proc/sys/net/ipv4/tcp_congestion_control   # cubic
-cat /proc/sys/net/ipv4/tcp_congestion_control                            # still bbr
+sudo ip netns exec green cat /proc/sys/net/ipv4/tcp_congestion_control   # reno
+cat /proc/sys/net/ipv4/tcp_congestion_control                            # unchanged (your original value)
 ```
 
-Different values per ns — green now reads `cubic` while init_net stays `bbr`, proving the tables are independent. The per-ns sysctl table is at `net->sysctls`.
+Different values per ns — green now reads `reno` while init_net keeps its original value, proving the tables are independent. The per-ns sysctl table is at `net->sysctls`. (If your init_net somehow already runs `reno`, set green to `cubic` instead — the point is just to pick something different from init_net's current value.)
 
 ### Per-ns routing
 
@@ -156,7 +165,13 @@ sudo ip netns add demo
 sudo ip netns delete demo
 ```
 
-> **Caveat:** `setup_net` is `static __net_init` (`net/core/net_namespace.c`), so it may be inlined or freed after boot and `fentry:setup_net` may not reliably attach. If it doesn't fire, trace the creation path via `copy_net_ns` (its caller, which has a `struct net *` once `setup_net` returns) instead. `cleanup_net` is a work-queue function and attaches reliably.
+> **Caveat:** `setup_net` is `static __net_init` (`net/core/net_namespace.c`), so it may be inlined or freed after boot and `fentry:setup_net` may not reliably attach. If it doesn't fire, trace its caller `copy_net_ns` instead — but note that `copy_net_ns`'s `struct net *` argument (`args->old_net`) is the OLD/parent namespace, not the new one. The freshly created `struct net` is the function's RETURN value, so you must use `fexit` and `retval`:
+>
+> ```bash
+> sudo bpftrace -e 'fexit:copy_net_ns { printf("new net %p\n", retval); }'
+> ```
+>
+> (`copy_net_ns` also runs for `CLONE` without `CLONE_NEWNET`, in which case it just returns the old net pointer; the distinct heap addresses appear exactly when `ip netns add` runs.) `cleanup_net` is a work-queue function and attaches reliably.
 
 You'll see the ns being created and torn down.
 
@@ -184,15 +199,22 @@ This is why deleting a netns can take a long time on a busy system — every sub
 
 ### Try moving a physical NIC to a netns
 
+First find your real interface name — many cloud/test VMs use predictable names like `ens5` or `enp0s3`, not `eth0`:
+```bash
+ip route get 1.1.1.1     # read the 'dev <name>' field; substitute it for eth0 below
+```
+
 ```bash
 sudo ip link set eth0 netns red    # **CAREFUL** — your SSH may go away
 ```
 
 If you do this on the real interface you're using, your SSH session disconnects (init_net no longer has eth0). For real testing, do it with a non-essential interface or via a console.
 
-To recover from console:
+To recover from console — note the device comes back **down** with its addresses flushed, so you must bring it up and re-acquire an address:
 ```bash
 sudo ip netns exec red ip link set eth0 netns 1   # back to init_net
+sudo ip link set eth0 up
+sudo dhclient eth0        # or re-add the static address you had before
 ```
 
 ### Watch conntrack count per ns
@@ -206,6 +228,16 @@ sysctl net.netfilter.nf_conntrack_count
 ```
 
 The two views are independent.
+
+### Cleanup
+
+These experiments leave persistent namespaces and a veth pair behind. Tear them down so you don't accumulate stale interfaces and ns mounts:
+
+```bash
+sudo ip link del veth_red 2>/dev/null     # removes both ends of the pair
+sudo ip netns delete green 2>/dev/null
+sudo ip netns delete red 2>/dev/null      # also reaps the peer living inside it
+```
 
 ---
 
