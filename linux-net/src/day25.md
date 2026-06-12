@@ -106,26 +106,47 @@ modinfo tls
 
 To use it, an application must explicitly call the setsockopt sequence. Modern OpenSSL (1.1.1+) supports it via `SSL_OP_ENABLE_KTLS` — pass it to `SSL_CTX_set_options` and OpenSSL handshakes normally then offloads encryption.
 
+The key push fires the instant the handshake completes, so the tracer must already be running before the client connects. First generate a cert and start the server (pass `-ktls` so the server offloads too):
+
 ```bash
 # Test with openssl s_server (since OpenSSL 3.0)
 openssl genrsa -out /tmp/k.pem 2048
 openssl req -new -x509 -key /tmp/k.pem -out /tmp/c.pem -days 1 -subj /CN=test
-sudo openssl s_server -accept 4443 -cert /tmp/c.pem -key /tmp/k.pem &
-
-openssl s_client -connect 127.0.0.1:4443 -ktls
-# Inside the client, type some text; verify the connection works
+sudo openssl s_server -accept 4443 -cert /tmp/c.pem -key /tmp/k.pem -ktls &
 ```
 
-Watch with bpftrace:
+Now start the bpftrace one-liner and **leave it running** in this terminal. It prints the key push symbolically — `optname` 1 and 2 are `TLS_TX` and `TLS_RX` from `include/uapi/linux/tls.h`:
 
 ```bash
 sudo bpftrace -e '
 fentry:do_tls_setsockopt {
-  printf("setsockopt optname=%d on sk=%p\n", args->optname, args->sk);
+  printf("%s push on sk=%p\n", args->optname==1?"TLS_TX":"TLS_RX", args->sk);
 }'
 ```
 
-Run the openssl client; you'll see TX_KEY and RX_KEY pushes. (`do_tls_setsockopt` is `static`, so on some builds it may be inlined and the `fentry` probe won't attach — if so, trace the exported `tls_setsockopt` instead.)
+Then, in another terminal, connect the client. `s_client` is interactive and blocks on stdin — type `Q` then Enter (or Ctrl-D) to close it, or drive it non-interactively with `echo Q`:
+
+```bash
+echo Q | openssl s_client -connect 127.0.0.1:4443 -ktls
+```
+
+When the offload engages you'll see the SOL_TLS key pushes, one per direction (the `sk` value is an opaque kernel pointer that differs every run):
+
+```
+TLS_TX push on sk=0xffff...
+TLS_RX push on sk=0xffff...
+```
+
+Two caveats worth knowing, because kTLS offload is genuinely finicky:
+
+- **The push only happens if kTLS actually activates**, which needs the handshake to negotiate a cipher the kernel can offload (an AES-GCM suite). Default TLS 1.3 on some builds negotiates a suite the kernel declines, so no key is pushed and the tracer stays silent. Pin a known-good suite to force it: add `-tls1_2 -cipher ECDHE-RSA-AES128-GCM-SHA256` to `s_server` and `-tls1_2` to `s_client`.
+- **The probe target varies by kernel.** `do_tls_setsockopt` is `static`, so on some builds it's inlined and the `fentry` probe won't attach (try the exported `tls_setsockopt` instead); on others it attaches but the key push doesn't traverse it. The reliable, probe-independent confirmation that kTLS engaged is the SNMP counters — `TlsTxSw`/`TlsRxSw` (software offload) increment per offloaded session:
+
+```bash
+grep -E 'TlsTxSw|TlsRxSw' /proc/net/tls_stat   # before and after; the count rises when kTLS engages
+```
+
+When done, stop the server and clean up: `sudo pkill -f 's_server -accept 4443'; rm -f /tmp/k.pem /tmp/c.pem`.
 
 ### Watch hardware-offload status
 
