@@ -204,38 +204,71 @@ A `sock_ops` BPF program (eBPF Day 19) can call `bpf_setsockopt()` to set sockop
 # See sockopts on live sockets
 ss -tipsm | head -20    # m=memory accounting
 
-# Check current TCP info via getsockopt
+# SET options and READ them back via getsockopt — exercises the day's core verb
 cat << 'EOF' > /tmp/tcpinfo.c
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 
 int main(int argc, char **argv) {
   int s = socket(AF_INET, SOCK_STREAM, 0);
-  struct sockaddr_in a = { AF_INET, htons(80) };
+
+  /* (1) SET a buffer size and watch the kernel double it — no connection needed */
+  int v = 65536, g; socklen_t gl = sizeof g;
+  setsockopt(s, SOL_SOCKET, SO_RCVBUF, &v, sizeof v);
+  getsockopt(s, SOL_SOCKET, SO_RCVBUF, &g, &gl);
+  printf("SO_RCVBUF: set %d, got %d (kernel doubled it)\n", v, g);
+
+  /* (2) SET congestion control for THIS socket only (no global sysctl) */
+  char cc[32]; socklen_t cl = sizeof cc;
+  getsockopt(s, IPPROTO_TCP, TCP_CONGESTION, cc, &cl);
+  printf("cc before: %s\n", cc);
+  setsockopt(s, IPPROTO_TCP, TCP_CONGESTION, "bbr", 3);
+
+  /* (3) connect, then READ tcp_info + the now-active CC name */
+  struct sockaddr_in a = { AF_INET, htons(argc > 2 ? atoi(argv[2]) : 80) };
   inet_aton(argc > 1 ? argv[1] : "8.8.8.8", &a.sin_addr);
   if (connect(s, (struct sockaddr*)&a, sizeof a) < 0) { perror("connect"); return 1; }
 
   struct tcp_info ti;
   socklen_t l = sizeof ti;
   getsockopt(s, IPPROTO_TCP, TCP_INFO, &ti, &l);
-  printf("rtt %u us, cwnd %u, rwnd %u, retrans %u, ca_state %u\n",
+  cl = sizeof cc;
+  getsockopt(s, IPPROTO_TCP, TCP_CONGESTION, cc, &cl);
+  printf("rtt %u us, cwnd %u, rwnd %u, retrans %u, ca_state %u, cc %s\n",
          ti.tcpi_rtt, ti.tcpi_snd_cwnd, ti.tcpi_snd_wnd,
-         ti.tcpi_total_retrans, ti.tcpi_ca_state);
+         ti.tcpi_total_retrans, ti.tcpi_ca_state, cc);
   return 0;
 }
 EOF
 cc /tmp/tcpinfo.c -o /tmp/tcpinfo && /tmp/tcpinfo
 ```
 
-Try changing CC and observe:
+The default target is `8.8.8.8:80`, so this needs outbound TCP/80 reachability. On an offline or egress-firewalled box, start a local listener and point the program at it instead (the program takes `host port` as args):
 
 ```bash
-sudo sysctl -w net.ipv4.tcp_congestion_control=bbr
-/tmp/tcpinfo                # the connection uses BBR
+nc -l 127.0.0.1 18080 &     # any high port avoids needing root to bind :80
+/tmp/tcpinfo 127.0.0.1 18080
+kill %1                      # stop the listener
 ```
+
+Expected output (numbers vary; loopback gives a tiny rtt):
+
+```
+SO_RCVBUF: set 65536, got 131072 (kernel doubled it)
+cc before: cubic
+rtt 37 us, cwnd 10, rwnd 65483, retrans 0, ca_state 0, cc bbr
+```
+
+What each line proves:
+
+- **`set 65536, got 131072`** — the chapter's headline gotcha (line 33). The kernel stored *twice* what you asked; the extra half is bookkeeping overhead. (The doubled value is clamped at `2 * net.core.rmem_max`, so very large sets get capped.)
+- **`cc before: cubic` → `cc bbr`** — the per-socket `setsockopt(TCP_CONGESTION)` took effect, and `getsockopt` reads it back. This changes *only this socket* — the system-wide default (`net.ipv4.tcp_congestion_control`) is never touched, so there is no global state to restore. `bbr` must be available (`modprobe tcp_bbr`; check `sysctl net.ipv4.tcp_available_congestion_control`).
+- **`rtt`** is `tcpi_rtt` = `srtt_us >> 3` in microseconds; **`cwnd 10`** is the initial congestion window; **`ca_state 0`** is `TCP_CA_Open` (the normal, no-loss state).
 
 ## What to read in the kernel
 
