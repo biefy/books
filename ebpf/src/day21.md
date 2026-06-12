@@ -181,6 +181,12 @@ sudo cat /sys/kernel/debug/tracing/trace_pipe
 
 You'll see one line per `filename_unlinkat` showing the retrieved task and elapsed time.
 
+When you're done watching, stop the loader so the fentry/fexit programs detach:
+
+```bash
+sudo pkill -f task_assoc       # or, since it's job 1: kill %1
+```
+
 ## What to break
 
 ### Plain store
@@ -189,7 +195,13 @@ You'll see one line per `filename_unlinkat` showing the retrieved task and elaps
 vp->task = acq;
 ```
 
-Verifier rejects: the kptr field can only be assigned via `bpf_kptr_xchg`. Plain stores don't go through the atomic exchange that the runtime uses to track lifetimes; allowing them would let a refcount leak by overwriting.
+Verifier rejects with a distinct message — not the leak-class `Unreleased reference` of the next two items, but:
+
+```
+store to referenced kptr disallowed
+```
+
+The kptr field can only be assigned via `bpf_kptr_xchg`. Plain stores don't go through the atomic exchange that the runtime uses to track lifetimes; allowing them would let a refcount leak by overwriting. (The check lives in `check_map_kptr_access` — `kernel/bpf/verifier.c:4747` — which rejects any non-load store class targeting a `BPF_KPTR_REF` field with `-EACCES`.)
 
 ### Forget to release the previous occupant
 
@@ -219,14 +231,32 @@ Rejected at exit: `Unreleased reference id=N alloc_insn=M`.
 
 ### Map deletion releases automatically
 
-Add a userspace cleanup that periodically deletes entries:
+When userspace deletes a map entry whose kptr slot is still **populated**, the kernel runs the registered destructor (`bpf_task_release` for tasks) on the slot's pointer at `bpf_obj_free_fields` time. No leak, no manual cleanup — and if your program terminates abnormally, userspace can drain the map and the kernel still frees every stashed task.
+
+The trouble with demonstrating this in the lab as written: the fexit handler already `bpf_kptr_xchg`'s the slot back to NULL on return (lines 162–168), so by the time any userspace delete runs, the slot is empty and deletion frees nothing. To actually see the destructor fire, **temporarily comment out the fexit retrieval (lines 162–168)** so entries stay populated, then delete them from userspace:
 
 ```c
-/* userspace */
-bpf_map_delete_elem(fd, &tid);
+/* userspace — fd and key are real, not placeholders */
+int fd = bpf_map__fd(skel->maps.stash);
+
+/* tid is a per-rm-process key you don't know a priori, so iterate: */
+__u32 key = 0, next;
+struct val v;
+while (bpf_map_get_next_key(fd, &key, &next) == 0) {
+    bpf_map_lookup_and_delete_elem(fd, &next, &v);   /* delete fires the kptr dtor */
+    key = next;
+}
 ```
 
-The kernel sees the kptr field, calls `bpf_task_release` automatically. No leak. Good — if your program terminates abnormally, your map can be cleaned up by userspace and the kernel handles the rest.
+Observe the destructor firing — in a second terminal, before you delete:
+
+```bash
+sudo bpftrace -e 'kprobe:bpf_task_release { @releases = count(); printf("dtor fired\n"); }'
+```
+
+Expected result: `@releases` increments once per deleted **populated** slot — that is the kernel invoking the registered kptr destructor on your behalf. Without the kptr machinery you would leak one task refcount per stashed entry.
+
+Caveat: this same probe also fires on the explicit `bpf_task_release(t)` in the fexit path, so either disable that path (the comment-out above) or compare counts to isolate the map-delete releases. Alternatively, dump the live slots first with `sudo bpftool map dump pinned /sys/fs/bpf/stash` (if you pin the map) to confirm they're populated before the delete.
 
 ## What to read in the kernel
 
