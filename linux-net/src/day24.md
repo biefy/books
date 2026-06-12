@@ -95,36 +95,135 @@ python3 /tmp/reuseport_srv.py &
 python3 /tmp/reuseport_srv.py &
 python3 /tmp/reuseport_srv.py &
 
+# Wait until the listener is actually up. Python startup + bind()/listen() is
+# racy against the first connect, so without this the first several nc attempts
+# hit "Connection refused" before any worker has finished binding.
+until nc -z localhost 8080 2>/dev/null; do sleep 0.1; done
+
+# Watch the kernel selector itself fire. arg1 of reuseport_select_sock is the
+# per-flow hash that drives the modulo-N pick: reuseport_select_sock(sk, u32 hash, ...).
+sudo bpftrace -e 'kprobe:reuseport_select_sock { printf("reuseport_select_sock hash=%u\n", arg1); }' &
+sleep 2
+
 # Hit it 20 times, see different PIDs respond
 for i in $(seq 1 20); do echo -n "$i: "; nc -q 1 localhost 8080; done
-# Roughly 1/3 of responses from each worker
+# Roughly 1/3 of responses from each worker. Each connect uses a fresh ephemeral
+# source port, so each is a distinct 4-tuple -> distinct hash -> the picks fan out.
+
+sudo pkill -f bpftrace
 
 # Inspect the bind hash
 sudo ss -tlnp | grep :8080
 # 3 listeners, all on 0.0.0.0:8080
 ```
 
-Verify the kernel-level hash is per-4-tuple:
+You should see the three workers spread the load, with one kprobe line per connect:
+
+```
+worker 12345 listening
+worker 12346 listening
+worker 12347 listening
+Attaching 1 probe...
+1: hello from 12345
+2: hello from 12347
+3: hello from 12346
+...
+reuseport_select_sock hash=2847561234
+reuseport_select_sock hash=901233517
+reuseport_select_sock hash=3310928844
+...
+```
+
+The hash bpftrace prints is computed from `(saddr, sport, daddr, dport)`; since
+each `nc` here gets a new ephemeral source port, every hash differs and the
+responding PIDs vary. (The exact hash values and PIDs will differ on your box.)
+```
+
+Verify the kernel-level hash is per-4-tuple — and that an *identical* tuple is deterministic (the "same client → same worker" affinity the prose keeps emphasizing):
 
 ```bash
-# Same source IP, different source ports should spread:
+# Re-attach the selector probe so we can read the hash for each connect:
+sudo bpftrace -e 'kprobe:reuseport_select_sock { printf("hash=%u\n", arg1); }' &
+sleep 2
+
+# (1) SPREAD: same source IP, different source ports -> different 4-tuple ->
+#     different hash -> connections fan out across workers.
 for p in 50000 50001 50002 50003 50004; do
   echo -n "port $p: "
   nc -q 1 -p $p localhost 8080 || true
 done
-# Different PIDs respond — different source ports hash to different workers.
+# Different PIDs respond, and bpftrace prints a different hash for each port.
+
+# (2) AFFINITY: a *fixed* 4-tuple yields a FIXED hash, hence the same worker.
+nc -q 1 -p 51000 localhost 8080      # note the hash and the responding PID
+sleep 61                             # let TIME_WAIT on :51000 drain before reuse
+nc -q 1 -p 51000 localhost 8080      # SAME hash, SAME PID -> affinity confirmed
+
+sudo pkill -f bpftrace
 ```
+
+The five fixed source ports produce five distinct hashes (spread); the two
+connects from the *same* `-p 51000` produce the **same** hash and hit the **same**
+PID. That determinism is exactly the connection affinity property — useful for
+per-worker caches. (Don't try to show this with plain repeated `nc` without
+`-p`: the ephemeral source port changes each time, so the hash changes too.)
 
 ### Pin workers to CPUs
 
 ```bash
+# Kill the 3 unpinned workers first — otherwise they stay in the reuseport group
+# and absorb part of the hash, muddying the cross-core distribution below.
+pkill -f reuseport_srv.py
+
 taskset -c 0 python3 /tmp/reuseport_srv.py &
 taskset -c 1 python3 /tmp/reuseport_srv.py &
 taskset -c 2 python3 /tmp/reuseport_srv.py &
 taskset -c 3 python3 /tmp/reuseport_srv.py &
+until nc -z localhost 8080 2>/dev/null; do sleep 0.1; done
+
+# Confirm each worker really is pinned to a distinct CPU:
+pgrep -f reuseport_srv.py | while read p; do taskset -cp $p; done
+
+# Drive load and watch the per-CPU spread:
+( for i in $(seq 1 2000); do nc -q 0 localhost 8080 >/dev/null; done ) &
+mpstat -P ALL 1 5
 ```
 
+Each worker should report a single, distinct CPU in 0-3, and under load the
+user/softirq time spreads across those four cores:
+
+```
+pid 12345's current affinity list: 0
+pid 12346's current affinity list: 1
+pid 12347's current affinity list: 2
+pid 12348's current affinity list: 3
+
+Linux 7.0.0-1004-azure (host)   06/12/26   _x86_64_   (4 CPU)
+
+00:24:24     CPU    %usr   %nice    %sys   %soft   %idle
+00:24:25       0    3.00    0.00    9.00    4.00   84.00
+00:24:25       1    2.97    0.00    8.91    3.96   84.16
+00:24:25       2    3.06    0.00    9.18    4.08   83.67
+00:24:25       3    2.94    0.00    8.82    3.92   84.31
+```
+
+(Exact percentages and PIDs vary; the point is all four cores show activity
+rather than one core carrying everything.)
+
 Now incoming connections are hashed across cores 0-3. Combined with NIC RSS (which RX-distributes across cores via hardware) you get end-to-end multi-core scaling without any explicit dispatch logic.
+
+### Clean up
+
+The workers loop forever (`while True: s.accept()`), so they keep holding
+`:8080` until you stop them — leaving them running blocks any re-run of this lab
+or any later TCP lab on port 8080.
+
+```bash
+sudo pkill -f reuseport_srv.py
+rm -f /tmp/reuseport_srv.py
+# Confirm the port is free — this should print nothing:
+ss -tlnp | grep :8080
+```
 
 ## What to read in the kernel
 
