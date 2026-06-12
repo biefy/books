@@ -189,15 +189,23 @@ printf("PID %u TID %u vfs_read → %lld bytes in %llu µs (%s)\n",
 
 ### Run it
 
+Use two terminals so the tracer and the workload don't fight over one shell.
+
+**Terminal A** — build and run the tracer in the foreground, and wait until it has attached before generating work (a `vfs_read` issued before `latency_bpf__attach()` returns is silently missed):
+
 ```bash
 make
-sudo ./latency &
-# Generate work:
+sudo ./latency
+```
+
+**Terminal B** — once the tracer is live, generate some reads:
+
+```bash
 cat /etc/passwd > /dev/null
 dd if=/dev/zero of=/dev/null bs=1k count=100
 ```
 
-Expected:
+Expected (in Terminal A):
 
 ```
 PID 14001 TID 14001 vfs_read → 2543 bytes in 12 µs (cat)
@@ -205,6 +213,8 @@ PID 14002 TID 14002 vfs_read → 1024 bytes in 8 µs (dd)
 PID 14002 TID 14002 vfs_read → 1024 bytes in 6 µs (dd)
 ...
 ```
+
+This traces *every* `vfs_read` on the box, not just `cat`/`dd` — sshd, systemd, journald, and the shell itself all read constantly, so those two lines are buried in a flood of unrelated events. To isolate them, pipe Terminal A through `grep -E 'cat|dd'` (or filter by `comm` in the consumer). **Stop the tracer with Ctrl-C in Terminal A when done.** (If you prefer to background it with `sudo ./latency &`, remember to `sleep 1` before generating work so attach completes, and `sudo pkill latency` to stop it.)
 
 You just measured every kernel-side `vfs_read` on your system in real time, with typed argument access and a few hundred nanoseconds of overhead per call. **This is what eBPF is for.**
 
@@ -214,26 +224,40 @@ You just measured every kernel-side `vfs_read` on your system in real time, with
 
 ### Break 1 — Forget the `bpf_map_delete_elem`
 
-Comment it out. Run for a few minutes against any read-heavy workload (e.g., `find /usr` or `cat /var/log/*`). Periodically check map size:
+Comment it out, then `make` and relaunch a fresh tracer (`sudo pkill latency; make && sudo ./latency &`) — the `starts` map only exists while the loaded program is running, so `bpftool map ... name starts` finds nothing if the tracer isn't up. Drive load from another terminal with `find /usr -type f -exec cat {} + >/dev/null`, then periodically read the live entry count. The reliable, version-independent way is the JSON dump piped to `jq length`:
 
 ```bash
-sudo bpftool map show name starts
-sudo bpftool map dump name starts | wc -l
+sudo bpftool map dump -j name starts | jq length
 ```
 
-The number grows. Slowly at first, then steady. At `max_entries=10240` it stops growing — but now `bpf_map_update_elem` silently fails on every new TID. Your tracer's coverage degrades to "only TIDs that were already in flight when the map filled."
+```
+21
+```
+
+(Plain `bpftool map dump name starts` prints the entries themselves — on newer bpftool, v7.x here, as a JSON array; on older builds as `key: … value: …` lines with a trailing `Found N elements` footer. The format varies, which is exactly why the `-j | jq length` form above is the dependable counter. Don't use `bpftool map show name starts` for this — it reports only the static `max_entries 10240` ceiling and key/value sizes, never the live count. And don't pipe `map dump` through `wc -l`: it counts formatting/footer lines, not elements.)
+
+Watch *N* climb. Slowly at first, then steady. As it plateaus toward `max_entries=10240`, `bpf_map_update_elem` silently fails on every new TID. Your tracer's coverage degrades to "only TIDs that were already in flight when the map filled."
 
 This is the slow-poison failure mode. **Always delete on exit.**
 
 ### Break 2 — Use TGID instead of TID
 
-Change both lookups/updates to use `id >> 32` as key. Run on a multi-threaded program:
+Change both lookups/updates to use `id >> 32` as key. The collision only shows up when several *threads of one process* (one shared TGID, many TIDs) read concurrently — separate processes each have a distinct TGID, so they never clash. Drive that with a single multi-threaded reader:
 
 ```bash
-stress-ng --io 4 --timeout 10
+python3 - <<'EOF'
+import threading, time
+def r():
+    while True:
+        with open('/etc/passwd') as f:
+            f.read()
+for _ in range(8):
+    threading.Thread(target=r, daemon=True).start()
+time.sleep(10)
+EOF
 ```
 
-Watch your output. You'll see latency values that are obviously wrong: many in the negative-ish range (millions of ns), occasional huge ones (seconds), and the count of events drops because some threads' fexit can't find their fentry entry.
+All 8 threads share one TGID and all call `vfs_read`, so a TGID-keyed map collides on every concurrent read: `fentry` from thread B overwrites thread A's start timestamp, so A's `fexit` computes a bogus delta. Watch your output. You'll see latency values that are obviously wrong — huge u64-underflowed durations (the subtraction wraps, giving ~10^18 ns) — and the event count drops, because some threads' `fexit` finds no matching `fentry` entry. (Contrast with TID keying: one entry per thread, so deltas stay correct.)
 
 Lesson stays: **TID for synchronous per-thread tracking.**
 
