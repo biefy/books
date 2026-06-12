@@ -98,25 +98,31 @@ PRR (RFC 6937) is the kernel's recovery rate-control strategy. The `prr_out`, `p
 
 ## Today's experiment
 
-Use `tc netem` to inject loss and watch recovery happen:
+Use `tc netem` to inject loss and watch recovery happen.
+
+**Prereq:** install `iperf3` — `sudo apt-get install -y iperf3` (Debian/Ubuntu) or `sudo dnf install -y iperf3` (Fedora/RHEL); confirm with `iperf3 --version`. The `tc netem` step needs the `sch_netem` module, which auto-loads the moment you run `tc qdisc add ... netem` and is present in any stock kernel (no manual `modprobe`).
 
 ```bash
 # Inject 5% loss on loopback
 sudo tc qdisc add dev lo root netem loss 5%
 
-# Run a transfer
+# Start the server, then run the client in the BACKGROUND (&) so the shell
+# stays free to inspect the socket while the 30s transfer is still live.
 iperf3 -s -p 5201 &
-iperf3 -c 127.0.0.1 -p 5201 -t 30
+iperf3 -c 127.0.0.1 -p 5201 -t 30 &
 
-# See retransmit counters
+# A few seconds in — WHILE the transfer is still running — inspect the socket.
+# ss must run during the transfer: once the client exits the iperf3 socket is
+# gone and you'll only see unrelated connections (e.g. your SSH session).
+ss -tin '( dport = :5201 or sport = :5201 )'
+
+# nstat is cumulative, so it's fine to run this even after the transfer ends.
 nstat | grep -i Retrans
-ss -tin | grep retrans
-
-# Restore
-sudo tc qdisc del dev lo root
 ```
 
-Trace recovery entry:
+While the transfer is live, `ss` lists the iperf3 socket with a reduced `cwnd` and a `retrans:A/B` field whose second number climbs as netem drops segments (the field is explained in *Per-connection retransmit info* below). `nstat | grep -i Retrans` then reports cumulative counters such as `TcpRetransSegs` and `TcpExtTCPSackRecovery`.
+
+Trace recovery entry. This loops every 10s — press **Ctrl-C** to stop — and only counts while loss recovery is actually happening, so you need a lossy transfer running **concurrently**: keep the netem qdisc above active and, in a second terminal, run `iperf3 -c 127.0.0.1 -p 5201 -t 30`. Against an idle system every 10s window prints zeros.
 
 ```bash
 sudo bpftrace -e '
@@ -128,14 +134,29 @@ interval:s:10 { print(@rec); print(@loss); print(@retx); clear(@rec); clear(@los
 
 Expect: many retransmits, several Recovery entries (each loss event), occasional Loss entries (when RTOs fire).
 
+When you're done, remove the injected loss and stop the background server:
+
+```bash
+# Restore
+sudo tc qdisc del dev lo root
+kill %1 2>/dev/null   # stop the background iperf3 server (or: pkill -f 'iperf3 -s')
+```
+
 ### Per-connection retransmit info
 
 ```bash
 ss -tin | grep -A 1 ESTAB
-# look for: cwnd:N retrans:RX/TX
+# look for: cwnd:N retrans:OUTSTANDING/TOTAL
 ```
 
-Where `RX` is total retransmits (cumulative) and `TX` is unacked retransmits in flight.
+Real output from a connection on the box:
+
+```
+ESTAB 0 0  10.0.0.4:22  ...:53179
+     cubic wscale:6,10 rto:219 ... cwnd:10 ssthresh:48 ... retrans:0/2 reord_seen:2 ... minrtt:10.33
+```
+
+`ss` prints `retrans:A/B` for the connection. `A` is the number of retransmissions currently **outstanding / in flight** (`tcpi_retrans` in `uapi/linux/tcp.h`); `B` is the **cumulative total** retransmissions over the connection's life (`tcpi_total_retrans`). Above, `retrans:0/2` means 0 retransmits outstanding right now and 2 total so far. The two values are not direction-related — there are no `RX`/`TX` fields here.
 
 ## What to read in the kernel
 
