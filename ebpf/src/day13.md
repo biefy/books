@@ -144,8 +144,31 @@ int BPF_PROG(on_out, struct file *f, char *buf, size_t n, loff_t *pos, ssize_t r
 
 ### `dropviz.c` — userspace + drop monitor
 
+Same build setup as Day 1: copy `~/libbpf-bootstrap/examples/c/Makefile` into this directory and set `APPS = dropviz`. The Makefile expects `dropviz.bpf.c` and `dropviz.c` and generates `dropviz.skel.h` (the typed accessors for `skel->maps.rb`, `skel->maps.drops`, etc.) for you on `make`. Regenerate `vmlinux.h` if you haven't already (`sudo bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h`).
+
 ```c
-/* Every 1s, sample drops counter */
+#include <stdio.h>
+#include <signal.h>
+#include <time.h>
+#include <bpf/libbpf.h>
+#include "dropviz.skel.h"
+
+struct event {
+    __u32 pid;
+    __u64 dur;
+    char comm[16];
+};
+
+static volatile sig_atomic_t exiting;
+static void sigh(int s) { exiting = 1; }
+
+static int handle_event(void *ctx, void *data, size_t sz) {
+    struct event *e = data;
+    printf("%-16s pid=%-7u dur=%llu ns\n", e->comm, e->pid, e->dur);
+    return 0;
+}
+
+/* Every 1s, sample the per-CPU drops counter and sum across CPUs */
 static void sample_drops(int fd) {
     __u64 total = 0;
     __u32 key = 0;
@@ -156,30 +179,49 @@ static void sample_drops(int fd) {
     fprintf(stderr, "[total drops: %llu]\n", total);
 }
 
-int main(...) {
-    /* ... open/load/attach ... */
+int main(int argc, char **argv)
+{
+    struct dropviz_bpf *skel;
+    struct ring_buffer *rb;
+    struct timespec last, now;
+
+    skel = dropviz_bpf__open_and_load();
+    if (!skel) return 1;
+    if (dropviz_bpf__attach(skel)) return 1;
+
+    rb = ring_buffer__new(bpf_map__fd(skel->maps.rb), handle_event, NULL, NULL);
     int drops_fd = bpf_map__fd(skel->maps.drops);
-    /* poll loop with periodic drop sampling */
+
+    signal(SIGINT, sigh);
+    clock_gettime(CLOCK_MONOTONIC, &last);
     while (!exiting) {
-        ring_buffer__poll(rb, 100);
-        if (time_since_last_sample > 1s) {
+        ring_buffer__poll(rb, 100);   /* 100 ms timeout */
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        if (now.tv_sec - last.tv_sec >= 1) {   /* ~1s tick */
             sample_drops(drops_fd);
+            last = now;
         }
     }
+
+    ring_buffer__free(rb);
+    dropviz_bpf__destroy(skel);
+    return 0;
 }
 ```
 
 ### Run with deliberate pressure
 
+First, **disable the 5µs filter for this demo only**: the `dur` in `on_out` is wall time across `vfs_read`, and `/dev/zero` reads with `bs=512` complete in well under 1µs, so the `if (dur < 5000) return 0;` line filters out ~99.9% of events *before* they ever reach `bpf_ringbuf_reserve` — leaving the drop counter stuck at `[total drops: 0]`. To make the flood reach the ringbuf, change that line to `if (dur < 0) return 0;` (or comment it out) and rebuild. (We put the filter back as a *fix* below.)
+
 ```bash
 make
 sudo ./dropviz &
 
-# Generate massive read pressure
+# Generate massive read pressure: ~500k reads/sec straight through vfs_read
 dd if=/dev/zero of=/dev/null bs=512 count=10000000 &
 ```
 
-Watch:
+Watch (representative — exact numbers vary with CPU and consumer speed):
 
 ```
 [total drops: 0]
@@ -189,10 +231,19 @@ Watch:
 [total drops: 7821]
 ```
 
-Drops are accumulating. Now fix:
+If you see `[total drops: 0]` forever, the filter is eating everything — confirm you actually lowered the threshold and rebuilt. Drops appear because hundreds of thousands of fast reads/sec overwhelm the deliberately tiny 64 KiB ringbuf faster than the single-threaded poll loop drains it.
+
+Let it run ~10s to watch drops accumulate, then **stop both background jobs**:
+
+```bash
+kill %2 2>/dev/null   # the dd job
+sudo pkill dropviz    # the tracer — it polls forever, so Ctrl-C won't reach a backgrounded job
+```
+
+The `dd` job reads ~5 GB and would eventually exit on its own, but `dropviz` runs an indefinite poll loop and must be killed explicitly. Now fix:
 
 1. **Increase ringbuf size** to 4 MiB (`64 * 1024 * 64`). Drops should stop or shrink.
-2. **Lower filter threshold** — change 5µs filter to 100µs to skip more.
+2. **Raise the filter threshold** — change the 5µs cutoff (`dur < 5000`) to 100µs (`dur < 100000`) so more events are filtered out in BPF before they ever reach the ringbuf.
 3. **Slow down the consumer's per-event work** in your handler. (Print less.)
 
 Each adjustment you can verify by re-running the workload and watching the drops counter.
@@ -217,27 +268,39 @@ Functionally similar; uses copy semantics instead of reserve/submit. About 10% s
 
 ### Break 3 — Variable-size with dynptr
 
+Two things make the naive version wrong, and both matter:
+
+- **Capture at `fexit`, not `fentry`.** At entry the read hasn't happened yet, so the user buffer `buf` is not populated — there is nothing to copy.
+- **`bpf_dynptr_write` does a plain kernel `memmove`; it does *not* read user memory.** Passing the `char __user *buf` directly as `src` copies garbage, and the Verifier rejects a raw user pointer where it expects kernel-resident `ARG_PTR_TO_MEM`. You must first stage the user bytes into a bounded kernel stack temp with `bpf_probe_read_user`.
+
 ```c
-SEC("fentry/vfs_read")
-int BPF_PROG(on_in_dyn, struct file *f, char *buf, size_t n, loff_t *pos)
+SEC("fexit/vfs_read")
+int BPF_PROG(on_out_dyn, struct file *f, char *buf, size_t n, loff_t *pos, ssize_t ret)
 {
-    __u32 to_emit = n > 64 ? 64 : n;
+    if (ret <= 0) return 0;
+    /* cap to a compile-time constant so the Verifier can bound the copy */
+    __u32 to_emit = ret > 64 ? 64 : ret;
+    char tmp[64];
+    if (bpf_probe_read_user(tmp, to_emit, buf) < 0)
+        return 0;
+
     struct bpf_dynptr ptr;
     if (bpf_ringbuf_reserve_dynptr(&rb, sizeof(struct event) + to_emit, 0, &ptr) < 0) {
         inc_drops();
+        bpf_ringbuf_discard_dynptr(&ptr, 0);   /* every reserve needs a submit OR discard */
         return 0;
     }
-    /* write header */
-    struct event hdr = { ... };
+    struct event hdr = {};
+    hdr.pid = bpf_get_current_pid_tgid() >> 32;
+    bpf_get_current_comm(&hdr.comm, sizeof(hdr.comm));
     bpf_dynptr_write(&ptr, 0, &hdr, sizeof(hdr), 0);
-    /* write variable-size suffix */
-    bpf_dynptr_write(&ptr, sizeof(hdr), buf, to_emit, 0);
+    bpf_dynptr_write(&ptr, sizeof(hdr), tmp, to_emit, 0);   /* kernel src, in-bounds */
     bpf_ringbuf_submit_dynptr(&ptr, 0);
     return 0;
 }
 ```
 
-Now event size depends on `n`. Try replacing your reserve-and-submit pattern with this for a tracer that captures variable-length data.
+The `to_emit = ret > 64 ? 64 : ret` cap is what lets the Verifier prove the `bpf_probe_read_user` and the second `bpf_dynptr_write` stay within `tmp[64]`. Now event size depends on the actual bytes read. Try replacing your reserve-and-submit pattern with this for a tracer that captures variable-length data.
 
 ### Break 4 — Force-wakeup spam
 
