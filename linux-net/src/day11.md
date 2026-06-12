@@ -122,16 +122,38 @@ sudo ip netns exec ns1 ping -c 2 10.0.0.2
 
 Inspect the FDB:
 ```bash
-bridge fdb show dev v1p     # MAC of v1 (learned from ns1's traffic)
-bridge fdb show dev v2p     # MAC of v2
-
-# Trace updates
-sudo bpftrace -e 'fentry:br_fdb_update {
-  printf("learn vid=%d port=%s\n", args->vid, args->source->dev->name);
-}'
+bridge fdb show dev v1p     # learned MAC of v1
+bridge fdb show dev v2p     # learned MAC of v2
 ```
 
-You'll see one update per src MAC per port; subsequent traffic doesn't refresh until aging.
+`bridge fdb show` prints several lines per port — don't expect just one:
+
+```text
+92:56:a0:eb:25:81 master br0                 # <- the learned entry (v1's MAC)
+ee:72:dd:99:36:fa vlan 1 master br0 permanent
+ee:72:dd:99:36:fa master br0 permanent
+33:33:00:00:00:01 self permanent
+01:00:5e:00:00:01 self permanent
+```
+
+The learned entry is the single line shown as `<mac> master br0` **without** a `permanent` flag — that is v1's MAC, learned from ns1's traffic, and it ages out after 300 s (the default `ageing_time`). The `... permanent` line is the port's own MAC; the `33:33:.../01:00:5e:... self permanent` lines are multicast-group memberships — none of those are learned traffic.
+
+Trace the learning path. `br_fdb_update` runs on the per-frame learning path, so bound the probe with an `interval` exit and provoke traffic while it runs:
+
+```bash
+sudo bpftrace -e 'fentry:br_fdb_update {
+  printf("learn vid=%d port=%s\n", args->vid, args->source->dev->name);
+} interval:s:10 { exit(); }'
+```
+
+While that runs, in another terminal flush the FDB (so re-learning fires the probe) and ping:
+
+```bash
+sudo bridge fdb flush dev v1p master
+sudo ip netns exec ns1 ping -c 5 10.0.0.2
+```
+
+`br_fdb_update` fires on **every** received frame on a learning port, so you'll see one `learn` line per packet per source port (a 5-packet ping prints ~5 lines for `v1p`) — not once per MAC. Each call refreshes the entry's `updated` timestamp, and that continuous refresh is exactly how an active entry avoids aging out. (`vid=0` appears here because `vlan_filtering` is still off; it becomes `100` only after you enable filtering below.) The probe auto-exits after 10 s.
 
 Then turn on VLAN filtering:
 ```bash
@@ -140,21 +162,41 @@ sudo bridge vlan add dev v1p vid 100 pvid untagged
 sudo bridge vlan add dev v2p vid 100 pvid untagged
 sudo bridge vlan show
 
-# After flushing FDB, traffic should still pass (both ports in VLAN 100):
-sudo bridge fdb flush dev v1p
-sudo bridge fdb flush dev v2p
+# After flushing FDB, traffic should still pass (both ports in VLAN 100).
+# The `master` scope flushes the entries the bridge LEARNED on each port.
+# Without it, iproute2 defaults to `self`, and a veth has no self-FDB delete
+# handler, so the kernel returns "Operation not supported" and nothing flushes:
+sudo bridge fdb flush dev v1p master
+sudo bridge fdb flush dev v2p master
 sudo ip netns exec ns1 ping -c 2 10.0.0.2
 
 # Now move v2p to a different VLAN:
 sudo bridge vlan del dev v2p vid 100
 sudo bridge vlan add dev v2p vid 200 pvid untagged
-# ping should now fail — different VLANs
+# ping should now fail — v1p in VLAN 100, v2p in VLAN 200, frame dropped at egress:
+sudo ip netns exec ns1 ping -c 2 -W 1 10.0.0.2   # 100% packet loss, exit code 1
 ```
 
 ## What to break
 
-- **Set `stp_state 1` on a bridge with no loops.** Watch ports go `LISTENING → LEARNING → FORWARDING` over ~30s — STP startup delay. Containers usually don't tolerate this; leave STP off.
-- **Enable `br_netfilter` and add an iptables DROP rule on the bridge.** Now bridged traffic gets filtered by iptables. Disable: `sudo iptables -P FORWARD ACCEPT` to ensure you don't lose connectivity.
+- **Set `stp_state 1` on a bridge with no loops.** To actually watch the state machine run, enable STP and then bounce a port — just setting `stp_state 1` on a bridge whose ports are already forwarding leaves them forwarding, because the `listening → learning` walk only happens when a port comes up under STP:
+  ```bash
+  sudo ip link set br0 type bridge stp_state 1
+  sudo ip link set v1p down; sudo ip link set v1p up
+  watch -n1 bridge link show dev v1p
+  ```
+  You'll see `state listening` → `learning` → `forwarding` over ~30 s (default forward delay is 15 s, applied once per stage). Containers usually don't tolerate this delay; leave STP off.
+- **Enable `br_netfilter` and add an iptables DROP rule on the bridge.** Loading the module defaults `net.bridge.bridge-nf-call-iptables=1`, which is what routes bridged frames through iptables:
+  ```bash
+  sudo modprobe br_netfilter
+  sudo iptables -A FORWARD -j DROP
+  sudo ip netns exec ns1 ping -c2 -W1 10.0.0.2   # now fails — iptables sees bridged frames
+  ```
+  Clean up by **deleting the exact rule**. Note that `iptables -P FORWARD ACCEPT` only resets the chain *policy* — it will NOT remove an appended `-A` rule, so it leaves connectivity broken:
+  ```bash
+  sudo iptables -D FORWARD -j DROP
+  sudo modprobe -r br_netfilter
+  ```
 - **Mix VLANs:** put `v1p` and `v2p` in different VLANs. FDB miss → flood, but flood respects VLAN membership, so frame is dropped. `bridge -s vlan show` reveals the rules.
 
 ## What to read in the kernel
