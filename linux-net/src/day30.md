@@ -91,28 +91,59 @@ A single web fetch involves: 2 DNS packets (UDP), 7 TCP packets minimum (SYN, SY
 ## Suggested concrete experiment
 
 ```bash
-# 1. Set up tracing
+# 0. Remove any stale trace.dat. trace-cmd writes it as root, and a leftover
+#    file from a prior run makes `report` silently read OLD data instead of
+#    erroring.
+sudo rm -f trace.dat
+
+# 1. Set up tracing — records for 8s as a background job in THIS shell
 sudo trace-cmd record -p function_graph \
-    -g netif_receive_skb \
     -g tcp_sendmsg \
+    -g tcp_v4_rcv \
     -e net:* \
     -e tcp:* \
     -e skb:kfree_skb \
     sleep 8 &
 
-# 2. In another terminal, generate one packet exchange
-nc -l 9999 &
+# 2. Generate one packet exchange in this same shell
+nc -l 9999 >/dev/null &
 sleep 0.5
 echo "test" | nc -q 1 localhost 9999
 
-# 3. Wait for trace-cmd to finish
+# 3. Wait for the background trace-cmd recorder (sleep 8) to exit, so
+#    trace.dat is fully finalized before we read it. `wait` (no args) blocks
+#    on the recorder; it also reaps the nc listener, which has already exited
+#    once the client closed the connection.
+wait
 
 # 4. Generate the report
 sudo trace-cmd report > /tmp/packet_trace.txt
 
 # 5. Walk through the report
 less /tmp/packet_trace.txt
+
+# 6. Clean up — trace-cmd dropped a (potentially large) trace.dat here
+rm -f trace.dat
+pkill -f 'nc -l 9999' 2>/dev/null  # usually already gone after the single connection
 ```
+
+> **Why loopback, and what it skips.** This experiment uses `nc localhost` for reproducibility — no external network needed. Be aware that loopback is a degenerate path: it uses the `noqueue` qdisc (no `fq_codel`), has no driver/NAPI, no GRO coalescing, no ARP/neighbor resolution, and no routing to a gateway — i.e. most of the layers the worked example above emphasizes. Its receive side is also delivered via the backlog (`loopback_xmit` → `__netif_rx` → `process_backlog` → `__netif_receive_skb`), which never calls the *exported* `netif_receive_skb` symbol, so a `-g netif_receive_skb` subtree comes up empty on loopback — that is why step 1 graphs `-g tcp_v4_rcv` (a dependable TCP receive entry on both loopback and real NICs) instead. To see the full stack — qdisc, GRO, neighbor, routing, driver — re-run while driving real off-box traffic, e.g. `curl -s http://example.com >/dev/null` or `ping -c1 8.8.8.8`, on a real interface.
+
+The send side comes out looking like this (function_graph nesting; CPU/timestamp columns trimmed for width):
+
+```
+  nc-506899 [001] ...1. 245526.239429: funcgraph_entry: |  tcp_sendmsg() {
+  nc-506899 [001] ...1. 245526.239432: funcgraph_entry: |    tcp_sendmsg_locked() {
+  nc-506899 [001] ...1. 245526.239452: funcgraph_entry: |      tcp_push() {
+  nc-506899 [001] ...1. 245526.239453: funcgraph_entry: |        tcp_write_xmit() {
+  nc-506899 [001] ...1. 245526.239456: funcgraph_entry: |          __tcp_transmit_skb() {
+  nc-506899 [001] ...1. 245526.239498: funcgraph_entry: |            ip_queue_xmit() {
+  nc-506899 [001] ...2. 245526.239500: funcgraph_entry: |              ip_local_out() {
+  nc-506899 [001] ...2. 245526.239512: funcgraph_entry: |                ip_output() {
+  nc-506899 [001] ...3. 245526.239515: funcgraph_entry: |                  ip_finish_output2() {
+```
+
+The receive side opens with `tcp_v4_rcv() { → tcp_inbound_hash() { ...`. The *indented nesting* above is the raw `trace-cmd report` format — it maps onto the arrow chain you'll write below. Confirm your `trace.dat` actually contains this `tcp_sendmsg`/`tcp_v4_rcv` subtree before you invest 1–2 hours on the write-up.
 
 The report will be long — hundreds to thousands of lines. Pick **one TCP segment** (the SYN you sent, or the response you received) and follow it through the kernel:
 
