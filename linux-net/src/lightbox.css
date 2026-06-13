@@ -69,37 +69,22 @@
 .content img {
   cursor: zoom-in;
   transition: opacity 0.15s;
+  /* Every diagram fills the content column (up to its native width), centered.
+     No height cap inline — a tall diagram just makes the page scroll, which
+     keeps its text at readable size. The lightbox handles zoom for detail. */
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  margin-left: auto;
+  margin-right: auto;
 }
 .content img:hover {
   opacity: 0.92;
 }
-.content .diagram-scroll {
-  max-width: 100%;
-  overflow-x: auto;
-  margin: 1rem 0;
-  padding-bottom: 0.35rem;
-}
-.content .diagram-scroll img.diagram-wide {
-  max-width: none;
-  width: auto;
-  min-width: min(1100px, 160vw);
-  max-height: 560px;
-}
-.content img.diagram-tall {
-  display: block;
-  max-height: 720px;
-  width: auto;
-  margin-left: auto;
-  margin-right: auto;
-}
+/* Small diagrams (narrow native width): don't upscale past native resolution
+   (PNGs would blur); just center them so they aren't stranded in whitespace. */
 .content img.diagram-small {
-  display: block;
   width: auto;
-  height: auto;
-  /* Don't upscale past native resolution (PNGs would blur); just center the
-     diagram so it isn't stranded against the left margin in a sea of
-     whitespace. The lightbox still gives a click-to-zoom for detail. */
   max-width: 100%;
-  margin-left: auto;
-  margin-right: auto;
 }
