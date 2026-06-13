@@ -14,7 +14,7 @@
   );
 
   function init() {
-    var content = document.querySelector("#content");
+    var content = document.querySelector(".content");
     if (!content) return;
 
     var codes = content.querySelectorAll("code");

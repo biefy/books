@@ -3,24 +3,24 @@
  * and styled here as a clickable link to GitHub.
  */
 
-#content code.ksrc-link {
+.content code.ksrc-link {
   /* legacy class, kept harmless */
   cursor: pointer;
 }
 
-#content a.ksrc-link-wrap {
+.content a.ksrc-link-wrap {
   text-decoration: none;
   border-bottom: 1px dashed currentColor;
   text-decoration-skip-ink: none;
 }
-#content a.ksrc-link-wrap:hover {
+.content a.ksrc-link-wrap:hover {
   background: rgba(255, 180, 84, 0.18);
   border-bottom-style: solid;
 }
-#content a.ksrc-link-wrap > code {
+.content a.ksrc-link-wrap > code {
   cursor: pointer;
 }
-#content a.ksrc-link-wrap::after {
+.content a.ksrc-link-wrap::after {
   content: " ↗";
   font-size: 0.85em;
   opacity: 0.7;
