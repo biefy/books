@@ -1,0 +1,27 @@
+digraph headroom {
+    rankdir=TB;
+    labelloc=t;
+    label="The linear buffer: headroom, data, tailroom — and skb_push";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The buffer as a single horizontal record, left to right
+    buf [shape=record, style="filled", fillcolor="#fef3c7", fontsize=10,
+         label="{ head | NET_SKB_PAD\n= 64B\n(headroom) | <d> data:\nETH | IP | TCP | payload | <t> tail | tailroom | end | shinfo }"];
+
+    // Pointers annotation
+    ptrs [shape=note, style="filled", fillcolor="#fef9c3", fontsize=9,
+          label="headroom = data - head   (reserved at alloc)\ltailroom = end - tail\llen      = tail - data  (+ data_len for frags)\l"];
+    buf -> ptrs [style=invis];
+
+    // skb_push eating into headroom
+    push [shape=box, style="filled,rounded", fillcolor="#dbeafe", fontsize=10,
+          label="skb_push(skb, VLAN_HLEN)\n→ data moves LEFT into the\nreserved headroom.\nNo reallocation needed."];
+
+    why [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+         label="Why reserve 64B?\l1. Room to prepend outer headers\l   (VLAN, tunnel) without realloc.\l2. = L1_CACHE_BYTES, so data starts\l   on a cache-line boundary.\l"];
+
+    buf:d -> push [label="prepend header", color="#2563eb"];
+    push -> why [style=invis];
+    { rank=same; ptrs; why; }
+}

@@ -1,0 +1,32 @@
+digraph cachelines {
+    rankdir=TB;
+    labelloc=t;
+    label="The CPU reads memory in 64-byte cache lines → sk_buff field ordering";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // sk_buff drawn as a stack of cache lines
+    skb [shape=record, style="filled", fontsize=9, fillcolor="#ffffff",
+         label="{ \
+{ line 0  (64B) | <l0> RX-HOT: next, prev, dev, sk, tstamp\n(list/device fields RX path hits first) } | \
+{ line 1  (64B) | cb[48] per-proto control block + len/data_len } | \
+{ line 2  (64B) | TX-hot: queue_mapping, headers, flags bitfield } | \
+{ line 3+ (64B) | COLD: rarely-touched fields, padding holes } }"];
+
+    // color the hot line
+    hot [shape=box, style="filled", fillcolor="#fecaca", fontsize=9,
+         label="RX-hot fields clustered\nin line 0 → RX path drags\nfew lines into L1"];
+    skb:l0 -> hot [color="#dc2626"];
+
+    // shared_info on its own line
+    shinfo [shape=box, style="filled", fillcolor="#dcfce7", fontsize=9,
+            label="data buffer end:\nskb_shared_info placed on its OWN\ncache line (kmalloc alignment), so\nskb->head (RX) and dataref (clones)\nnever share a line → no cross-CPU\nline bouncing"];
+
+    // pahole footer
+    pahole [shape=note, style="filled", fillcolor="#fef9c3", fontsize=9,
+            label="pahole -C sk_buff vmlinux shows:\lfield offsets, padding holes, and\l/* size: N, cachelines: M, members: K */\lSLAB_HWCACHE_ALIGN ⇒ each descriptor\lstarts on a line boundary.\l"];
+
+    skb -> shinfo [style=invis];
+    skb -> pahole [style=invis];
+    { rank=same; hot; pahole; }
+}

@@ -1,0 +1,45 @@
+digraph linear_plus_frags {
+    rankdir=LR;
+    labelloc=t;
+    label="Why payload goes into page fragments, not one big buffer";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The skb split design (the GOOD way)
+    subgraph cluster_good {
+        label="A 64KB GRO superpacket — the split design";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+
+        head [shape=box, style="filled", fillcolor="#dbeafe",
+              label="linear head\n(small kmalloc)\nETH | IP | TCP\nheaders only"];
+        shinfo [shape=box, style="filled", fillcolor="#dcfce7",
+                label="skb_shared_info\nnr_frags = N\nfrags[]"];
+        head -> shinfo [label="at end"];
+
+        // scattered pages
+        node [shape=box, style="filled", fillcolor="#fef3c7"];
+        fp0 [label="page A\n4KB payload"];
+        fp1 [label="page B\n4KB payload"];
+        fp2 [label="page C\n4KB payload"];
+        fpd [shape=plaintext, style="", fillcolor="white", label="… up to\nMAX_SKB_FRAGS"];
+
+        shinfo -> fp0 [label="frags[0]"];
+        shinfo -> fp1 [label="frags[1]"];
+        shinfo -> fp2 [label="frags[2]"];
+        shinfo -> fpd [style=dashed, arrowhead=none];
+
+        note_good [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+                   label="Each page grabbed wherever free.\lNon-contiguous is fine.\lCan be DMA pages (RX) or\lsendfile file-cache pages (TX):\lreferenced, never copied.\l"];
+        fp2 -> note_good [style=invis];
+    }
+
+    // The BAD way
+    subgraph cluster_bad {
+        label="One 64KB contiguous buffer";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#dc2626";
+        bad [shape=box, style="filled", fillcolor="#fee2e2",
+             label="kmalloc(64KB)\nneeds 16 physically\nCONTIGUOUS pages\n\n✗ unreliable under\nfragmentation\n✗ > KMALLOC_MAX_SIZE"];
+    }
+
+    head -> bad [style=invis];
+}

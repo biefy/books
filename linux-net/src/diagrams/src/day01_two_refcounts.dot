@@ -1,0 +1,38 @@
+digraph two_refcounts {
+    rankdir=TB;
+    labelloc=t;
+    label="Two refcounts: skb->users (descriptor) vs dataref (data buffer)";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // Two descriptors, one shared buffer (skb_clone)
+    subgraph cluster_clone {
+        label="skb_clone: new descriptor, SHARED data (cheap)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+
+        a [shape=box, style="filled", fillcolor="#dbeafe",
+           label="skb A (original)\nusers = 1"];
+        b [shape=box, style="filled", fillcolor="#dbeafe",
+           label="skb B (clone)\nusers = 1"];
+        buf [shape=box, style="filled", fillcolor="#fef3c7",
+             label="ONE data buffer\n[ headers | payload ]"];
+        shinfo [shape=box, style="filled", fillcolor="#dcfce7",
+                label="skb_shared_info\ndataref = 2"];
+
+        a -> buf [label="head"];
+        b -> buf [label="head", color="#16a34a", style=bold];
+        buf -> shinfo [label="at end"];
+    }
+
+    // skb_copy contrast
+    copy [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="skb_copy: duplicates BOTH descriptor\land data → a second buffer, dataref = 1.\lSlow; only when you must mutate payload.\l"];
+
+    // The two questions
+    q [shape=note, style="filled", fillcolor="#fef9c3", fontsize=9,
+       label="skb_shared(skb)  ⇔  users != 1   (descriptor shared?)\lskb_cloned(skb)  ⇔  (dataref & MASK) != 1   (buffer shared?)\l\ldataref is split: low 16 bits = all refs,\lhigh 16 bits = payload-only (header-release) refs.\lskb_cloned() true ⇒ copy-on-write before touching headers.\l"];
+
+    shinfo -> copy [style=invis];
+    shinfo -> q [style=invis];
+    { rank=same; copy; q; }
+}

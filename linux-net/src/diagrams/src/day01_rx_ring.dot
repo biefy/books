@@ -1,0 +1,56 @@
+digraph rx_ring {
+    rankdir=LR;
+    labelloc=t;
+    label="NIC RX descriptor ring → DMA pages → sk_buff";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The NIC
+    nic [shape=box, style="filled", fillcolor="#e9d5ff", label="NIC\n(DMA engine)"];
+
+    // The ring: a cluster of descriptors
+    subgraph cluster_ring {
+        label="RX ring (circular array of descriptors, in host RAM)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=record, style="filled", fillcolor="#dbeafe"];
+        d0 [label="<f>desc 0|bus_addr|DONE=1"];
+        d1 [label="<f>desc 1|bus_addr|DONE=1"];
+        d2 [label="<f>desc 2|bus_addr|DONE=0"];
+        d3 [label="<f>desc 3|bus_addr|DONE=0"];
+        d0 -> d1 -> d2 -> d3 [color="#94a3b8", arrowhead=none];
+        d3 -> d0 [color="#94a3b8", style=dashed, constraint=false, label="wraps"];
+    }
+
+    // Pre-allocated DMA pages
+    subgraph cluster_pages {
+        label="driver's pre-allocated pages";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", fillcolor="#fef3c7"];
+        p0 [label="page 0\n[frame bytes]"];
+        p1 [label="page 1\n[frame bytes]"];
+        p2 [label="page 2\n(empty)"];
+        p3 [label="page 3\n(empty)"];
+    }
+
+    d0:f -> p0 [label="DMA addr"];
+    d1:f -> p1 [label="DMA addr"];
+    d2:f -> p2 [color="#94a3b8"];
+    d3:f -> p3 [color="#94a3b8"];
+
+    nic -> p0 [style=bold, color="#7c3aed", label="1. DMA-writes\nframe"];
+    nic -> d0 [style=dashed, color="#7c3aed", label="2. sets DONE"];
+
+    // What the driver does in NAPI poll
+    napi [shape=box, style="filled", fillcolor="#dcfce7",
+          label="driver NAPI poll\n(Day 2): walk ring,\nfind DONE descriptors"];
+    d0 -> napi [style=bold, color="#16a34a", label="3. process"];
+
+    small [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+           label="small packet:\ncopy bytes into a\nfresh small skb,\nrecycle page → ring"];
+    big [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+         label="large packet:\nbuild_skb() wraps the page\nskb->head points INTO it\n(zero copy)"];
+
+    napi -> small [label="4a"];
+    napi -> big [label="4b", style=bold, color="#16a34a"];
+    p0 -> big [style=dashed, color="#16a34a", label="same page", constraint=false];
+}
