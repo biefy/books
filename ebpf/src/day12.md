@@ -199,7 +199,7 @@ But you can't *see* those drops with the obvious command. A ringbuf is a stream,
 sudo bpftool map dump name rb
 ```
 
-It prints a useless `Found 0 elements` line and **exits non-zero** (exit 244 on bpftool 7.7; some builds emit no output at all — either way you learn nothing about drops). Real drop visibility needs an explicit counter you add yourself: a `__u64` in a separate `BPF_MAP_TYPE_ARRAY`, incremented whenever `bpf_ringbuf_reserve()` returns NULL, then read with `bpftool map dump name <counter_map>`. You build exactly that in Day 13.
+It produces **no output and exits non-zero** (exit 255 on bpftool v7.7.0; some builds instead print a useless `Found 0 elements` line — either way you learn nothing about drops). Real drop visibility needs an explicit counter you add yourself: a `__u64` in a separate `BPF_MAP_TYPE_ARRAY`, incremented whenever `bpf_ringbuf_reserve()` returns NULL, then read with `bpftool map dump name <counter_map>`. You build exactly that in Day 13.
 
 ### Break 4 — Use `bpf_probe_read_user_str` instead
 
