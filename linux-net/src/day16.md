@@ -217,7 +217,7 @@ Note the CC algorithm prints as a bare token (`bbr` / `cubic`), the smoothed RTT
 
 - **`net/ipv4/tcp_input.c`** — search `tcp_ack`. The function that calls `cong_avoid` per incoming ACK. Trace through it once to see how the kernel decides "this is a useful ACK" vs "duplicate ACK" before invoking the algorithm.
 
-- **`net/ipv4/tcp_cubic.c:475`** — `cubictcp` instance + the implementation. Read the `bictcp_cong_avoid` function and its helpers; the math is mostly in `bictcp_update`. Compare against the CUBIC paper if you want academic precision.
+- **`net/ipv4/tcp_cubic.c:475`** — `cubictcp` instance + the implementation. Read the `cubictcp_cong_avoid` function and its helpers; the math is mostly in `bictcp_update`. Compare against the CUBIC paper if you want academic precision.
 
 - **`net/ipv4/tcp_bbr.c:1144`** — BBR's full state machine. Long file (~1200 lines) but the structure is clear: `bbr_main` is the entry per ACK; it cycles through states (Startup, Drain, ProbeBW, ProbeRTT). Read the top-of-file comment; it's a textbook explanation.
 

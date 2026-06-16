@@ -263,7 +263,7 @@ struct bpf_link *new = bpf_program__attach_tcx(skel->progs.new_prog, ifindex, &o
 
 ## What to read in the kernel
 
-- **`kernel/bpf/tcx.c`** — the whole file is ~250 lines. Read it.
+- **`kernel/bpf/tcx.c`** — the whole file is ~350 lines. Read it.
 - **`kernel/bpf/mprog.c`** — the multi-program ordering machinery. Used by tcx, netkit, and others.
 - **`tools/lib/bpf/libbpf.c`** — search `bpf_program__attach_tcx`. The userspace wrapper.
 - **`tools/testing/selftests/bpf/prog_tests/tc_opts.c`** — extensive tcx tests.

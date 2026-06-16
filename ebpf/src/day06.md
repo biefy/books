@@ -323,7 +323,7 @@ The leak lesson still stands, though — it just applies to functions the denyli
 - **`kernel/bpf/trampoline.c`** — open it. Search `arch_prepare_bpf_trampoline`. The trampoline is *generated assembly* that saves arguments, calls fentry programs, calls the original function, captures the return value into the ctx array, and calls fexit programs. The ASM is per-arch (x86_64, arm64, etc.) but the structure is consistent.
 - **`tools/lib/bpf/bpf_tracing.h`** — search `BPF_PROG`. The macro is ~30 lines of variadic-template-style C macros. Read it once. You'll see how the `u64 *ctx` array gets unpacked into typed parameters via `((__u64 *)ctx)[N]` casts. After this, the macro stops feeling magic.
 - **`kernel/trace/bpf_trace.c`** — search `bpf_get_func_arg` and `bpf_get_func_ret`. These are helper-based access patterns for the same data, used when `BPF_PROG`'s positional args don't fit (e.g., variadic kernel functions).
-- **`Documentation/bpf/prog_trace.rst`** — the official doc on tracing programs. One read, optional.
+- **`Documentation/bpf/libbpf/program_types.rst`** — the official doc listing tracing program types (`fentry`, `fexit`, `fsession`). One read, optional.
 
 ---
 

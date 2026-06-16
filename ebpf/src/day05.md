@@ -202,7 +202,7 @@ processed 24 insns (limit 1000000) ...
 `processed N insns` is the path-exploration cost. The exact counts are **kernel- and compiler-version dependent**, so capture your own rather than trusting any number printed here — but the *relationship* is the lesson:
 
 - `loop_const` (16-iter inline) verifies every unrolled iteration, so its insn count scales with the iteration count.
-- `loop_helper` (10K `bpf_loop`) verifies the callback **once**, so its cost is tiny and independent of N — about 24 insns on this 7.0 kernel.
+- `loop_helper` (10K `bpf_loop`) verifies the callback **once**, so its cost is tiny and independent of N — about 24 insns on this 7.1 kernel.
 
 `bpf_loop` is *cheaper* for the Verifier even though it does *more* work at runtime, because the callback verifies once.
 

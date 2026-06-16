@@ -69,7 +69,7 @@ When loss is detected (any of the three mechanisms above), the kernel calls **`t
 2. Reduces `cwnd` toward `ssthresh` (PRR — Proportional Rate Reduction; reduces gracefully across the RTT). How far depends on the CC: the default CUBIC drops to ≈70% (β = 717/1024), classic Reno halves to 50%.
 3. Calls the CC algorithm's `set_state(CA_Recovery)` — most algorithms record the loss event.
 
-While in Recovery, the kernel transmits new segments at the reduced rate and selectively retransmits the lost ones. Recovery ends when `snd_una` advances past where the loss was detected (the "recovery point") — the kernel calls `tcp_complete_cwr` and returns to CA_Open.
+While in Recovery, the kernel transmits new segments at the reduced rate and selectively retransmits the lost ones. Recovery ends when `snd_una` advances past where the loss was detected (the "recovery point") — the kernel calls `tcp_end_cwnd_reduction` and returns to CA_Open.
 
 For RTO-driven loss, the kernel uses **`tcp_enter_loss`** (`net/ipv4/tcp_input.c:2554`) instead — much more punitive (cwnd=1, slow start).
 

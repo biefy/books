@@ -75,7 +75,7 @@ The **raw** (non-`format c`) dump prints each function as a single line with the
 ...
 ```
 
-This filters all `FUNC` BTF kinds whose name starts with `bpf_` — on this kernel there are ~1666 of them. Many are kfuncs; many are helpers; many are internal kernel functions exposed for other reasons. The `type_id=` points at the `FUNC_PROTO` entry that holds the argument types (a separate, earlier entry — not the line shown here). To narrow down to kfuncs, cross-reference with the source method. (If you prefer JSON, `bpftool btf dump -j ... | grep '"name": "bpf_'` matches the `name` key instead.)
+This filters all `FUNC` BTF kinds whose name starts with `bpf_` — on this kernel there are ~1666 of them. Many are kfuncs; many are helpers; many are internal kernel functions exposed for other reasons. The `type_id=` points at the `FUNC_PROTO` entry that holds the argument types (a separate, earlier entry — not the line shown here). To narrow down to kfuncs, cross-reference with the source method. (If you prefer JSON, `bpftool btf dump -j ... | grep '"name":"bpf_'` matches the `name` key instead — note the compact JSON has no space after the colon.)
 
 ### 3. Documentation
 

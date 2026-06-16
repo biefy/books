@@ -45,8 +45,8 @@ The polymorphism lives in **`sk->sk_prot`** — a function pointer table per pro
 ```c
 struct proto {
     void  (*close)(struct sock *sk, long timeout);
-    int   (*connect)(struct sock *sk, struct sockaddr *uaddr, int addr_len);
-    int   (*bind)(struct sock *sk, struct sockaddr *uaddr, int addr_len);
+    int   (*connect)(struct sock *sk, struct sockaddr_unsized *uaddr, int addr_len);
+    int   (*bind)(struct sock *sk, struct sockaddr_unsized *uaddr, int addr_len);
     int   (*sendmsg)(struct sock *sk, struct msghdr *msg, size_t len);
     int   (*recvmsg)(struct sock *sk, struct msghdr *msg, size_t len, ...);
     /* ... ~30 more callbacks ... */
@@ -81,8 +81,8 @@ Walk through a TCP server's lifecycle, kernel-side:
 
 ### `socket(AF_INET, SOCK_STREAM, 0)`
 
-1. Userspace calls the syscall — handled at `net/socket.c:1818` `SYSCALL_DEFINE3(socket, ...)`.
-2. **`__sock_create`** (`net/socket.c:1593`) walks `net_families[AF_INET]` to find the protocol family's `create` callback.
+1. Userspace calls the syscall — handled at `net/socket.c:1819` `SYSCALL_DEFINE3(socket, ...)`.
+2. **`__sock_create`** (`net/socket.c:1594`) walks `net_families[AF_INET]` to find the protocol family's `create` callback.
 3. For AF_INET that's **`inet_create`** (`net/ipv4/af_inet.c:259`). It:
    - Allocates a `struct socket`.
    - Allocates a `struct tcp_sock` (or `udp_sock` etc.) via the protocol's `prot->slab` cache.
@@ -187,9 +187,9 @@ ss -tim
 
 - **`include/linux/tcp.h:197`** — `struct tcp_sock`. The full TCP state. ~150 fields covering snd_wnd, snd_cwnd, srtt_us, rcv_nxt, write_seq, sack info, RACK, retrans queue. Don't try to memorize; just know it's there and grep when you need a specific field.
 
-- **`net/socket.c:1818`** — `SYSCALL_DEFINE3(socket, ...)`. The userspace entry. ~50 lines. Walk through to see how a syscall becomes a `struct socket`.
+- **`net/socket.c:1819`** — `SYSCALL_DEFINE3(socket, ...)`. The userspace entry. ~50 lines. Walk through to see how a syscall becomes a `struct socket`.
 
-- **`net/socket.c:1593`** — `__sock_create`. The protocol-family dispatch. Reads `net_families[family]` and calls the registered create callback.
+- **`net/socket.c:1594`** — `__sock_create`. The protocol-family dispatch. Reads `net_families[family]` and calls the registered create callback.
 
 - **`net/ipv4/af_inet.c:259`** — `inet_create`. AF_INET's create. Allocates the sock from the protocol's slab cache, sets up inet_sk fields, calls protocol-specific init.
 

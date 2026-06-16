@@ -99,7 +99,7 @@ Including it in your `.bpf.c` gives access to `struct task_struct`, `struct file
 
 ### CO-RE — Compile Once, Run Everywhere
 
-The whole reason BPF programs aren't fragile across kernel versions. You compile once against `vmlinux.h` from one kernel; libbpf relocates field offsets at load time using the *target* kernel's BTF. The same `.bpf.o` runs on kernel 6.6 and kernel 7.0 even if struct layouts changed.
+The whole reason BPF programs aren't fragile across kernel versions. You compile once against `vmlinux.h` from one kernel; libbpf relocates field offsets at load time using the *target* kernel's BTF. The same `.bpf.o` runs on kernel 6.6 and kernel 7.1 even if struct layouts changed.
 
 ![BTF + CO-RE flow](diagrams/day01_btf_core.png)
 
@@ -131,7 +131,7 @@ Replaced **perfbuf** (`BPF_MAP_TYPE_PERF_EVENT_ARRAY`) for most uses. Perfbuf is
 ### Setup (one time)
 
 ```bash
-# On your Linux 7.0 box
+# On your Linux 7.1 box
 mkdir -p ~/ebpf-labs/day01 && cd ~/ebpf-labs/day01
 
 # Clone libbpf-bootstrap — it provides the Makefile and the vendored

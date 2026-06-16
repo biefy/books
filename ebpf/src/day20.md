@@ -285,15 +285,15 @@ calling kernel function bpf_cpumask_create is not allowed
 
 - **`kernel/bpf/helpers.c:2733`** and surrounding — `bpf_task_acquire`, `bpf_task_release`, and friends. Real kfunc implementations. Note the `__bpf_kfunc` annotation and how short these are — kfuncs are usually thin wrappers around kernel APIs.
 
-- **`kernel/bpf/helpers.c:4698`** — `BTF_KFUNCS_START(generic_btf_ids)`. The big "general purpose" kfunc set. Skim the list — it's the catalog of what a tracing program can call.
+- **`kernel/bpf/helpers.c:4703`** — `BTF_KFUNCS_START(generic_btf_ids)`. The big "general purpose" kfunc set. Skim the list — it's the catalog of what a tracing program can call.
 
-- **`kernel/bpf/cpumask.c`** — a *complete* kfunc family in one file (~700 lines). Read top to bottom. Notice the pattern: short C functions + a `BTF_KFUNCS_START` block + a `register_btf_kfunc_id_set` call at module init. This is the template for adding new kfuncs.
+- **`kernel/bpf/cpumask.c`** — a *complete* kfunc family in one file (~530 lines). Read top to bottom. Notice the pattern: short C functions + a `BTF_KFUNCS_START` block + a `register_btf_kfunc_id_set` call at module init. This is the template for adding new kfuncs.
 
 - **`kernel/bpf/btf.c:8996`** — `register_btf_kfunc_id_set`. The registration entry. Short function (~50 lines). Note the per-`enum bpf_prog_type` registration.
 
 - **`kernel/bpf/verifier.c`** — search `KF_ACQUIRE`. The verifier check that creates a new ref id. Trace forward to see how `acquire_reference_state` interacts with `release_reference_state`.
 
-- **`tools/testing/selftests/bpf/progs/test_task_kfunc*.c`** — test programs exercising every aspect of acquire/release/store-in-map. Real, working examples.
+- **`tools/testing/selftests/bpf/progs/task_kfunc_*.c`** — test programs exercising every aspect of acquire/release/store-in-map. Real, working examples.
 
 ## Bullet Points
 

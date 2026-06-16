@@ -235,7 +235,7 @@ Watch the kernel side. Trace the ops this program actually submits — the async
 
 ```bash
 sudo bpftrace -e 'fentry:io_accept  { @accept = count(); }
-fentry:io_send_zc { @zc = count(); }
+fentry:io_sendmsg_zc { @zc = count(); }
 interval:s:5 { print(@accept); print(@zc); exit(); }'
 ```
 
@@ -246,7 +246,7 @@ After running `/tmp/iour_accept` and connecting once with `nc localhost 7777`, e
 @zc: 1
 ```
 
-Probe names must match the submitted op: a plain `recv` goes through `io_recv`, `recvmsg` through `io_recvmsg`, `send` through `io_send`, and ZC send through `io_send_zc`.
+Probe names must match the submitted op: a plain `recv` goes through `io_recv`, `recvmsg` through `io_recvmsg`, `send` through `io_send`, and ZC send through `io_sendmsg_zc` (both `IORING_OP_SEND_ZC` and `SENDMSG_ZC` issue through the same function).
 
 ## What to read in the kernel
 

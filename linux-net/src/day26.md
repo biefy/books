@@ -226,8 +226,7 @@ give the kernel a second address it can open an additional subflow from. This
 # Announce a second loopback address and allow one extra subflow.
 sudo ip addr add 127.0.0.2/8 dev lo
 sudo ip mptcp limits set subflow 2 add_addr_accepted 2
-sudo ip mptcp endpoint add 127.0.0.2 dev lo signal    # ADD_ADDR so the peer can join
-sudo ip mptcp endpoint add 127.0.0.2 dev lo subflow   # initiate a subflow from it
+sudo ip mptcp endpoint add 127.0.0.2 dev lo signal subflow  # ADD_ADDR so the peer can join + initiate a subflow from it
 
 # Re-run the transfer, then look for the second subflow and the MP_JOIN exchange:
 /tmp/mptcp_demo & sleep 1; ss -M | head

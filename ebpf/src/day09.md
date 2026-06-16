@@ -277,11 +277,11 @@ Lesson: size `stacks` and `counts` to expected unique-stack cardinality. For mos
 
 ## What to read in the kernel
 
-- **`kernel/bpf/stackmap.c`** — the implementation. `stack_map_alloc` builds the map's own structure (a `buckets[]` array plus a per-CPU freelist of stack buffers — *not* the generic `htab_map_alloc`), and `bpf_get_stackid` is the helper. Read the file once; ~500 lines.
+- **`kernel/bpf/stackmap.c`** — the implementation. `stack_map_alloc` builds the map's own structure (a `buckets[]` array plus a per-CPU freelist of stack buffers — *not* the generic `htab_map_alloc`), and `bpf_get_stackid` is the helper. Read the file once; ~800 lines.
 - **`arch/x86/kernel/unwind_orc.c`** — the ORC unwinder x86_64 uses. Don't read deeply; just know it exists and is faster/more reliable than frame pointers.
-- **`kernel/bpf/helpers.c`** — search `bpf_get_stack`. The non-stackid version that copies frames directly.
+- **`kernel/bpf/stackmap.c`** — search `bpf_get_stack`. The non-stackid version that copies frames directly.
 - **`tools/lib/bpf/btf.c` and `tools/perf/util/symbol.c`** — for inspiration on symbolization. The selftests don't have a clean example.
-- **`tools/testing/selftests/bpf/progs/test_stacktrace_map.c`** — minimal example of the pattern.
+- **`tools/testing/selftests/bpf/progs/stacktrace_map.c`** — minimal example of the pattern.
 
 External reference (skim once): https://www.brendangregg.com/flamegraphs.html
 

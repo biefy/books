@@ -258,11 +258,11 @@ Real NICs have multiple RX queues. Spawn one userspace thread per queue, one AF_
 
 ## What to read in the kernel
 
-- **`net/xdp/xsk.c`** — the AF_XDP implementation. ~1800 lines. Read the top to understand the ring structures.
+- **`net/xdp/xsk.c`** — the AF_XDP implementation. ~2100 lines. Read the top to understand the ring structures.
 - **`net/xdp/xsk_queue.h`** — the lock-free ring code. Tight, copy-this-pattern level.
 - **`include/uapi/linux/if_xdp.h`** — UAPI for AF_XDP rings, descriptors, configurations.
 - **`tools/testing/selftests/bpf/xskxceiver.c`** — comprehensive AF_XDP test suite. Best example.
-- **`samples/bpf/xdpsock_user.c`** — older but well-commented userspace example.
+- **`tools/testing/selftests/bpf/xdp_hw_metadata.c`** — compact userspace AF_XDP example (UMEM + `xsk_socket__create`, diverts UDP into an AF_XDP socket).
 
 ---
 

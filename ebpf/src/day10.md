@@ -273,7 +273,7 @@ You're now reading plaintext that's about to be encrypted. (Don't deploy this on
 
 ## What to read in the kernel
 
-- **`kernel/events/uprobes.c`** — overview. The function `uprobe_register` is the entry point. Note `find_uprobe` and `set_swbp`/`set_orig_insn` for the breakpoint patching mechanics.
+- **`kernel/events/uprobes.c`** — overview. The function `uprobe_register` is the entry point. Note `find_uprobe_rcu` and `set_swbp`/`set_orig_insn` for the breakpoint patching mechanics.
 - **`tools/lib/bpf/libbpf.c`** — search `bpf_program__attach_uprobe`. This is where libbpf opens the ELF, resolves symbols, and registers the uprobe via the kernel's `perf_event_open`.
 - **`tools/testing/selftests/bpf/progs/uprobe_multi.c`** — multi-uprobe (next day's topic) examples.
 - **`Documentation/trace/uprobetracer.rst`** — the kernel's doc on uprobes from a tracing perspective.

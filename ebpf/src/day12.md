@@ -199,7 +199,7 @@ But you can't *see* those drops with the obvious command. A ringbuf is a stream,
 sudo bpftool map dump name rb
 ```
 
-It produces **no output and exits non-zero** (exit 255 on bpftool 7.x — older builds may print a `Found 0 elements` line instead; either way you learn nothing about drops). Real drop visibility needs an explicit counter you add yourself: a `__u64` in a separate `BPF_MAP_TYPE_ARRAY`, incremented whenever `bpf_ringbuf_reserve()` returns NULL, then read with `bpftool map dump name <counter_map>`. You build exactly that in Day 13.
+It prints a useless `Found 0 elements` line and **exits non-zero** (exit 244 on bpftool 7.7; some builds emit no output at all — either way you learn nothing about drops). Real drop visibility needs an explicit counter you add yourself: a `__u64` in a separate `BPF_MAP_TYPE_ARRAY`, incremented whenever `bpf_ringbuf_reserve()` returns NULL, then read with `bpftool map dump name <counter_map>`. You build exactly that in Day 13.
 
 ### Break 4 — Use `bpf_probe_read_user_str` instead
 
@@ -218,10 +218,10 @@ A helper worth distinguishing from these: `bpf_d_path` (resolves a `struct path`
 ## What to read in the kernel
 
 - **`kernel/bpf/trampoline.c`** — search `__bpf_prog_enter_sleepable`. The wrapper that takes the SRCU read-side lock around sleepable program invocation.
-- **`kernel/bpf/verifier.c`** — search `is_sleepable_prog`. How the Verifier decides which helpers a program may call.
+- **`kernel/bpf/verifier.c`** — search `in_sleepable_context`. How the Verifier decides which helpers a program may call.
 - **`Documentation/RCU/Design/Requirements/Requirements.rst`** — the RCU/SRCU design doc. Skim the SRCU section.
-- **`tools/testing/selftests/bpf/progs/lsm_sleepable.c`** — sleepable LSM example.
-- **`include/linux/bpf.h`** — search `enum bpf_prog_type` and look at flags like `is_sleepable` in `struct bpf_prog`.
+- **`tools/testing/selftests/bpf/progs/lsm.c`** — sleepable LSM example (see `SEC("lsm.s/bprm_committed_creds")`).
+- **`include/linux/bpf.h`** — search `enum bpf_prog_type` and look at flags like `sleepable` in `struct bpf_prog`.
 
 ---
 
