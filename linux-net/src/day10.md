@@ -30,7 +30,7 @@ Sysctls that matter:
 - `net.ipv6.conf.<dev>.addr_gen_mode`: 0 = EUI-64, 1 = none, 2 = stable_privacy, 3 = random (initializes a random secret, then generates via the stable_privacy algorithm).
 - `net.ipv6.conf.<dev>.use_tempaddr`: 0 = no privacy addrs, 1 = use them but prefer stable, 2 = prefer privacy.
 
-Implementation: `net/ipv6/addrconf.c:3415` `addrconf_addr_gen` — branches on `addr_gen_mode` and calls the right generator.
+Implementation: `net/ipv6/addrconf.c:3417` `addrconf_addr_gen` — branches on `addr_gen_mode` and calls the right generator.
 
 ### Step 2: Duplicate Address Detection (DAD)
 
@@ -101,7 +101,7 @@ IPv6 base header is fixed at 40 bytes. The `nexthdr` field tells what follows. F
 - **Authentication Header (51)** / **ESP (50)** — IPsec.
 - **Mobility (135)** — Mobile IPv6.
 
-Each extension is parsed by a per-protocol handler registered in `inet6_protos[]`. The Routing handler is `ipv6_rthdr_rcv` (`net/ipv6/exthdrs.c:654`), Destination is `ipv6_destopt_rcv` (`net/ipv6/exthdrs.c:295`), etc.
+Each extension is parsed by a per-protocol handler registered in `inet6_protos[]`. The Routing handler is `ipv6_rthdr_rcv` (`net/ipv6/exthdrs.c:658`), Destination is `ipv6_destopt_rcv` (`net/ipv6/exthdrs.c:299`), etc.
 
 ### Why this is dangerous
 
@@ -152,15 +152,15 @@ sudo bpftrace -e 'fentry:ipv6_skip_exthdr { printf("skip nexthdr=%d start=%d\n",
   - `addrconf_dad_start` (search for the function; no fixed line) — kicks off DAD.
   - `addrconf_rs_timer` — periodic RS solicitation when no router heard from.
   - `addrconf_prefix_rcv` — handle a prefix from RA: install address, run DAD on it.
-  - `addrconf_addr_gen` (line 3415) — host-portion generation.
+  - `addrconf_addr_gen` (line 3417) — host-portion generation.
 
   Read the top of the file's comments first; the model is a state machine per `inet6_dev`.
 
 - **`net/ipv6/ndisc.c:109`** — `nd_tbl`, the neighbour-table instance. The struct is identical to IPv4's `arp_tbl` — confirms how generic the neighbour subsystem is. Around it, `ndisc_recv_ns`, `ndisc_recv_na`, `ndisc_send_na`, `ndisc_send_ns` are the protocol handlers.
 
 - **`net/ipv6/exthdrs.c`** — extension-header parsers.
-  - `ipv6_rthdr_rcv` (line 654): Routing header. Read this to understand SRv6 — the most actively-developed extension. Also where most CVEs have been.
-  - `ipv6_destopt_rcv` (line 295): Destination Options. Simpler; good warm-up.
+  - `ipv6_rthdr_rcv` (line 658): Routing header. Read this to understand SRv6 — the most actively-developed extension. Also where most CVEs have been.
+  - `ipv6_destopt_rcv` (line 299): Destination Options. Simpler; good warm-up.
   - `ipv6_hop_jumbo` (line 996): the parser for the Jumbo Payload option in HOPOPT. Tiny but instructive.
 
 - **`include/uapi/linux/in6.h`** and **`include/net/ipv6.h`** — the canonical structs (`struct ipv6hdr`, `struct in6_addr`, the IPV6_NEXTHDR_* constants).

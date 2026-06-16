@@ -265,7 +265,7 @@ The collision is on the **priority + handle** pair, not the priority alone. A se
 
 - **`net/sched/cls_bpf.c`** — the classic tc-bpf classifier. Ages ~10 years old.
 - **`net/sched/sch_ingress.c`** — `clsact_init` and the ingress hook plumbing.
-- **`tools/lib/bpf/libbpf.c`** — search `bpf_program__attach_tc`. The libbpf wrapper for the legacy interface.
+- **`tools/lib/bpf/netlink.c`** — search `bpf_tc_attach`. The libbpf wrapper for the legacy interface.
 
 ---
 

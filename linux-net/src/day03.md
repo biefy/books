@@ -31,7 +31,7 @@ For TCP that's **`tcp_sendmsg`** at `net/ipv4/tcp.c:1447`. The function locks th
 
 1. **Copy bytes from userspace into kernel skbs.** Allocate skbs via `tcp_stream_alloc_skb`, copy data via `copy_from_iter` or zero-copy if MSG_ZEROCOPY. Append to `sk->sk_write_queue`.
 
-2. **Maybe trigger transmission.** Calls `tcp_push` which eventually invokes `tcp_write_xmit` (line 2962 in `tcp_output.c`).
+2. **Maybe trigger transmission.** Calls `tcp_push` which eventually invokes `tcp_write_xmit` (line 2963 in `tcp_output.c`).
 
 The split matters: queueing is cheap. Actually sending requires the congestion window to be open, the receive window to permit it, Nagle constraints to be satisfied, etc. So one `send()` may queue 1MB of bytes but only transmit 64KB right now.
 
@@ -198,7 +198,7 @@ sudo tc qdisc del dev eth0 root           # restores the kernel/runtime default
 ## What to read in the kernel
 
 - **`net/ipv4/tcp.c`** — `tcp_sendmsg` (line 1447), `tcp_sendmsg_locked` (line 1117). The core of TCP user-side semantics.
-- **`net/ipv4/tcp_output.c`** — `tcp_write_xmit` (line 2962), `tcp_transmit_skb`. Decides what to send when.
+- **`net/ipv4/tcp_output.c`** — `tcp_write_xmit` (line 2963), `tcp_transmit_skb`. Decides what to send when.
 - **`net/ipv4/ip_output.c`** — `ip_queue_xmit` (line 546), `ip_local_out` (line 125), `ip_finish_output2`.
 - **`net/core/dev.c`** — `__dev_queue_xmit` (line 4766), the qdisc dance.
 - **`net/sched/sch_generic.c`** — `__qdisc_run`, `sch_direct_xmit`, the qdisc pump.

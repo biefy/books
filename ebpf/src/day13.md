@@ -316,7 +316,7 @@ On every event, regardless of what's pending. Rebuild, run heavy. Watch CPU usag
 
 - **`kernel/bpf/ringbuf.c`** — the whole file is ~700 lines. Read top to bottom. Note `__bpf_ringbuf_reserve`, `bpf_ringbuf_commit`, and the wakeup logic around `BPF_RB_FORCE_WAKEUP`.
 - **`include/uapi/linux/bpf.h`** — search `BPF_RB_FORCE_WAKEUP` and `BPF_RINGBUF_*` flags.
-- **`kernel/bpf/dynptr.c`** — the dynamic-pointer bounds-tracking implementation. Read `bpf_dynptr_init` and the `_write`/`_read` helpers.
+- **`kernel/bpf/helpers.c`** — the dynamic-pointer bounds-tracking implementation. Read `bpf_dynptr_init` and the `_write`/`_read` helpers.
 - **`tools/testing/selftests/bpf/progs/test_ringbuf.c`** and **`test_ringbuf_multi.c`** — examples of the patterns we covered.
 
 ---

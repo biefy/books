@@ -193,9 +193,9 @@ Now connections from this cgroup to port 8080 are silently redirected to port 80
 
 ## What to read in the kernel
 
-- **`kernel/bpf/cgroup.c`** — the cgroup BPF infrastructure. ~1500 lines. Read the dispatch path.
+- **`kernel/bpf/cgroup.c`** — the cgroup BPF infrastructure. ~2750 lines. Read the dispatch path.
 - **`include/linux/bpf-cgroup.h`** — interface and program types.
-- **`net/core/filter.c`** — search `bpf_sock_ops_func_proto`. Helpers available to sockops.
+- **`net/core/filter.c`** — search `sock_ops_func_proto`. Helpers available to sockops.
 - **`tools/testing/selftests/bpf/progs/sockopt_*.c`** — sockops examples.
 - **`Documentation/bpf/prog_cgroup_sockopt.rst`** — official docs.
 

@@ -4,7 +4,7 @@
  */
 (function () {
   // Pin to a kernel tag; line numbers in the books are verified against this.
-  var KERNEL_TAG = "v7.1-rc1";
+  var KERNEL_TAG = "v7.1";
   var BLOB_BASE = "https://github.com/torvalds/linux/blob/" + KERNEL_TAG + "/";
 
   // Top-level kernel directories — restrict so we don't match unrelated paths.

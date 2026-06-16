@@ -198,7 +198,7 @@ pid 12346's current affinity list: 1
 pid 12347's current affinity list: 2
 pid 12348's current affinity list: 3
 
-Linux 7.0.0-1004-azure (host)   06/12/26   _x86_64_   (4 CPU)
+Linux 7.1.0-1004-azure (host)   06/12/26   _x86_64_   (4 CPU)
 
 00:24:24     CPU    %usr   %nice    %sys   %soft   %idle
 00:24:25       0    3.00    0.00    9.00    4.00   84.00
@@ -235,7 +235,7 @@ ss -tlnp | grep :8080
 
 - **`net/ipv4/inet_hashtables.c:467`** — `__inet_lookup_listener`. The TCP-side listener lookup. When `SO_REUSEPORT` is set, falls into `reuseport_select_sock`; otherwise returns the single listener. Read this to see how the lookup combines `lhash2` (the per-port-hash table) with reuseport handling.
 
-- **`net/ipv4/udp.c`** — search for `reuseport_select_sock` to find UDP's analogous path.
+- **`net/ipv4/udp.c`** — search for `inet_lookup_reuseport` to find UDP's analogous path (it wraps `reuseport_select_sock`).
 
 - **`tools/testing/selftests/bpf/progs/test_select_reuseport_kern.c`** — example SK_REUSEPORT BPF program. ~183 lines, shows how to write the selector.
 

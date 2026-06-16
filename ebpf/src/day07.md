@@ -365,7 +365,7 @@ Regular `tracepoint/...` programs give you what the kernel chose to copy. For mo
 
 ## What to read in the kernel
 
-- **`tools/lib/bpf/bpf_tracing.h`** — the canonical reference for `BPF_PROG`, `BPF_KPROBE`, `BPF_KRETPROBE`, `BPF_KSYSCALL`, and the `PT_REGS_*` family. Read all of it. It's ~500 lines but most is per-arch macros for register names.
+- **`tools/lib/bpf/bpf_tracing.h`** — the canonical reference for `BPF_PROG`, `BPF_KPROBE`, `BPF_KRETPROBE`, `BPF_KSYSCALL`, and the `PT_REGS_*` family. Read all of it. It's ~930 lines but most is per-arch macros for register names.
 - **`include/uapi/linux/bpf.h`** — search `enum bpf_func_id`. The complete helper list. ~200 entries. Skim — recognize the categories (skb manipulation, map ops, networking, tracing, time, random, etc.).
 - **`kernel/bpf/helpers.c`** — search `bpf_get_current_pid_tgid_proto`. Each helper has a `bpf_func_proto` struct that declares its argument types, return type, and which program types can call it. This is what the Verifier consults when type-checking a helper call.
 - **`net/core/filter.c`** — search `bpf_helper_changes_pkt_data` or `xdp_func_proto`. Per-program-type proto tables that gate which helpers a given program can call.

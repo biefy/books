@@ -119,7 +119,7 @@ Now start the bpftrace one-liner and **leave it running** in this terminal. It p
 
 ```bash
 sudo bpftrace -e '
-fentry:do_tls_setsockopt {
+fentry:tls_setsockopt {
   printf("%s push on sk=%p\n", args->optname==1?"TLS_TX":"TLS_RX", args->sk);
 }'
 ```
@@ -140,7 +140,7 @@ TLS_RX push on sk=0xffff...
 Two caveats worth knowing, because kTLS offload is genuinely finicky:
 
 - **The push only happens if kTLS actually activates**, which needs the handshake to negotiate a cipher the kernel can offload (an AES-GCM suite). Default TLS 1.3 on some builds negotiates a suite the kernel declines, so no key is pushed and the tracer stays silent. Pin a known-good suite to force it: add `-tls1_2 -cipher ECDHE-RSA-AES128-GCM-SHA256` to `s_server` and `-tls1_2` to `s_client`.
-- **The probe target varies by kernel.** `do_tls_setsockopt` is `static`, so on some builds it's inlined and the `fentry` probe won't attach (try the exported `tls_setsockopt` instead); on others it attaches but the key push doesn't traverse it. The reliable, probe-independent confirmation that kTLS engaged is the SNMP counters — `TlsTxSw`/`TlsRxSw` (software offload) increment per offloaded session:
+- **The probe target varies by kernel.** The inner `do_tls_setsockopt` is `static`, so on many builds it's inlined and has no `fentry` target at all (hence the probe above hooks the exported `tls_setsockopt` wrapper instead); on others the wrapper attaches but the key push doesn't traverse it. The reliable, probe-independent confirmation that kTLS engaged is the SNMP counters — `TlsTxSw`/`TlsRxSw` (software offload) increment per offloaded session:
 
 ```bash
 grep -E 'TlsTxSw|TlsRxSw' /proc/net/tls_stat   # before and after; the count rises when kTLS engages
@@ -161,7 +161,7 @@ If on, your NIC has TLS offload available; kTLS will use it transparently when t
 
 ## What to read in the kernel
 
-- **`net/tls/tls_main.c:863`** — `do_tls_setsockopt`. The dispatcher (~44 lines, ending at line 906) for TLS_TX, TLS_RX, TLS_TX_ZEROCOPY_RO, etc. To follow the full setsockopt flow including the per-option handlers, read from `do_tls_setsockopt_conf` (line 635) through line 906 — ~272 lines.
+- **`net/tls/tls_main.c:863`** — `do_tls_setsockopt`. The dispatcher (~32 lines, ending at line 894) for TLS_TX, TLS_RX, TLS_TX_ZEROCOPY_RO, etc. To follow the full setsockopt flow including the per-option handlers, read from `do_tls_setsockopt_conf` (line 635) through line 906 — ~272 lines.
 
 - **`net/tls/tls_main.c:635`** — `do_tls_setsockopt_conf`. The TX/RX key configuration. This is where the kernel decides software (`tls_set_sw_offload`) vs hardware (`tls_set_device_offload`) and validates the crypto_info struct.
 

@@ -87,7 +87,7 @@ sysctl net.netfilter.nf_conntrack_buckets     # hash table size (rounded to powe
 
 Rule of thumb: **buckets = max / 4 to max / 8**. Defaults are conservative; busy gateways set both higher (millions of entries on big NAT boxes).
 
-When `nf_conntrack_max` is reached, new connections fail to track, and depending on the policy (`nf_conntrack_tcp_loose`, etc.) may also be dropped. The per-CPU counters including `drop` and `early_drop` (early eviction of LRU when full) are reported by `conntrack -S`. They are *also* exposed in **`/proc/net/stat/nf_conntrack`**, but only when the kernel is built with `CONFIG_NF_CONNTRACK_PROCFS=y` — that procfs view is deprecated and off on many modern kernels (including the 7.0 target), so prefer `conntrack -S`.
+When `nf_conntrack_max` is reached, new connections fail to track, and depending on the policy (`nf_conntrack_tcp_loose`, etc.) may also be dropped. The per-CPU counters including `drop` and `early_drop` (early eviction of LRU when full) are reported by `conntrack -S`. They are *also* exposed in **`/proc/net/stat/nf_conntrack`**, but only when the kernel is built with `CONFIG_NF_CONNTRACK_PROCFS=y` — that procfs view is deprecated and off on many modern kernels (including the 7.1 target), so prefer `conntrack -S`.
 
 ## Conntrack helpers
 
@@ -104,8 +104,8 @@ Helpers are no longer auto-loaded by default (security: ALG-style helpers were a
 ```bash
 sudo nft add table inet ct_lab
 sudo nft 'add chain inet ct_lab prerouting { type filter hook prerouting priority 0 ; }'
-sudo nft add ct helper inet ct_lab ftp { type "ftp" protocol tcp \; }
-sudo nft add rule inet ct_lab prerouting tcp dport 21 ct helper set "ftp"
+sudo nft 'add ct helper inet ct_lab ftp { type "ftp" protocol tcp ; }'
+sudo nft 'add rule inet ct_lab prerouting tcp dport 21 ct helper set "ftp"'
 # cleanup
 sudo nft delete table inet ct_lab
 ```

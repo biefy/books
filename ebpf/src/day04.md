@@ -270,9 +270,9 @@ The full log goes to `kern_log` if your loader doesn't capture it; `dmesg | tail
 
 - **`kernel/bpf/verifier.c`**:
   - `do_check` — the main loop. Don't read it all; just see the structure.
-  - `mark_ptr_or_null_regs` — search for this. ~50 lines. This is the function that flips `OR_NULL` types after a comparison.
+  - `mark_ptr_or_null_regs` — search for this. ~20 lines. This is the function that flips `OR_NULL` types after a comparison.
   - `check_helper_call` — how the Verifier knows what type a helper returns. The metadata comes from each helper's `bpf_func_proto`.
-- **`include/linux/bpf_verifier.h`** — see `enum bpf_reg_type`. Read the comment near `PTR_TO_MAP_VALUE_OR_NULL`. This is the canonical list of register types — bookmark it.
+- **`include/linux/bpf.h`** — see `enum bpf_reg_type`. Read the comment near `PTR_TO_MAP_VALUE_OR_NULL`. This is the canonical list of register types — bookmark it.
 - **`tools/testing/selftests/bpf/progs/verifier_*.c`** — there are dozens of files here, each focused on a different verifier behavior. `verifier_map_ret_val.c` covers exactly today's topic. Read it: each test is a 3-line program that's *intended* to be rejected, with the expected error message embedded.
 
 ---

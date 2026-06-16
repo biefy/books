@@ -48,16 +48,16 @@ When a tracepoint fires, regular `tracepoint/...` listeners get the copied event
 
 ```bash
 # All tracepoints, grouped by subsystem:
-ls /sys/kernel/tracing/events/
+sudo ls /sys/kernel/tracing/events/
 
 # All sched events:
-ls /sys/kernel/tracing/events/sched/
+sudo ls /sys/kernel/tracing/events/sched/
 
 # Format of a specific tracepoint (the struct you'd get from raw):
 sudo cat /sys/kernel/tracing/events/sched/sched_switch/format
 ```
 
-The two `ls` commands run fine unprivileged — the event directories are mode `0755`. But each `format` file is mode `0440 root:root`, so reading one needs `sudo` even though the directory above it is world-traversable. You'll see the struct layout, e.g.:
+These all need `sudo`: the tracefs root `/sys/kernel/tracing` is mounted mode `0700 root:root`, so unprivileged users can't even traverse into `events/`. (The event subdirectories below it are `0755`, and each `format` file is `0440 root:root`, but the root directory gates access to everything underneath.) You'll see the struct layout, e.g.:
 
 ```
 name: sched_switch
@@ -304,9 +304,9 @@ But: if `next` could be NULL or invalid, `BPF_CORE_READ` returns 0 instead of cr
 
 - **`include/trace/events/sched.h`** — definitions of all sched/* tracepoints. Search `TRACE_EVENT(sched_switch`. The macro expands into a *lot* of code, but the `TP_PROTO` is the contract.
 - **`include/linux/tracepoint.h`** — the macro machinery. Skim. Note `DECLARE_TRACE` and `__DECLARE_TRACE`.
-- **`kernel/tracepoint.c`** — what happens when a tracepoint fires. The function `__DO_TRACE` walks the registered probe list.
+- **`kernel/tracepoint.c`** — what happens when a tracepoint fires. The generated `__traceiter_<event>` iterator walks the registered probe list.
 - **`kernel/trace/bpf_trace.c`** — search `bpf_get_raw_tracepoint`. This is how BPF programs attach to raw tracepoints. `tp_btf` goes through the same raw-tracepoint path (`BPF_TRACE_RAW_TP`): the link is set up via `bpf_raw_tracepoint_open` / `bpf_get_raw_tracepoint`, just with BTF-typed arguments.
-- **`tools/testing/selftests/bpf/progs/test_tp_btf.c`** — official examples using tp_btf.
+- **`tools/testing/selftests/bpf/progs/cgrp_ls_tp_btf.c`** — official examples using tp_btf.
 
 ---
 
