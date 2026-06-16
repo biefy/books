@@ -198,7 +198,7 @@ pid 12346's current affinity list: 1
 pid 12347's current affinity list: 2
 pid 12348's current affinity list: 3
 
-Linux 7.1.0-1004-azure (host)   06/12/26   _x86_64_   (4 CPU)
+Linux 7.1.0 (host)   06/12/26   _x86_64_   (4 CPU)
 
 00:24:24     CPU    %usr   %nice    %sys   %soft   %idle
 00:24:25       0    3.00    0.00    9.00    4.00   84.00

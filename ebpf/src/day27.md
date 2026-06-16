@@ -30,7 +30,7 @@ This sounds like a bottleneck — and it is — but the central architecture tra
 
 ## Reading `scx_central.bpf.c`
 
-Open `tools/sched_ext/scx_central.bpf.c`. ~350 lines. Walk through it in this order:
+Open `tools/sched_ext/scx_central.bpf.c`. ~380 lines. Walk through it in this order:
 
 > **Heads-up: the code blocks below are *simplified pseudocode*, not literal quotes from the file.** They capture the central-dispatch *shape* so you can follow the logic, but the real `scx_central.bpf.c` is more involved. When you open the actual file you'll see it uses a `BPF_MAP_TYPE_QUEUE` of pids (`central_q`) rather than a fallback DSQ for the hand-off, calls `bpf_task_from_pid()` to turn a dequeued pid back into a `task_struct`, dispatches with `scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL_ON | cpu, ...)` to target a specific CPU's local queue, and drives tickless preemption from a `bpf_timer` (`central_timerfn`). Read the simplified versions for intuition, then read the real file for the details.
 
@@ -144,7 +144,7 @@ For workloads where the scheduling rate exceeds what one CPU can sustain, you ne
 
 ## scx_flatcg — read after this one
 
-If you have appetite for more reading, open `tools/sched_ext/scx_flatcg.bpf.c`. ~600 lines. Same shape as scx_central but cgroup-aware: each cgroup gets its own DSQ; vtime is per-cgroup; dispatch picks the cgroup with the lowest vtime first.
+If you have appetite for more reading, open `tools/sched_ext/scx_flatcg.bpf.c`. ~950 lines. Same shape as scx_central but cgroup-aware: each cgroup gets its own DSQ; vtime is per-cgroup; dispatch picks the cgroup with the lowest vtime first.
 
 This is closer to how a real "fair-share + isolation" scheduler looks — like CFS with cgroup awareness, but in BPF.
 
@@ -152,7 +152,7 @@ This is closer to how a real "fair-share + isolation" scheduler looks — like C
 
 - **`tools/sched_ext/scx_central.bpf.c`** — the file we just walked through. Read end to end with the diagram above as a guide.
 
-- **`tools/sched_ext/scx_central.c`** — the userspace driver. ~200 lines. Note how it sets `central_cpu` before attach and runs a stats loop.
+- **`tools/sched_ext/scx_central.c`** — the userspace driver. ~125 lines. Note how it sets `central_cpu` before attach and runs a stats loop.
 
 - **`tools/sched_ext/scx_flatcg.bpf.c`** — the cgroup-aware scheduler. Read after central. Notice the per-cgroup vtime tracking.
 

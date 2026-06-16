@@ -228,7 +228,7 @@ sudo iptables -D INPUT -p tcp --dport 12346 -j DROP   # clean up exactly this ru
 
 - **`net/netfilter/nf_tables_core.c:250`** — `nft_do_chain`. The runtime VM. Read end to end (~100 lines). Notice the `nft_regs` structure — each chain run gets a fresh 16-register file. The expression eval pattern (`expr->ops->eval(expr, regs, pkt)`) is how each kind of expression contributes.
 
-- **`net/netfilter/nf_tables_api.c`** — netlink interface for adding/removing rules. ~10000 lines. Don't read straight; key entries: `nf_tables_newrule`, `nf_tables_delrule`, `nf_tables_dump_chains`. This is where transactional updates are processed.
+- **`net/netfilter/nf_tables_api.c`** — netlink interface for adding/removing rules. ~12000 lines. Don't read straight; key entries: `nf_tables_newrule`, `nf_tables_delrule`, `nf_tables_dump_chains`. This is where transactional updates are processed.
 
 - **`net/netfilter/nft_*.c`** — individual expression implementations. Pick a few short ones to read:
   - `nft_immediate.c` — sets a register value or a verdict.

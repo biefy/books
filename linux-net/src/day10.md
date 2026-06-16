@@ -148,7 +148,7 @@ sudo bpftrace -e 'fentry:ipv6_skip_exthdr { printf("skip nexthdr=%d start=%d\n",
 
 - **`net/ipv6/ip6_input.c:188`** — `ip6_rcv_core`. The IPv6 receive core logic (~145 lines, ~80 of real logic). `ipv6_rcv` (line 344) is a ~10-line wrapper that calls `ip6_rcv_core`, then runs the netfilter PRE_ROUTING hook. Notice how it parses the base header, validates `version=6`, and dispatches via the registered `inet6_protos[]` table — same pattern as IPv4's `ip_rcv` but with the extension-header parser as the first handler.
 
-- **`net/ipv6/addrconf.c`** — autoconf state machine. ~5000 lines but you only need a few entry points:
+- **`net/ipv6/addrconf.c`** — autoconf state machine. ~7600 lines but you only need a few entry points:
   - `addrconf_dad_start` (search for the function; no fixed line) — kicks off DAD.
   - `addrconf_rs_timer` — periodic RS solicitation when no router heard from.
   - `addrconf_prefix_rcv` — handle a prefix from RA: install address, run DAD on it.

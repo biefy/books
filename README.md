@@ -5,7 +5,7 @@ Two hands-on books on Linux kernel internals, written in Head First style with r
 ## Read online
 
 - **[Linux Network Subsystem in 30 Days](https://biefy.github.io/books/linux-net/)** — kernel network stack from `sk_buff` to MPTCP.
-- **[Practical eBPF in 30 Days](https://biefy.github.io/books/ebpf/)** — modern eBPF on Linux 7.x.
+- **[Practical eBPF in 30 Days](https://biefy.github.io/books/ebpf/)** — modern eBPF on Linux 7.1.
 
 Read the network book first; the BPF book builds on it.
 

@@ -230,7 +230,7 @@ Two gotchas worth knowing. **Op naming:** ops are `get`/`rings-get`, not `dev-ge
 
 ## What to read in the kernel
 
-- **`net/psp/`** — PSP. Read `psp_main.c` first (~300 lines) for the registration model, then `psp_sock.c` for the socket-side integration.
+- **`net/psp/`** — PSP. Read `psp_main.c` first (~380 lines) for the registration model, then `psp_sock.c` for the socket-side integration.
 
 - **`include/net/dropreason-core.h`** — the `enum skb_drop_reason` list. Skim. Tells you what categories of drops dropwatch can report.
 

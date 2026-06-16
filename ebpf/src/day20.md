@@ -289,7 +289,7 @@ calling kernel function bpf_cpumask_create is not allowed
 
 - **`kernel/bpf/cpumask.c`** — a *complete* kfunc family in one file (~530 lines). Read top to bottom. Notice the pattern: short C functions + a `BTF_KFUNCS_START` block + a `register_btf_kfunc_id_set` call at module init. This is the template for adding new kfuncs.
 
-- **`kernel/bpf/btf.c:8996`** — `register_btf_kfunc_id_set`. The registration entry. Short function (~50 lines). Note the per-`enum bpf_prog_type` registration.
+- **`kernel/bpf/btf.c:8996`** — `register_btf_kfunc_id_set`. The registration entry. Short function (~15 lines). Note the per-`enum bpf_prog_type` registration.
 
 - **`kernel/bpf/verifier.c`** — search `KF_ACQUIRE`. The verifier check that creates a new ref id. Trace forward to see how `acquire_reference_state` interacts with `release_reference_state`.
 

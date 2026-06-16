@@ -168,7 +168,7 @@ Your `N` and `M` will differ — the point is that the **same id appears in both
 
 ## What to read in the kernel
 
-- **`net/core/dev.c`** — search `bpf_prog_run_xdp` and `xdp_do_redirect`. The dispatch from driver to BPF and the implementation of `XDP_REDIRECT`.
+- **`net/core/dev.c`** — search `bpf_prog_run_xdp` (the generic-XDP dispatch from driver to BPF). For the `XDP_REDIRECT` implementation (`xdp_do_redirect`), see **`net/core/filter.c`**.
 
 - **`include/net/xdp.h`** — `struct xdp_md`, `struct xdp_buff`, the action constants. Quick read.
 

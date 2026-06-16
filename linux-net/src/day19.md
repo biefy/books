@@ -142,11 +142,11 @@ sudo nginx -s stop
 
 - **`fs/eventpoll.c:2385`** — `epoll_ctl`. The ADD/MOD/DEL dispatcher. Notice how `EPOLL_CTL_ADD` calls `ep_insert` which registers the wait-queue callback on the target FD. *That's where the magic happens* — once the callback is registered, the FD reports readiness to epoll automatically.
 
-- **`fs/eventpoll.c:1938`** — `ep_poll`. The wait path. Read end to end (~150 lines). Notice how it handles spurious wakes, the busy-loop fast path for low-latency cases, and how it dequeues from the rdllist.
+- **`fs/eventpoll.c:1938`** — `ep_poll`. The wait path. Read end to end (~120 lines). Notice how it handles spurious wakes, the busy-loop fast path for low-latency cases, and how it dequeues from the rdllist.
 
 - **`fs/eventpoll.c:1765`** — `ep_send_events`. Copies the ready list to the user's `epoll_event` array. For LT, re-arms the FD if still ready. For ET, doesn't.
 
-- **`fs/eventpoll.c:1249`** — `ep_poll_callback`. The wait-queue callback that gets called when a registered FD becomes ready. Short (~50 lines). This is where readiness gets translated into an epoll event.
+- **`fs/eventpoll.c:1249`** — `ep_poll_callback`. The wait-queue callback that gets called when a registered FD becomes ready. Short (~100 lines). This is where readiness gets translated into an epoll event.
 
 - **io_uring** — for the `io_uring/net.c` and `io_uring/io_uring.c` entry points, the liburing examples, and the man pages, see Day 28's "What to read." Today, focus on the epoll path above.
 

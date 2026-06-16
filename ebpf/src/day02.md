@@ -256,7 +256,7 @@ Without `bpf_map_delete_elem` somewhere, every TID that ever called `vfs_read` g
 
 ## What to read in the kernel
 
-- **`kernel/bpf/hashtab.c`** — open it, read `htab_map_lookup_elem` (small) and `htab_map_update_elem` (longer). Note the bucket-level lock and the per-CPU variant. The file is ~1500 lines but you only need to read the lookup/update path today.
+- **`kernel/bpf/hashtab.c`** — open it, read `htab_map_lookup_elem` (small) and `htab_map_update_elem` (longer). Note the bucket-level lock and the per-CPU variant. The file is ~2700 lines but you only need to read the lookup/update path today.
 - **`kernel/bpf/verifier.c`** — search `mark_ptr_or_null_regs`. This is the function that flips a register's type from `PTR_TO_MAP_VALUE_OR_NULL` to `PTR_TO_MAP_VALUE` after a null check. Don't try to read the whole verifier — just this function and its callers. Maybe 50 lines.
 - **`include/uapi/linux/bpf.h`** — search `BPF_MAP_TYPE_`. Skim every entry. You don't need to know each one yet; just know they exist. We'll use about half of them across these 30 days.
 

@@ -131,7 +131,7 @@ void BPF_STRUCT_OPS(simple_dispatch, s32 cpu, struct task_struct *prev)
 
 Plus `init`, `exit`, and the vtable instance. That's the whole scheduler.
 
-The userspace component (`scx_simple.c`) is ~200 lines and handles:
+The userspace component (`scx_simple.c`) is ~110 lines and handles:
 - Loading the BPF object.
 - Attaching the struct_ops link.
 - Periodic stats output.
