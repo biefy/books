@@ -4,7 +4,7 @@
 
 ## What a Linux bridge is, and why you have one
 
-A Linux bridge is a software L2 switch. It looks like a netdev (you can give it an IP, ping it, configure routes through it) but its job is to forward Ethernet frames between member ports based on destination MAC. The implementation lives in `net/bridge/` (~28k lines of top-level `.c`).
+A Linux bridge is a software L2 switch. It looks like a netdev (you can give it an IP, ping it, configure routes through it) but its job is to forward Ethernet frames between member ports based on destination MAC. The implementation lives in `net/bridge/` (~29k lines of top-level `.c`).
 
 You're using bridges constantly even if you've never explicitly created one:
 
@@ -201,7 +201,7 @@ sudo ip netns exec ns1 ping -c 2 -W 1 10.0.0.2   # 100% packet loss, exit code 1
 
 ## What to read in the kernel
 
-- **`net/bridge/br_input.c:339`** — `br_handle_frame`. This is the rx_handler installed by `br_add_if`. Read top to bottom (~130 lines including the no-port early returns). Notice it dispatches BPDUs separately from data frames, applies VLAN filtering, and then either invokes the netfilter PREROUTING hook (if `br_netfilter` is loaded) or jumps directly to `br_handle_frame_finish`.
+- **`net/bridge/br_input.c:339`** — `br_handle_frame`. This is the rx_handler installed by `br_add_if`. Read top to bottom (~110 lines including the no-port early returns). Notice it dispatches BPDUs separately from data frames, applies VLAN filtering, and then either invokes the netfilter PREROUTING hook (if `br_netfilter` is loaded) or jumps directly to `br_handle_frame_finish`.
 
 - **`net/bridge/br_input.c:76`** — `br_handle_frame_finish`. The actual switch logic. Walk through it: FDB lookup, multicast handling, forward vs flood decision. This is the function whose performance limits how fast a Linux bridge can switch — every cycle here is on the per-frame hot path.
 

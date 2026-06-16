@@ -221,7 +221,7 @@ Add `.pkts_acked = (void *)my_pkts_acked` to the vtable. Now you have two BPF pr
 
 - **`include/uapi/linux/tcp.h`** — `struct tcp_info`. The same per-connection fields you read off the BTF `struct tcp_sock` pointer are also surfaced to userspace here via `getsockopt(TCP_INFO)`. When you wonder "what other state can I expose?" — this is the catalog. (`bpf_get_socket_cookie` is unrelated: it returns a `u64` SO_COOKIE id, not a `tcp_info`, and as noted in the instrumentation step it isn't even available to `tcp_congestion_ops` programs.)
 
-- **`include/linux/tcp.h`** — the kernel-internal `struct tcp_sock`. ~150 fields. Read once. The relationship: `struct tcp_info` (UAPI) is a curated subset of `struct tcp_sock` (internal); BPF programs can read either by casting `struct sock *sk → struct tcp_sock * = (void *)sk`.
+- **`include/linux/tcp.h`** — the kernel-internal `struct tcp_sock`. ~170 fields. Read once. The relationship: `struct tcp_info` (UAPI) is a curated subset of `struct tcp_sock` (internal); BPF programs can read either by casting `struct sock *sk → struct tcp_sock * = (void *)sk`.
 
 - **`tools/testing/selftests/bpf/progs/bpf_cubic.c`** — another struct_ops example, full Cubic implementation. Compare against `bpf_dctcp.c` for stylistic differences.
 

@@ -290,7 +290,7 @@ For Day 3, both forms work. Internalize: **direct deref for kernel-handed-to-you
 - **`tools/lib/bpf/relo_core.c`** — the CO-RE engine in userspace. `bpf_core_calc_relo_insn` computes the relocation value from target-kernel BTF, and `bpf_core_patch_insn` writes it into the instruction's offset/immediate. ~300 lines, accessible if you know what to look for.
 - **`tools/lib/bpf/btf.c`** — read `btf__find_by_name_kind`. This is how libbpf finds types in BTF by name. CO-RE is built on top of it.
 - **`tools/lib/bpf/bpf_core_read.h`** — search `BPF_CORE_READ`. The macros expand to a chain of `bpf_core_read` (kernel-side) calls; reading them once eliminates magic.
-- **`include/linux/btf.h`** — see `struct btf_type` and the `BTF_KIND_*` enums. BTF has only ~12 kinds (int, ptr, array, struct, union, enum, fwd, typedef, volatile, const, restrict, func, ...). Skim.
+- **`include/linux/btf.h`** — see `struct btf_type` and the `BTF_KIND_*` enums. BTF has ~19 kinds (int, ptr, array, struct, union, enum, fwd, typedef, volatile, const, restrict, func, func_proto, var, datasec, float, decl_tag, type_tag, enum64). Skim.
 
 ---
 
@@ -301,7 +301,7 @@ For Day 3, both forms work. Internalize: **direct deref for kernel-handed-to-you
 - **Use direct deref** (`task->real_parent->tgid`) when the pointer chain is trusted and you want speed.
 - **Handle missing fields with `bpf_core_field_exists`** — libbpf will patch the access to a no-op when the field is absent.
 - **`bpf_get_current_task_btf()`** returns a typed `task_struct *` you can deref directly.
-- BTF kinds you'll meet: `STRUCT`, `UNION`, `ENUM`, `INT`, `PTR`, `ARRAY`, `FUNC`, `TYPEDEF`. About 12 total.
+- BTF kinds you'll meet: `STRUCT`, `UNION`, `ENUM`, `INT`, `PTR`, `ARRAY`, `FUNC`, `TYPEDEF`. About 19 total.
 
 ---
 

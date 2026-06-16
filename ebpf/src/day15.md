@@ -296,7 +296,7 @@ Update map definition's value type, parse CIDR with `inet_pton(AF_INET6, ...)`, 
 
 ## What to read in the kernel
 
-- **`kernel/bpf/lpm_trie.c`** — the implementation. Read `trie_lookup_elem` and `trie_update_elem`. ~1000 lines, accessible.
+- **`kernel/bpf/lpm_trie.c`** — the implementation. Read `trie_lookup_elem` and `trie_update_elem`. ~800 lines, accessible.
 - **`include/uapi/linux/bpf.h`** — search `BPF_MAP_TYPE_LPM_TRIE`. Map flag definitions.
 - **`tools/testing/selftests/bpf/map_tests/lpm_trie_map_basic_ops.c`** — the canonical test, including edge cases.
 

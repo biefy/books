@@ -27,7 +27,7 @@ You can read the actual macro at `tools/lib/bpf/bpf_tracing.h`. It's about 30 li
 >
 > **Q: How does the macro know how many arguments my function has?**
 >
-> A: C variadic macros (`__VA_ARGS__`) plus a counting trick (`COUNT_ARGS`) that uses preprocessor recursion to figure out the arity. `bpf_tracing.h` provides `BPF_PROG_0`, `BPF_PROG_1`, ..., `BPF_PROG_12` and dispatches to the right one. The actual implementation is gnarly C macro magic but the concept is simple.
+> A: C variadic macros (`__VA_ARGS__`) plus a counting trick (`___bpf_narg`) that uses preprocessor recursion to figure out the arity. `bpf_tracing.h` then dispatches through `___bpf_ctx_cast` to the right `___bpf_ctx_cast0`..`___bpf_ctx_cast12` slot-caster (supporting up to 12 args). The actual implementation is gnarly C macro magic but the concept is simple.
 >
 > **Q: What if my function has more than 12 arguments?**
 >
@@ -214,7 +214,7 @@ make
 sudo ./inspect 2>&1 | less
 ```
 
-If you have `veristat` (it ships in the kernel tree under `tools/bpf/`, so you may need to build it), you can skip the loader entirely and dump the same per-instruction log: `sudo veristat -v -l 2 inspect.bpf.o 2>&1 | less` — `-v` is what emits the log and `-l 2` is the log level that prints the `R1_w=...` register-state lines.
+If you have `veristat` (it ships in the kernel tree under `tools/testing/selftests/bpf/`, so you may need to build it), you can skip the loader entirely and dump the same per-instruction log: `sudo veristat -v -l 2 inspect.bpf.o 2>&1 | less` — `-v` is what emits the log and `-l 2` is the log level that prints the `R1_w=...` register-state lines.
 
 ### Inspect the verifier log for each program
 

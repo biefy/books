@@ -131,7 +131,7 @@ For each TCP connection:
 
 1. **At socket creation**: `tcp_init_sock` calls `tcp_assign_congestion_control` which picks the algorithm (per-route, per-default, per-app sockopt).
 2. **`init` callback** runs once. Allocates per-sock private state (in `icsk_ca_priv` — 104 bytes of scratch space inside the inet_connection_sock).
-3. **Per ACK**: `tcp_ack` (`tcp_input.c`) calls `cong_avoid(sk, ack, acked)` for classic CCs (CUBIC/Reno). Algorithms that define `cong_control` instead (BBR, DCTCP) get `cong_control(sk, ack, flag, rs)` with a full `rate_sample`. Either way the algorithm updates `tp->snd_cwnd` based on its model.
+3. **Per ACK**: `tcp_ack` (`tcp_input.c`) calls `cong_avoid(sk, ack, acked)` for classic CCs (CUBIC/Reno). Algorithms that define `cong_control` instead (BBR) get `cong_control(sk, ack, flag, rs)` with a full `rate_sample`. Either way the algorithm updates `tp->snd_cwnd` based on its model.
 4. **On loss/RTO**: kernel calls `set_state(sk, CA_Loss)` and `ssthresh(sk)`. The algorithm computes the new threshold and sets cwnd accordingly.
 5. **On RTT sample**: kernel calls `pkts_acked(sk, sample)` with the latest RTT measurement. Pure feedback for the algorithm.
 
