@@ -1,0 +1,27 @@
+digraph icsk_ca_priv {
+    rankdir=LR;
+    labelloc=t;
+    label="inet_csk_ca(sk): the inline icsk_ca_priv[104] scratch, cast to struct bpf_dctcp *";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    sock [shape=record, style="filled", fillcolor="#dbeafe",
+          label="struct sock / inet_connection_sock|...other fields...|icsk_ca_ops  ● (which algorithm)|{icsk_ca_priv[104]  (INLINE scratch)|no extra allocation}"];
+
+    accessor [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=10,
+              label="inet_csk_ca(sk)\nreturns (void *)icsk_ca_priv\ntyped as your struct"];
+
+    priv [shape=record, style="filled", fillcolor="#fef3c7",
+          label="struct bpf_dctcp *  (28 bytes, overlaid)|old_delivered|old_delivered_ce|prior_rcv_nxt|dctcp_alpha|next_seq|ce_state|loss_cwnd"];
+
+    cap [shape=box, style="filled", fillcolor="#fee2e2", fontsize=10,
+         label="ICSK_CA_PRIV_SIZE = 104 bytes\nHARD WALL: the private\nstruct MUST fit inside\n(28 < 104, fine)"];
+
+    sock -> accessor [label="icsk_ca_priv", color="#dc2626", style=bold];
+    accessor -> priv [label="cast to struct bpf_dctcp *", color="#7c3aed", style=bold];
+    priv -> cap [label="must fit", style=dashed, color="#dc2626"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="Lifecycle of this inline buffer:\linit()    writes the initial fields (zero counters, set alpha) — called last\lcong_avoid()/ssthresh()/in_ack_event() read + update them on each ACK\lrelease() tears it down\lThat is why the vtable has init/release slots.\l"];
+    cap -> note [style=invis];
+}
