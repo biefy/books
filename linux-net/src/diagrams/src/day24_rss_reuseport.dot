@@ -1,0 +1,51 @@
+digraph rss_reuseport {
+    rankdir=TB;
+    labelloc=t;
+    label="Two independent hashes steer one connection: NIC RSS vs reuseport";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    wire [shape=box, style="filled", fillcolor="#fef3c7", label="frame off the wire"];
+
+    toeplitz [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+              label="NIC Toeplitz hash\nover the 4-tuple\n(in hardware, RX time)"];
+
+    indir [shape=box, style="filled", fillcolor="#dbeafe",
+           label="indirection table\n(low hash bits → queue)"];
+
+    subgraph cluster_queues {
+        label="RX queues — each its OWN MSI-X IRQ + NAPI + CPU (RSS)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=record, style="filled", fillcolor="#dbeafe"];
+        q0 [label="queue 0|IRQ→CPU0|NAPI"];
+        q1 [label="queue 1|IRQ→CPU1|NAPI"];
+        q2 [label="queue 2|IRQ→CPU2|NAPI"];
+        q3 [label="queue 3|IRQ→CPU3|NAPI"];
+    }
+
+    stack [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+           label="protocol stack runs\non that queue's CPU\n(softirq RX in parallel)"];
+
+    lookup [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="__inet_lookup_listener"];
+
+    inethash [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+              label="reuseport pick via\ninet_ehashfn\n(in kernel, lookup time)"];
+
+    worker [shape=box, style="filled", fillcolor="#dbeafe",
+            label="chosen worker\n(pinned to a CPU)"];
+
+    wire -> toeplitz -> indir;
+    indir -> q0; indir -> q1; indir -> q2; indir -> q3;
+    q1 -> stack [color="#16a34a", style=bold];
+    stack -> lookup -> inethash -> worker;
+
+    warn [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="Two DIFFERENT hashes, DIFFERENT seeds!\lNIC Toeplitz picks the RX queue/CPU.\linet_ehashfn independently picks the worker.\lA flow can land on CPU1's queue yet hash to CPU3's worker.\l"];
+    toeplitz -> warn [style=invis];
+    inethash -> warn [style=invis];
+
+    align [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+           label="To co-locate received-CPU = worker-CPU,\lalign them deliberately:\lSO_INCOMING_CPU (kernel) or aRFS (NIC).\l"];
+    worker -> align [style=dashed, color="#7c3aed", label="align"];
+}

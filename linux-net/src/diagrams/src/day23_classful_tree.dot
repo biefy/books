@@ -1,0 +1,38 @@
+digraph classful_tree {
+    rankdir=TB;
+    labelloc=t;
+    label="tc classful tree: root qdisc 1:, classes, and a u32 filter routing packets";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The tree
+    root [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+          label="root qdisc 1:\n(HTB, default 30)"];
+    c1 [shape=box, style="filled", fillcolor="#dbeafe",
+        label="class 1:1\nrate 100mbit\n(holds all capacity)"];
+    c10 [shape=box, style="filled", fillcolor="#dbeafe",
+         label="class 1:10\nrate 30mbit"];
+    c20 [shape=box, style="filled", fillcolor="#dbeafe",
+         label="class 1:20\nrate 50mbit"];
+    c30 [shape=box, style="filled", fillcolor="#dbeafe",
+         label="class 1:30\nrate 20mbit\n(default)"];
+
+    root -> c1;
+    c1 -> c10;
+    c1 -> c20;
+    c1 -> c30;
+
+    // The filter
+    pkt [shape=circle, style="filled", fillcolor="#fef3c7", width=0.6,
+         label="incoming\npacket"];
+    filter [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+            label="filter (u32)\nmatch ip dport 22\n0xffff -> flowid 1:10"];
+
+    pkt -> filter [color="#2563eb"];
+    filter -> c10 [label="dport 22 matched", color="#16a34a", style=bold];
+    filter -> c30 [label="default 30 (unmatched)", color="#94a3b8", style=dashed];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="handle major:minor\lminor 0 (1:) = the qdisc itself\lnonzero minor (1:10) = a class\l"];
+    c30 -> note [style=invis];
+}

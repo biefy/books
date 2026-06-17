@@ -1,0 +1,44 @@
+digraph expectation {
+    rankdir=TB;
+    labelloc=t;
+    label="RELATED via expectations: how FTP-active's data connection is recognized";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // Step 1: the master control connection
+    master [shape=box, style="filled", fillcolor="#dbeafe",
+            label="1. FTP control conn (master nf_conn)\nclient:rand -> server:21\nalready tracked & ESTABLISHED"];
+
+    // Step 2: helper parses control stream
+    helper [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="2. nf_conntrack_ftp helper\nparses the PASV reply,\npredicts the data tuple"];
+
+    // Step 3: expectation registered into expect hash
+    expect [shape=record, style="filled", fillcolor="#fef3c7",
+            label="{ 3. struct nf_conntrack_expect | tuple = client to server:dataport | master = control conn }"];
+
+    expecthash [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+                label="expectation hash\n(pending tuples)"];
+
+    // Step 4: data SYN arrives and matches
+    datasyn [shape=box, style="filled", fillcolor="#fef3c7",
+             label="4. data SYN arrives\nclient -> server:dataport\ntuple matches the expectation"];
+
+    // Step 5: new conn born RELATED with master set
+    newconn [shape=box, style="filled", fillcolor="#dbeafe",
+             label="5. new data nf_conn created\n->master = control conn\npacket tagged IP_CT_RELATED"];
+
+    master -> helper [color="#7c3aed", style=bold, label="reads L7 payload"];
+    helper -> expect [color="#7c3aed", label="registers"];
+    expect -> expecthash [color="#d97706"];
+    datasyn -> expecthash [style=bold, color="#16a34a", label="lookup"];
+    expecthash -> newconn [style=bold, color="#16a34a", label="match -> create"];
+
+    // the master backlink
+    newconn -> master [style=dashed, color="#2563eb", constraint=false,
+                       label="->master link\n= 'related'"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="The data flow has a DIFFERENT tuple than the\lcontrol flow, so to a stateless view it looks\llike an unsolicited NEW inbound. The expectation\lis what lets 'ct state related accept' allow it.\lHelpers are opt-in (nft ct helper) since v7.1.\l"];
+    newconn -> note [style=invis];
+}

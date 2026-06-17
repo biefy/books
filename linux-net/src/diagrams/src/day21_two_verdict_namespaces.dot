@@ -1,0 +1,42 @@
+digraph two_verdict_namespaces {
+    rankdir=LR;
+    labelloc=t;
+    label="Two verdict namespaces; nft_immediate is the bridge";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // Lane 1: internal nft verdicts
+    subgraph cluster_internal {
+        label="LANE 1: internal nft verdicts — steer the chain walk, never leave nft_do_chain";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        node [shape=box, style="filled", fillcolor="#dbeafe"];
+        cont   [label="NFT_CONTINUE (-1)\nkeep evaluating"];
+        brk    [label="NFT_BREAK (-2)\nabandon this rule"];
+        jmp    [label="NFT_JUMP (-3)\npush chain, jump"];
+        goto_  [label="NFT_GOTO (-4)\njump, no push"];
+        ret    [label="NFT_RETURN (-5)\npop jump stack"];
+    }
+
+    // Lane 2: terminal Netfilter verdicts
+    subgraph cluster_nf {
+        label="LANE 2: terminal Netfilter verdicts — returned to the hook (Day 20)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+        node [shape=box, style="filled", fillcolor="#dcfce7"];
+        accept [label="NF_ACCEPT"];
+        drop   [label="NF_DROP"];
+        queue  [label="NF_QUEUE"];
+        stolen [label="NF_STOLEN"];
+    }
+
+    // The bridge
+    bridge [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="nft_immediate\n(rule says 'accept' / 'drop')\nwrites an NF_* value\ninto the verdict register"];
+
+    cont -> bridge [style=invis];
+    bridge -> accept [label="crosses to lane 2", color="#7c3aed", style=bold];
+    bridge -> drop [color="#7c3aed", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="Value is NOT in the NFT_* range,\lso the loop's terminal switch\lreturns it and the chain stops.\l"];
+    bridge -> note [style=invis];
+}

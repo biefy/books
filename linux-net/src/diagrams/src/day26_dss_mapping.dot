@@ -1,0 +1,49 @@
+digraph dss_mapping {
+    rankdir=TB;
+    labelloc=t;
+    label="DSS maps each subflow's local seq onto one connection-wide DSN — same DSN on two paths = reinjection";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // Shared DSN ruler on top
+    subgraph cluster_dsn {
+        label="Connection-wide DSN ruler (the application's byte order)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#7c3aed";
+        dsn [shape=record, style="filled", fillcolor="#e9d5ff",
+             label="{<a> DSN 0..99|<b> DSN 100..199|<c> DSN 200..299|<d> DSN 300..399}"];
+    }
+
+    // Subflow A lane
+    subgraph cluster_a {
+        label="Subflow A — its own monotonic subflow_seq (a normal TCP stream on the wire)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        a [shape=record, style="filled", fillcolor="#dbeafe",
+           label="{<x> subA_seq 0..99|<y> subA_seq 100..199|<z> subA_seq 200..299}"];
+    }
+
+    // Subflow B lane
+    subgraph cluster_b {
+        label="Subflow B — independent subflow_seq (subA byte 5000 and subB byte 5000 are unrelated)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        b [shape=record, style="filled", fillcolor="#dbeafe",
+           label="{<x> subB_seq 0..99|<y> subB_seq 100..199}"];
+    }
+
+    // DSS mapping arrows from each lane up to the DSN ruler
+    a:x -> dsn:a [label="DSS {data_seq=0, subflow_seq=0, data_len=100}", color="#16a34a"];
+    a:y -> dsn:b [label="DSS -> DSN 100", color="#16a34a"];
+    b:x -> dsn:c [label="DSS -> DSN 200", color="#d97706"];
+
+    // The reinjection: DSN 300..399 carried on BOTH lanes
+    a:z -> dsn:d [label="DSS -> DSN 300 (subA_seq 200)", color="#dc2626", style=bold];
+    b:y -> dsn:d [label="DSS -> DSN 300 (subB_seq 100)", color="#dc2626", style=bold];
+
+    // Application delivery
+    app [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+         label="application read()\nreceives DSN 0,100,200,300 in order, ONCE"];
+    dsn -> app [label="deliver in DSN order", color="#16a34a", style=bold];
+
+    note_reinj [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+                label="Reinjection: the SAME bytes (DSN 300..399) are sent on A and B\lwith different subflow_seq but the SAME data_seq. The receiver sees\lthe duplicate DSN range and delivers it to the app only once (dedup).\l"];
+    dsn:d -> note_reinj [style=dashed, color="#dc2626", constraint=false];
+}

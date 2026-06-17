@@ -1,0 +1,59 @@
+digraph ulp_vtable_swap {
+    rankdir=LR;
+    labelloc=t;
+    label="setsockopt(TCP_ULP,\"tls\") + TLS_TX swaps the socket's vtables (recall Day 13's two vtables)";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    compound=true;
+
+    // ---------- BEFORE ----------
+    subgraph cluster_before {
+        label="BEFORE — plain connected TCP socket";
+        fontname="Helvetica"; fontsize=12; style="rounded"; color="#94a3b8";
+
+        b_write [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+                 label="write(fd, plaintext)"];
+        b_sk [shape=record, style="filled", fillcolor="#dbeafe",
+              label="{struct sock|sk-\>sk_prot = &tcp_prot|sk-\>sk_socket-\>ops = inet_stream_ops}"];
+        b_tcp [shape=box, style="filled", fillcolor="#dbeafe",
+               label="tcp_sendmsg"];
+        b_wire [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+                label="WIRE\n(plaintext bytes)"];
+
+        b_write -> b_sk [label="sendmsg"];
+        b_sk -> b_tcp [label="sk_prot->sendmsg"];
+        b_tcp -> b_wire [style=bold, color="#d97706"];
+    }
+
+    // ---------- AFTER ----------
+    subgraph cluster_after {
+        label="AFTER — kTLS ULP attached, TX key pushed";
+        fontname="Helvetica"; fontsize=12; style="rounded"; color="#16a34a";
+
+        a_write [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+                 label="write(fd, plaintext)\n(same syscall, unchanged app)"];
+        a_sk [shape=record, style="filled", fillcolor="#dcfce7",
+              label="{struct sock|sk-\>sk_prot = &tls_prots[TLSV4][TLS_SW][TLS_BASE]|sk-\>sk_socket-\>ops = tls_proto_ops[...]}"];
+        a_tls [shape=box, style="filled", fillcolor="#dcfce7",
+               label="tls_sw_sendmsg\n(accumulate record)"];
+        a_aead [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+                label="AES-GCM encrypt\n(crypto/ AEAD)"];
+        a_tcp [shape=box, style="filled", fillcolor="#dbeafe",
+               label="tcp_sendmsg"];
+        a_wire [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+                label="WIRE\n(ciphertext records)"];
+
+        a_write -> a_sk [label="sendmsg"];
+        a_sk -> a_tls [label="sk_prot->sendmsg\n(re-pointed)"];
+        a_tls -> a_aead [style=bold, color="#dc2626"];
+        a_aead -> a_tcp [label="down to TCP"];
+        a_tcp -> a_wire [style=bold, color="#d97706"];
+    }
+
+    b_sk -> a_sk [ltail=cluster_before, lhead=cluster_after, style=bold, color="#7c3aed",
+                  label="update_sk_prot()\nWRITE_ONCE both tables"];
+
+    matrix [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+            label="tls_prots[ip_ver][tx_conf][rx_conf]\l   axis values: TLS_BASE / TLS_SW / TLS_HW\l   TX & RX selected INDEPENDENTLY\l   TLS_TX push: tx_conf BASE -> SW\l   TLS_RX push: rx_conf BASE -> SW\l"];
+    a_sk -> matrix [style=invis];
+}

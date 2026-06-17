@@ -1,0 +1,58 @@
+digraph join_token {
+    rankdir=TB;
+    labelloc=t;
+    label="MP_JOIN names the connection by token, not by 4-tuple; the HMAC proves it isn't forged";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // Two endpoints
+    A [shape=box, style="filled", fillcolor="#e9d5ff", label="Host A (client)\nholds key_A"];
+    B [shape=box, style="filled", fillcolor="#e9d5ff", label="Host B (server)\nholds key_B"];
+
+    // Primary subflow handshake
+    subgraph cluster_cap {
+        label="1. Primary subflow — MP_CAPABLE handshake (keys appear on the wire ONCE)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        syn [shape=box, style="filled", fillcolor="#dbeafe",
+             label="SYN  MP_CAPABLE\n(advertise key_A)"];
+        synack [shape=box, style="filled", fillcolor="#dbeafe",
+                label="SYN-ACK  MP_CAPABLE\n(advertise key_B)"];
+        syn -> synack [style=invis];
+    }
+    A -> syn [color="#2563eb"];
+    syn -> B [color="#2563eb"];
+    B -> synack [color="#2563eb"];
+    synack -> A [color="#2563eb"];
+
+    // Token derivation
+    token [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+           label="token = first 32 bits of SHA256(peer's key)\l(mptcp_crypto_key_sha). A stable 32-bit handle\lthat fits the option budget; the key itself is\lnever re-transmitted.\l"];
+
+    // The join from a new address
+    subgraph cluster_join {
+        label="2. Additional subflow — a BRAND-NEW TCP 4-tuple from a different source address";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+        join [shape=record, style="filled", fillcolor="#fef3c7",
+              label="{SYN  MP_JOIN  (new src addr)|token = hash(key_B)|HMAC over key_A + key_B}"];
+    }
+    A -> join [label="opens 2nd path", color="#d97706"];
+
+    // Demux
+    table [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+           label="token -> msk table\n(mptcp_token_get_sock)\nlook up by token, NOT 4-tuple"];
+    join -> table [label="arrives at B", color="#d97706", style=bold];
+
+    msk [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+         label="existing msk\nconn_list (subflow list)"];
+    table -> msk [label="token hit -> attach", color="#16a34a", style=bold];
+
+    new_conn [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+              label="NOT a fresh, unrelated\nconnection (what plain\n4-tuple demux would do)"];
+    table -> new_conn [label="avoided", style=dashed, color="#dc2626"];
+
+    note_hmac [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+               label="A token is visible to any eavesdropper, so it can't be the\lcredential. The HMAC needs BOTH keys, which only A and B\lhold -> a stranger with the token still can't forge a join.\l"];
+
+    synack -> token [style=dashed, color="#16a34a", constraint=false];
+    join -> note_hmac [style=dashed, color="#dc2626", constraint=false];
+}
