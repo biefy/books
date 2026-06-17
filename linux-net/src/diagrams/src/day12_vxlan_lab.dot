@@ -1,0 +1,52 @@
+digraph vxlan_lab {
+    rankdir=TB;
+    labelloc=t;
+    label="VXLAN lab topology: two namespaces, two stacked address planes (overlay over underlay)";
+    fontname="Helvetica"; fontsize=13;
+    node [fontname="Monaco", fontsize=10];
+    compound=true;
+
+    // Overlay plane (top): the virtual 10.100.0.0/24 network on vxlan0
+    subgraph cluster_overlay {
+        label="OVERLAY  10.100.0.0/24  (virtual L2 the inner frames live on)";
+        fontname="Helvetica"; fontsize=11; style="rounded,filled"; fillcolor="#dcfce7"; color="#16a34a";
+        vxA [shape=record, style="filled", fillcolor="#dbeafe",
+             label="{vxlan0 (ns A)|10.100.0.1/24|VTEP, id 100}"];
+        vxB [shape=record, style="filled", fillcolor="#dbeafe",
+             label="{vxlan0 (ns B)|10.100.0.2/24|VTEP, id 100}"];
+        vxA -> vxB [dir=both, style=bold, color="#16a34a",
+                    label="overlay ping 10.100.0.2", fontname="Helvetica", fontsize=9];
+    }
+
+    // Underlay plane (bottom): the real 192.168.99.0/24 over br-underlay
+    subgraph cluster_underlay {
+        label="UNDERLAY  192.168.99.0/24  (real IP net that carries the outer UDP packets)";
+        fontname="Helvetica"; fontsize=11; style="rounded,filled"; fillcolor="#fef3c7"; color="#d97706";
+
+        vethApA [shape=record, style="filled", fillcolor="#dbeafe",
+                 label="{vethA_p (ns A)|192.168.99.1/24}"];
+        vethBpB [shape=record, style="filled", fillcolor="#dbeafe",
+                 label="{vethB_p (ns B)|192.168.99.2/24}"];
+
+        vethA [shape=box, style="filled", fillcolor="#e9d5ff", label="vethA (init_net)"];
+        vethB [shape=box, style="filled", fillcolor="#e9d5ff", label="vethB (init_net)"];
+
+        br [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="br-underlay (init_net)\none L2 segment, no IP"];
+
+        vethApA -> vethA [dir=both, style=dashed, color="#7c3aed", label="veth pair", fontname="Helvetica", fontsize=9];
+        vethBpB -> vethB [dir=both, style=dashed, color="#7c3aed", label="veth pair", fontname="Helvetica", fontsize=9];
+        vethA -> br [dir=both, color="#d97706"];
+        vethB -> br [dir=both, color="#d97706"];
+    }
+
+    // Stacking: each vxlan0 rides on its namespace's underlay address
+    vxA -> vethApA [style=bold, color="#16a34a", constraint=true,
+                    label="encap: outer src 192.168.99.1\nUDP dport 4789", fontname="Helvetica", fontsize=9];
+    vxB -> vethBpB [style=bold, color="#16a34a", constraint=true,
+                    label="encap: outer src 192.168.99.2\nUDP dport 4789", fontname="Helvetica", fontsize=9];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="Two planes, one wire:\lthe green overlay frame is wrapped (+~50B) and sent as a\lyellow underlay UDP datagram through br-underlay, then\lunwrapped at the far VTEP. Underlay must ping first.\l"];
+    br -> note [style=invis];
+}

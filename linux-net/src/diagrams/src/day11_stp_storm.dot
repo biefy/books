@@ -1,0 +1,51 @@
+digraph stp_storm {
+    labelloc=t;
+    label="L2 loop = broadcast storm (no TTL); STP elects a root and BLOCKS a port";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // Left panel: the storm
+    subgraph cluster_storm {
+        label="WITHOUT STP — broadcast storm";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#dc2626";
+        node [shape=box, style="filled", fillcolor="#fee2e2"];
+        A [label="bridge A"];
+        B [label="bridge B"];
+        C [label="bridge C"];
+        A -> B [dir=both, color="#dc2626", style=bold, label="flood"];
+        B -> C [dir=both, color="#dc2626", style=bold, label="flood"];
+        C -> A [dir=both, color="#dc2626", style=bold, label="flood"];
+        storm [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+               label="one broadcast multiplies\laround the loop forever.\lEthernet has no TTL to\lstop it.\l"];
+        storm -> B [style=invis];
+    }
+
+    // Right panel: STP resolved
+    subgraph cluster_stp {
+        label="WITH STP — loop broken";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+        node [shape=box, style="filled", fillcolor="#dcfce7"];
+        rA [label="bridge A\n(ROOT)", fillcolor="#bfdbfe"];
+        rB [label="bridge B"];
+        rC [label="bridge C"];
+        rA -> rB [dir=both, color="#16a34a", style=bold, label="forwarding"];
+        rA -> rC [dir=both, color="#16a34a", style=bold, label="forwarding"];
+        rB -> rC [dir=both, color="#9ca3af", style=dashed,
+                  label="BLOCKING\n(redundant link)"];
+    }
+
+    // State transition strip
+    subgraph cluster_states {
+        label="port coming up under STP";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", fillcolor="#dbeafe"];
+        s1 [label="LISTENING"];
+        s2 [label="LEARNING\n(learns MACs,\nno forwarding)"];
+        s3 [label="FORWARDING", fillcolor="#dcfce7"];
+        s1 -> s2 [label="15 s"];
+        s2 -> s3 [label="15 s"];
+    }
+
+    A -> rA [style=invis];
+    rC -> s1 [style=invis];
+}

@@ -1,0 +1,48 @@
+digraph reorder {
+    rankdir=LR;
+    labelloc=t;
+    label="Reordering looks like loss: keep one flow on one path";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // TOP: one path, in order
+    subgraph cluster_good {
+        label="GOOD — whole flow on nexthop A, arrives in order";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+        gsend [shape=box, style="filled", fillcolor="#dbeafe",
+               label="sender\nsend 1 2 3 4"];
+        gA [shape=box, style="filled", fillcolor="#dcfce7",
+            label="nexthop A\n(single path)"];
+        grecv [shape=record, style="filled", fillcolor="#fef3c7",
+               label="{receiver|got 1 2 3 4 in order}"];
+        gack [shape=box, style="filled", fillcolor="#dcfce7",
+              label="clean ACKs\n1,2,3,4\nwindow grows"];
+        gsend -> gA -> grecv -> gack [color="#16a34a"];
+    }
+
+    // BOTTOM: two paths, reordered
+    subgraph cluster_bad {
+        label="BAD — same flow split across A (fast) and B (slow)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#dc2626";
+        bsend [shape=box, style="filled", fillcolor="#dbeafe",
+               label="sender\nsend 1 2 3 4"];
+        bA [shape=box, style="filled", fillcolor="#dcfce7",
+            label="nexthop A (fast)\ncarries 1 3"];
+        bB [shape=box, style="filled", fillcolor="#e9d5ff",
+            label="nexthop B (slow)\ncarries 2 4"];
+        brecv [shape=record, style="filled", fillcolor="#fef3c7",
+               label="{receiver|got 1, 3, 4 ... 2 late\n(out of order)}"];
+        bdup [shape=box, style="filled", fillcolor="#fee2e2",
+              label="duplicate ACKs\nACK1 ACK1 ACK1\n3rd dup -> fast retransmit\ncongestion window CUT"];
+        bsend -> bA [color="#16a34a"];
+        bsend -> bB [color="#7c3aed"];
+        bA -> brecv [color="#16a34a"];
+        bB -> brecv [style=dashed, color="#7c3aed", label="arrives late"];
+        brecv -> bdup [color="#dc2626", style=bold];
+    }
+
+    cap [shape=note, style="filled", fillcolor="#fee2e2", fontsize=10,
+         label="Nothing was lost — every packet arrived.\lBut out-of-order arrival mimics the dup-ACK pattern of loss,\lso TCP's loss detector fires and throughput tanks for seconds.\l"];
+    gack -> cap [style=invis];
+    bdup -> cap [style=invis];
+}
