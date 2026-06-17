@@ -147,7 +147,9 @@ Relaxing to **loose mode (2)** fixes it because loose mode only asks "is this so
 
 ![Reverse-path filtering routes the source backwards with src/dst swapped](diagrams/day09_rpfilter.png)
 
-### Mark-based routing — pairs with netfilter
+## Mark-based routing
+
+This is the second canonical `fib_rules` recipe (the first was source-based routing above), and it pairs the routing side with netfilter — the mark from Background 1 in action.
 
 ```bash
 # Rule: marked traffic uses table 200
@@ -160,7 +162,7 @@ sudo nft add rule inet filter output ip daddr 93.184.216.34 meta mark set 0x42
 
 That `meta mark set 0x42` is the netfilter side from Background 1 *writing* the mark; the `ip rule add fwmark 0x42` is the routing side *reading* it. This is how policy routers, VPN clients (`mwan3`), and per-application VPN configs work.
 
-**Gotcha:** this is the ordering subtlety from the mark box, now concrete — mark in `OUTPUT` *after* the route was bound at `connect()`, and that connection's path is already fixed. To force re-routing on mark change, applications often combine `setsockopt(SO_MARK)` (Background 1 — the socket stamps every packet at birth, before routing) with route lookups, or use `ip rule add suppress_prefixlength 0` to skip the kernel's stickiness.
+**Gotcha:** this is the ordering subtlety from the mark box, now concrete — mark in `OUTPUT` *after* the route was bound at `connect()`, and that connection's path is already fixed. To force re-routing on mark change, applications often combine `setsockopt(SO_MARK)` (Background 1 — the socket stamps every packet at birth, before routing) with route lookups, or use the `suppress_prefixlength 0` rule action, which makes the kernel ignore a previously-cached route decision and re-run the rules.
 
 ## Multiple FIB tables in detail
 
@@ -185,7 +187,7 @@ sudo ip route add default via 10.0.0.1 table vpn
 
 The next section's central design driver — and the entire justification for resilient nexthop groups later — is the rule *"keep one flow on one path."* The chapter is about to claim that splitting a connection across two paths makes "TCP throughput tank for seconds." But TCP isn't taught until Day 13+, so you're being asked to accept the most important idea in the chapter on faith. Let's not do that. Here's just enough to make the rule self-evident.
 
-**First, define a "flow."** A flow is the set of packets sharing the same **5-tuple**: source IP, destination IP, source port, destination port, and protocol. Every packet of a single TCP connection has the same 5-tuple. ECMP's job is to hash that 5-tuple so that **every packet of one connection lands on the same next-hop** — which is exactly what the multipath hasher does. You can see what "a flow" means to the kernel by reading `fib_multipath_hash` (`net/ipv4/route.c:2066`): in `case 0` it hashes only the v4 source and destination addresses; in `case 1` it adds the L4 ports. Those fields *are* the flow identity.
+**First, define a "flow."** A flow is the set of packets sharing the same **5-tuple**: source IP, destination IP, source port, destination port, and protocol. Every packet of a single TCP connection has the same 5-tuple. ECMP's job is to hash a connection's fixed fields so that **every packet of one connection lands on the same next-hop** — which is exactly what the multipath hasher does. By default (hash policy 0) the kernel hashes only the source/destination IP pair, so all connections between the same pair of hosts share one next-hop; enabling policy 1 adds the L4 ports for true per-5-tuple spreading. Either way a single connection always hashes the same, so its packets stay on one next-hop. You can see what "a flow" means to the kernel by reading `fib_multipath_hash` (`net/ipv4/route.c:2066`): in `case 0` it hashes only the v4 source and destination addresses; in `case 1` it adds the L4 ports. Those fields *are* the flow identity.
 
 **Now, why keeping a flow together matters.** TCP has no direct "a packet was lost" signal — it **infers** loss from *ordering*. The receiver ACKs the highest in-order byte it has. If packets arrive out of order, the receiver keeps re-sending the same ACK number — **duplicate ACKs**. When the sender sees **three duplicate ACKs**, it concludes a packet was lost, triggers a **fast retransmit**, and **cuts its congestion window** (its sending rate). Throughput drops, then has to climb back up slowly.
 
@@ -338,7 +340,7 @@ Neither ping will actually get a reply from 8.8.8.8 — that's expected. Table 9
 
 > **Q: Why not just hash per-packet and get perfect balance?**
 >
-> A: Because of Background 3. Per-packet spraying gives ideal load balance but reorders every flow across paths of unequal latency, and TCP reads that reordering as loss — fast-retransmit, window cut, throughput collapse. Per-flow hashing trades a little balance for not lying to TCP's loss detector. It's the right trade for almost everyone.
+> A: Per-packet spraying reorders flows across paths of unequal latency, and TCP reads that as loss — see Background 3 ("why packet reordering wrecks TCP"). Per-flow hashing trades a little balance for not lying to TCP's loss detector.
 
 ## What to read in the kernel
 
@@ -368,7 +370,7 @@ Neither ping will actually get a reply from 8.8.8.8 — that's expected. Table 9
 - **Routing table IDs are `u32`.** Custom tables via `ip route add … table N`. Names in `/etc/iproute2/rt_tables`.
 - **Source-based routing** is the most common use case; **mark-based** for firewall integration.
 - **Reverse-path filtering** (`fib_validate_source`) is an anti-spoofing reverse FIB lookup on the source address. **Strict (`rp_filter=1`)** demands the reply path return to the arrival interface and so **silently drops** asymmetric source-routed traffic; set **loose (`2`)** on the relevant interface.
-- **ECMP**: multi-nexthop route, kernel hashes per-flow (the 5-tuple) to pick one. **Same flow → same nexthop**, because reordering a flow across paths looks like loss to TCP (dup-ACKs → fast-retransmit → window cut), not because packets would be lost.
+- **ECMP**: multi-nexthop route, kernel hashes per-flow to pick one — **by default the source/destination IP pair (hash policy 0); the full 5-tuple only with policy 1**. **Same flow → same nexthop**, because reordering a flow across paths looks like loss to TCP (dup-ACKs → fast-retransmit → window cut), not because packets would be lost.
 - **Hash policy**: 0 (L3 — kernel default), 1 (L4, opt-in for better flow spread), 2 (inner L3 for tunnels), 3 (custom fields via `fib_multipath_hash_fields`).
 - **Plain ECMP shifts the weighted hash-space boundaries when the nexthop set changes**, moving the flows whose hash falls in a shifted range. The **nexthop object model** (`ip nexthop add id …`, referenced by `nhid`) lets a next-hop be a standalone/grouped object — the home for the **resilient** bucket table, which uses a *fixed* `hash % num_buckets` modulus (independent of nexthop count) and re-maps only the buckets of a removed nexthop. Use it for stable production gateways.
 
