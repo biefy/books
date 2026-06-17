@@ -31,19 +31,20 @@ digraph ip_proto_demux {
     local -> l3tab [style=bold, color="#2563eb", label="inet_protos[N]-\>handler"];
 
     // The handlers
-    ipip   [shape=box, style="filled", fillcolor="#dcfce7", label="ipip_rcv\n(IP-in-IP, net/ipv4/ipip.c)"];
+    tunnel4 [shape=box, style="filled", fillcolor="#e9d5ff", label="tunnel4_rcv / tunnel64_rcv\n(net/ipv4/tunnel4.c owns slots 4 & 41)\nwalks xfrm_tunnel handler list"];
+    ipip   [shape=box, style="filled", fillcolor="#dcfce7", label="ipip_rcv / 6in4\n(joins list via xfrm4_tunnel_register)"];
     tcp    [shape=box, style="filled", fillcolor="#dcfce7", label="tcp_v4_rcv"];
     udp    [shape=box, style="filled", fillcolor="#fde68a", label="udp_rcv\n(VXLAN/GENEVE ride here:\nsecond demux at encap_rcv)"];
-    sixin4 [shape=box, style="filled", fillcolor="#dcfce7", label="IPv6-in-IPv4 (6in4)"];
-    gre    [shape=box, style="filled", fillcolor="#dcfce7", label="gre_rcv\n(then sub-dispatch by\nGRE-header version: v0 / v1)"];
+    gre    [shape=box, style="filled", fillcolor="#dcfce7", label="gre_rcv\n(owns slot 47 directly, then\nsub-dispatch by GRE version: v0 / v1)"];
 
-    l3tab:p4  -> ipip   [style=bold, color="#16a34a"];
+    l3tab:p4  -> tunnel4 [style=bold, color="#16a34a"];
+    l3tab:p41 -> tunnel4 [color="#16a34a"];
+    tunnel4   -> ipip    [style=bold, color="#7c3aed", label="2nd hop"];
     l3tab:p6  -> tcp    [color="#16a34a"];
     l3tab:p17 -> udp    [style=bold, color="#d97706"];
-    l3tab:p41 -> sixin4 [color="#16a34a"];
     l3tab:p47 -> gre    [style=bold, color="#16a34a"];
 
     note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
-          label="IPIP and GRE each OWN a slot in inet_protos[] and branch right here.\lUDP-based tunnels (VXLAN, GENEVE) do NOT — they ride slot 17 (UDP)\land are demuxed a second time, one layer deeper, at the UDP socket.\l"];
+          label="Only GRE OWNS its inet_protos[] slot directly (47).\lSlots 4 & 41 are owned by tunnel4.c's tunnel4_rcv/tunnel64_rcv, which\ldispatch to ipip_rcv / 6in4 via a 2nd-level xfrm_tunnel list.\lUDP-based tunnels (VXLAN, GENEVE) get NO slot — they ride slot 17 (UDP)\land are demuxed a second time, one layer deeper, at the UDP socket.\l"];
     udp -> note [style=invis];
 }
