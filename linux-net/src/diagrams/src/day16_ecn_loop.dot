@@ -1,0 +1,31 @@
+digraph ecn_loop {
+    rankdir=LR;
+    labelloc=t;
+    label="The ECN signaling loop: congestion signaled without a drop";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    sender   [shape=box, style="filled", fillcolor="#dbeafe", label="SENDER"];
+    swtch    [shape=box, style="filled", fillcolor="#e9d5ff", label="congested\nSWITCH / ROUTER\n(queue building)"];
+    receiver [shape=box, style="filled", fillcolor="#dbeafe", label="RECEIVER"];
+
+    // forward path (IP header bits)
+    sender -> swtch [color="#d97706", style=bold,
+        label="1. IP packet marked ECT\n(ECN-Capable Transport)\nlow 2 bits of TOS = 2"];
+    swtch -> receiver [color="#dc2626", style=bold,
+        label="2. switch rewrites ECT -> CE\nINET_ECN_CE = 3\n(no drop!)"];
+
+    // return path (TCP header flags)
+    receiver -> sender [color="#16a34a", style=bold, constraint=false,
+        label="3. ACK with ECE flag set\n(TCP header, TCPHDR_ECE)"];
+    sender -> receiver [color="#2563eb", style=dashed, constraint=false,
+        label="4. sender cuts cwnd,\nreplies with CWR flag\n(TCP header, TCPHDR_CWR)"];
+
+    ip_note [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+        label="IP HEADER carries the mark:\lECT / CE = low 2 bits of the TOS/DSCP byte\l(see inet_ecn.h: ECT_0=2, CE=3).\l"];
+    tcp_note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+        label="TCP HEADER carries the echo + ack:\lECE (receiver -> sender) closes the loop;\lCWR (sender -> receiver) confirms the cut.\l"];
+
+    swtch -> ip_note [style=invis];
+    receiver -> tcp_note [style=invis];
+}

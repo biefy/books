@@ -1,0 +1,41 @@
+digraph inflight_accounting {
+    rankdir=TB;
+    labelloc=t;
+    label="packets_in_flight = packets_out - (sacked_out + lost_out) + retrans_out";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The whole retransmit queue as one stacked bar.
+    bar [shape=record, style="filled", fontsize=10,
+         label="{ packets_out  (whole retransmit queue) | {<s> sacked_out\n(green: received,\npast a hole) | <l> lost_out\n(gray: presumed\nlost) | <o> remainder\n(blue: genuinely\noutstanding) } }"];
+
+    // Color-key boxes (records can't color individual cells in dot)
+    key_s [shape=box, style="filled", fillcolor="#dcfce7", fontsize=9,
+           label="sacked_out\nLEFT the network\n(received) -> subtract"];
+    key_l [shape=box, style="filled", fillcolor="#e5e7eb", fontsize=9,
+           label="lost_out\nLEFT the network\n(gone) -> subtract"];
+    key_o [shape=box, style="filled", fillcolor="#dbeafe", fontsize=9,
+           label="remainder\nstill on the wire,\nstill owed"];
+
+    key_s -> bar:s [style=dashed, color="#16a34a", arrowhead=none];
+    key_l -> bar:l [style=dashed, color="#6b7280", arrowhead=none];
+    key_o -> bar:o [style=dashed, color="#2563eb", arrowhead=none];
+
+    // Add-back arrow for retrans_out
+    retx [shape=box, style="filled,rounded", fillcolor="#fef3c7", fontsize=10,
+          label="+ retrans_out\nresent segments are\nreally back on the wire"];
+    retx -> bar:o [color="#d97706", style=bold, arrowhead=vee, label="add back"];
+
+    // Resolving bracket -> single number
+    pif [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=11,
+         label="packets_in_flight\nTCP's estimate of bytes\ncurrently in the network"];
+    bar -> pif [color="#7c3aed", style=bold, arrowhead=vee, label="resolve"];
+
+    // Compare to cwnd
+    cwnd [shape=box, style="filled,rounded", fillcolor="#fee2e2", fontsize=11,
+          label="cwnd\ncongestion window bound.\nRTO marks whole window lost\n-> in_flight ~ 0\n-> cwnd = in_flight + 1 ~ 1 MSS"];
+    pif -> cwnd [color="#dc2626", style=dashed, arrowhead=vee, label="compared to"];
+
+    { rank=same; key_s; key_l; key_o; }
+    { rank=same; pif; retx; }
+}

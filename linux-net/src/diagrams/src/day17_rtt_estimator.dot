@@ -1,0 +1,40 @@
+digraph rtt_estimator {
+    rankdir=LR;
+    labelloc=t;
+    label="RTO = srtt + 4*rttvar: a smoothed mean plus a jitter cushion";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The vertical RTT "axis" as a stacked band, top = highest RTT.
+    band [shape=record, style="filled", fontsize=10,
+          label="{ <rto> ===== RTO line =====\n(top of band: timer fires here) | <hi> +4*rttvar cushion\n(jitter headroom) | <srtt> ---- srtt (smoothed mean) ----\nEWMA: 7/8*srtt + 1/8*sample | <lo> -4*rttvar cushion }"];
+
+    // Raw noisy samples feeding the EWMA
+    samples [shape=box, style="filled,rounded", fillcolor="#fef3c7", fontsize=10,
+             label="raw RTT samples (noisy)\n8ms, 40ms, 11ms, 9ms ...\none delayed ACK spikes high"];
+    samples -> band:srtt [color="#d97706", style=bold, arrowhead=vee,
+                          label="smoothed into srtt"];
+
+    // rttvar sizes the band
+    var [shape=box, style="filled,rounded", fillcolor="#dbeafe", fontsize=10,
+         label="rttvar (mean deviation, smoothed)\nstable LAN: tiny band\njittery/wireless: wide band"];
+    var -> band:hi [color="#2563eb", style=dashed, arrowhead=vee, label="sizes cushion"];
+    var -> band:lo [color="#2563eb", style=dashed, arrowhead=vee];
+
+    // Event 1: a late-but-not-lost ACK lands inside the band
+    late [shape=box, style="filled,rounded", fillcolor="#dcfce7", fontsize=10,
+          label="late ACK lands INSIDE band\n-> below RTO line\n-> NO retransmit"];
+    band:hi -> late [color="#16a34a", style=bold, arrowhead=vee];
+
+    // Event 2: truly lost; timer crosses RTO line
+    lost [shape=box, style="filled,rounded", fillcolor="#fee2e2", fontsize=10,
+          label="truly lost segment\ntimer crosses ABOVE RTO line\n-> timer FIRES, retransmit"];
+    band:rto -> lost [color="#dc2626", style=bold, arrowhead=vee];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="Kernel form: RTO = (srtt_us >> 3) + rttvar_us\lsrtt stored x8 (the >> 3); the x4 weight is\lbaked into rttvar_us. Clamped to [200ms, 120s].\l"];
+    band:lo -> note [style=invis];
+
+    { rank=same; samples; var; }
+    { rank=same; late; lost; }
+}

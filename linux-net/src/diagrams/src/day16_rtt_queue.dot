@@ -1,0 +1,47 @@
+digraph rtt_queue {
+    rankdir=BT;
+    labelloc=t;
+    label="srtt rises above the flat min-RTT baseline as a standing queue builds";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=9, shape=box, style="filled", width=1.3, height=0.34];
+
+    // Fixed propagation-delay baseline (amber) - same for every sample
+    b0 [label="propagation\n(min_rtt)", fillcolor="#fef3c7"];
+    b1 [label="propagation\n(min_rtt)", fillcolor="#fef3c7"];
+    b2 [label="propagation\n(min_rtt)", fillcolor="#fef3c7"];
+    b3 [label="propagation\n(min_rtt)", fillcolor="#fef3c7"];
+    { rank=same; b0; b1; b2; b3; }
+    b0 -> b1 -> b2 -> b3 [style=invis];
+
+    // Growing standing queue (green) stacked on top of each baseline
+    q1a [label="queue", fillcolor="#dcfce7"];
+    q2a [label="queue", fillcolor="#dcfce7"];
+    q2b [label="queue", fillcolor="#dcfce7"];
+    q3a [label="queue", fillcolor="#dcfce7"];
+    q3b [label="queue", fillcolor="#dcfce7"];
+    q3c [label="queue", fillcolor="#dcfce7"];
+
+    b1 -> q1a [arrowhead=none];
+    b2 -> q2a -> q2b [arrowhead=none];
+    b3 -> q3a -> q3b -> q3c [arrowhead=none];
+
+    // srtt caps = top of each column (baseline + queue)
+    node [shape=plaintext, style="", fillcolor=none, fontsize=9];
+    s0 [label="srtt ≈ min_rtt"];
+    s1 [label="srtt"];
+    s2 [label="srtt"];
+    s3 [label="srtt"];
+    b0  -> s0 [arrowhead=none, color="#94a3b8"];
+    q1a -> s1 [arrowhead=none, color="#94a3b8"];
+    q2b -> s2 [arrowhead=none, color="#94a3b8"];
+    q3c -> s3 [arrowhead=none, color="#94a3b8"];
+
+    // Time axis label under the baselines
+    t [shape=plaintext, fontname="Helvetica", fontsize=10,
+       label="time / load increasing  ->"];
+    t -> b0 [style=invis];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontname="Helvetica", fontsize=9,
+          label="gap (srtt - min_rtt) = standing queue\lBBR watches this gap; it grows while bandwidth stays flat.\l"];
+    s3 -> note [style=invis];
+}

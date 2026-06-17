@@ -1,0 +1,28 @@
+digraph delayed_ack {
+    rankdir=TB;
+    labelloc=t;
+    label="Delayed ACK: wait a little, then piggyback or send a pure ACK";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    start [shape=box, style="filled", fillcolor="#fef3c7",
+           label="data segment arrives"];
+    timer [shape=box, style="filled", fillcolor="#dbeafe",
+           label="start delayed-ACK timer\ntypically ~40 ms (TCP_DELACK_MIN)\ncapped at 200 ms (TCP_DELACK_MAX)\nin ping-pong, bounded by RTT"];
+
+    piggy [shape=box, style="filled", fillcolor="#dcfce7",
+           label="reply payload OR 2nd segment\nbefore timer fires\n-> ACK rides along (piggyback)\nNO extra packet"];
+    pure  [shape=box, style="filled", fillcolor="#dbeafe",
+           label="timer fires, nothing to ride on\n-> send a pure ACK\n(the up-to-40ms dead time)"];
+    quick [shape=box, style="filled", fillcolor="#e9d5ff",
+           label="TCP_QUICKACK / quickack mode\n-> ACK immediately, no wait"];
+
+    start -> timer;
+    timer -> piggy [label="data to send", fontname="Helvetica", fontsize=9, color="#16a34a"];
+    timer -> pure  [label="timer expires", fontname="Helvetica", fontsize=9, color="#2563eb"];
+    timer -> quick [label="quickack set", fontname="Helvetica", fontsize=9, color="#7c3aed", style=dashed];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="In strict request/response (ping-pong) there's often\lno return payload and no 2nd segment -- so the wait\lis pure dead time on the critical path. QUICKACK\lcollapses it; bulk transfer leaves delaying ON.\l"];
+    pure -> note [style=invis];
+}

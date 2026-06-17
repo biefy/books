@@ -1,0 +1,84 @@
+digraph handshake_ladder {
+    labelloc=t;
+    label="TCP open (3 packets) and close (4 packets): state ladders";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.35;
+
+    // ---------- OPEN ladder ----------
+    subgraph cluster_open {
+        label="OPEN — three-way handshake";
+        fontname="Helvetica"; fontsize=12; style="rounded"; color="#2563eb";
+
+        node [shape=box, style="filled", fillcolor="#dbeafe", width=1.4];
+
+        // client timeline (left), server timeline (right)
+        oc0 [label="CLIENT\nCLOSED"];
+        oc1 [label="SYN_SENT"];
+        oc2 [label="ESTABLISHED"];
+
+        os0 [label="SERVER\nLISTEN"];
+        os1 [label="SYN_RECV"];
+        os2 [label="ESTABLISHED"];
+
+        oc0 -> oc1 -> oc2 [color="#94a3b8", arrowhead=none, style=bold];
+        os0 -> os1 -> os2 [color="#94a3b8", arrowhead=none, style=bold];
+
+        // packets cross between the timelines
+        oc0 -> os0 [style=invis];
+        oc1 -> os1 [label="1. SYN  seq=x", color="#7c3aed", style=bold,
+                    fontcolor="#7c3aed", constraint=false];
+        os1 -> oc1 [label="2. SYN-ACK  seq=y, ack=x+1", color="#16a34a",
+                    style=bold, fontcolor="#16a34a", constraint=false];
+        oc2 -> os2 [label="3. ACK  ack=y+1", color="#7c3aed", style=bold,
+                    fontcolor="#7c3aed", constraint=false];
+
+        { rank=same; oc0; os0; }
+        { rank=same; oc1; os1; }
+        { rank=same; oc2; os2; }
+    }
+
+    // ---------- CLOSE ladder ----------
+    subgraph cluster_close {
+        label="CLOSE — four-way (each direction closes independently)";
+        fontname="Helvetica"; fontsize=12; style="rounded"; color="#d97706";
+
+        node [shape=box, style="filled", fillcolor="#fef3c7", width=1.5];
+
+        // active closer (left), passive closer (right)
+        ca0 [label="ACTIVE CLOSER\nESTABLISHED"];
+        ca1 [label="FIN_WAIT_1"];
+        ca2 [label="FIN_WAIT_2"];
+        ca3 [style="filled", fillcolor="#fee2e2", label="TIME_WAIT\n(2*MSL ~60s)"];
+
+        cp0 [label="PASSIVE CLOSER\nESTABLISHED"];
+        cp1 [label="CLOSE_WAIT"];
+        cp2 [label="LAST_ACK"];
+        cp3 [style="filled", fillcolor="#dcfce7", label="CLOSED"];
+
+        ca0 -> ca1 -> ca2 -> ca3 [color="#94a3b8", arrowhead=none, style=bold];
+        cp0 -> cp1 -> cp2 -> cp3 [color="#94a3b8", arrowhead=none, style=bold];
+
+        ca0 -> cp0 [style=invis];
+        ca1 -> cp1 [label="1. FIN", color="#7c3aed", style=bold,
+                    fontcolor="#7c3aed", constraint=false];
+        cp1 -> ca2 [label="2. ACK", color="#16a34a", style=bold,
+                    fontcolor="#16a34a", constraint=false];
+        cp2 -> ca3 [label="3. FIN  (app called close)", color="#d97706",
+                    style=bold, fontcolor="#d97706", constraint=false];
+        ca3 -> cp3 [label="4. ACK", color="#7c3aed", style=bold,
+                    fontcolor="#7c3aed", constraint=false];
+
+        { rank=same; ca0; cp0; }
+        { rank=same; ca1; cp1; }
+        { rank=same; ca2; cp2; }
+        { rank=same; ca3; cp3; }
+    }
+
+    // keep open above close
+    oc2 -> ca0 [style=invis];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="SYN and FIN each consume one sequence number,\lso ack=x+1 / ack=y+1 — and a lost FIN can be retransmitted.\lTIME_WAIT stays alive to re-ACK a retransmitted FIN.\l"];
+    ca3 -> note [style=invis];
+}

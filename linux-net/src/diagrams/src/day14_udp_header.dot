@@ -1,0 +1,40 @@
+digraph udp_header {
+    rankdir=TB;
+    labelloc=t;
+    label="The 8-byte UDP header + the IPv4 pseudo-header the checksum folds over";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The UDP header: a 2-column byte grid (each row = 4 bytes = two 16-bit fields)
+    subgraph cluster_udp {
+        label="struct udphdr — 8 bytes on the wire";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        udp [shape=record, style="filled", fillcolor="#dbeafe",
+             label="{ {source (16b)|dest (16b)} | {len (16b)|check (16b)} }"];
+    }
+
+    // The pseudo-header: not on the wire, prepended only for the checksum
+    subgraph cluster_pseudo {
+        label="IPv4 pseudo-header — NOT on the wire, only summed";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+        pseudo [shape=record, style="filled", fillcolor="#dcfce7",
+                label="{ src IP (32b) | dst IP (32b) | { zero (8b) | proto=17 (8b) | UDP len (16b) } }"];
+    }
+
+    // The payload
+    payload [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+             label="UDP payload (variable)"];
+
+    // Coverage brace: what csum_tcpudp_magic folds over
+    cover [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+           label="checksum = ones-complement sum over:\l  (1) pseudo-header\l  (2) UDP header (check taken as 0)\l  (3) payload\lcsum_tcpudp_magic(saddr, daddr, len, IPPROTO_UDP, udp_csum(skb))\l"];
+
+    skip [shape=box, style="filled,rounded", fillcolor="#fee2e2", fontsize=9,
+          label="check == 0 on IPv4 receive\n=> skip verify\n(real zero is rewritten to 0xFFFF)"];
+
+    pseudo -> udp [color="#16a34a", arrowhead=none, style=dashed, label="prepended for sum"];
+    udp -> payload [color="#94a3b8", arrowhead=none];
+
+    pseudo -> cover [style=invis];
+    udp -> skip [color="#dc2626", style=dashed, label="check field"];
+}

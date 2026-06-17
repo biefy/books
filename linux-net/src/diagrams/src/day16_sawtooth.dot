@@ -1,0 +1,37 @@
+digraph sawtooth {
+    rankdir=LR;
+    labelloc=t;
+    label="The cwnd sawtooth: slow start, congestion avoidance, loss-driven cut";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // axes
+    yaxis [shape=plaintext, label="cwnd\n(segments)"];
+    xaxis [shape=plaintext, label="time (RTTs) ->"];
+
+    // The phases described as a left-to-right pipeline of labelled stages.
+    subgraph cluster_curve {
+        label="one cycle of the Reno sawtooth";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", fillcolor="#dbeafe"];
+
+        ss   [label="slow start\ncwnd doubles every RTT\n(exponential ramp)\nuntil cwnd >= ssthresh"];
+        ca   [label="congestion avoidance\n+1 segment per RTT\n(linear climb)", fillcolor="#dcfce7"];
+        loss [label="LOSS\n(packet dropped)", shape=box, style="filled", fillcolor="#fee2e2"];
+        cut  [label="multiplicative decrease\nssthresh = cwnd/2\ncwnd cut", fillcolor="#fef3c7"];
+        repeat [label="climb again\n(next sawtooth)", fillcolor="#dbeafe"];
+
+        ss -> ca [label="cross ssthresh"];
+        ca -> loss [label="probe too far"];
+        loss -> cut;
+        cut -> repeat [label="resume from ssthresh"];
+    }
+
+    yaxis -> ss [style=invis];
+    xaxis -> repeat [style=invis];
+
+    // CUBIC contrast note
+    cubic [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+           label="CUBIC keeps the same AIMD skeleton but replaces the\lstraight linear climb with a cubic curve: aggressive right\lafter the cut, plateauing near the previous max, then\lprobing upward. Reno = straight line, CUBIC = curve.\l"];
+    ca -> cubic [style=dashed, color="#7c3aed", constraint=false, label="vs"];
+}
