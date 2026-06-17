@@ -163,10 +163,7 @@ For an incoming packet, `ip_rcv_finish` (via `ip_rcv_finish_core`) first checks 
 2. Calls `fib_table_lookup` (`net/ipv4/fib_trie.c:1420`) on that table — the LC-trie walk (Background 3).
 3. Builds an `rtable` from the result, attaches it to the skb via `skb_dst_set` — loading `rt->dst.input` per Background 2.
 
-The skb's `dst->input` function pointer then dispatches the next step via `dst_input`:
-- `ip_local_deliver` if the packet is for us.
-- `ip_forward` if it's transit.
-- `ip_error` for unreachable destinations (route type `RTN_UNREACHABLE`); it rate-limits and sends an ICMP *Destination Unreachable*. (TTL-exceeded is *not* dispatched here — it is detected inside `ip_forward`, which then emits ICMP *Time Exceeded*.)
+The skb's `dst->input` function pointer then dispatches the next step via `dst_input`, jumping to whichever handler the lookup loaded (`ip_local_deliver` / `ip_forward` / `ip_error` — Background 2). The one new detail worth pinning down here: `ip_error` handles route type `RTN_UNREACHABLE` (it rate-limits and sends ICMP *Destination Unreachable*), whereas TTL-exceeded is *not* dispatched here — it is detected inside `ip_forward`, which then emits ICMP *Time Exceeded*.
 
 ## Anatomy of a lookup
 

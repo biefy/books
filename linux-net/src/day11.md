@@ -1,6 +1,6 @@
 # Day 11 — The bridge subsystem
 
-> **Today's mission:** create a software Linux bridge, attach two interfaces to it, and watch the FDB learn MACs as traffic flows. Along the way, learn the four mechanisms the bridge is built on — the `rx_handler` hook that hijacks a NIC's frames, why L2 loops are catastrophic (and what spanning tree does about it), how the forwarding database stays lock-free for readers, and how `br_netfilter` drags bridged frames through iptables. See how VLAN-aware bridges enable real switch behavior. Total time: ~110 minutes.
+> **Today's mission:** create a software Linux bridge, attach two interfaces to it, and watch the FDB learn MACs as traffic flows. Along the way you'll learn the four mechanisms the bridge is built on — the `rx_handler` hook that hijacks a NIC's frames, the RCU-protected hash table that keeps the FDB lock-free for readers, why L2 loops are catastrophic (and what spanning tree does about it), and how `br_netfilter` drags bridged frames through iptables — plus how VLAN-aware bridges deliver real switch behavior. Total time: ~110 minutes.
 
 ## What a Linux bridge is, and why you have one
 
@@ -14,7 +14,7 @@ You're using bridges constantly even if you've never explicitly created one:
 
 The bridge is the fastest L2-forwarding plane in the kernel — much faster than the IP routing path because, switching purely by destination MAC, it skips everything L3 does: no L3/FIB lookup, no TTL decrement and header-checksum rewrite, and (by default — see `br_netfilter`) no netfilter traversal or decapsulation.
 
-This chapter leans on four pieces of machinery that no earlier day taught you: the **`rx_handler`** hook that diverts a slave NIC's frames into bridge code; the **broadcast-storm / spanning-tree** problem that explains why switches need STP at all; the **RCU-protected `rhashtable`** that backs the forwarding database; and the **netfilter chains** that `br_netfilter` exposes. We'll teach each one — intuition first, then the concrete v7.1 struct or function — right where the bridge depends on it.
+This chapter leans on four pieces of machinery that no earlier day taught you: the **`rx_handler`** hook that diverts a slave NIC's frames into bridge code; the **RCU-protected `rhashtable`** that backs the forwarding database; the **broadcast-storm / spanning-tree** problem that explains why switches need STP at all; and the **netfilter chains** that `br_netfilter` exposes. We'll teach each one — intuition first, then the concrete v7.1 struct or function — right where the bridge depends on it.
 
 > Two things from earlier days are load-bearing today and will **not** be re-taught:
 > - **The RX path.** Recall from Day 2 — the NIC's NAPI poll builds an skb, then `__netif_receive_skb_core` walks the `ptype_base` hash to find the L3 handler (`ip_rcv` for IPv4). Today's whole story is about a hook that fires *before* that demux.
@@ -88,7 +88,7 @@ So the picture is: a frame on a slave NIC reaches `__netif_receive_skb_core`, wh
 For every frame that lands on a bridge port, the kernel runs the same compact decision tree:
 
 1. **Drop or forward control frames.** STP BPDUs (Bridge Protocol Data Units — Spanning Tree control frames, covered in Background 3; destined to `01:80:c2:00:00:00`) get special handling; non-bridge multicast may be flooded or snooped.
-2. **Learn the source.** Insert/refresh `(src MAC, vid, port)` in the FDB via `br_fdb_update` (`net/bridge/br_fdb.c:972`). Aging timers tick.
+2. **Learn the source.** Insert/refresh `(src MAC, vid, port)` in the FDB — the forwarding database, whose internals are Background 2 just below — via `br_fdb_update` (`net/bridge/br_fdb.c:972`). Aging timers tick.
 3. **Look up the destination.** `br_fdb_find_rcu` (`net/bridge/br_fdb.c:263`) walks the hash table.
 4. **Decide:**
    - **Hit, same port** → drop (don't loop the frame back to where it came from).
@@ -352,7 +352,7 @@ sudo bridge fdb flush dev v1p master
 sudo ip netns exec ns1 ping -c 5 10.0.0.2
 ```
 
-`br_fdb_update` fires on **every** received frame on a learning port, so you'll see one `learn` line per packet per source port (a 5-packet ping prints ~5 lines for `v1p`) — not once per MAC. For an already-known source each call refreshes the entry's `updated` timestamp (the write-heavy, cache-line-isolated field from Background 2) lock-free via `WRITE_ONCE()`, and that continuous refresh is exactly how an active entry avoids aging out. (`vid=0` appears here because `vlan_filtering` is still off; it becomes `100` only after you enable filtering below.) The probe auto-exits after 10 s.
+`br_fdb_update` fires on **every** received frame on a learning port, so you'll see one `learn` line per packet per source port (a 5-packet ping prints ~5 lines for `v1p`) — not once per MAC. For an already-known source each call refreshes the entry's `updated` timestamp (Background 2) lock-free via `WRITE_ONCE()` — which is how an active entry avoids aging out. (`vid=0` appears here because `vlan_filtering` is still off; it becomes `100` only after you enable filtering below.) The probe auto-exits after 10 s.
 
 Then turn on VLAN filtering:
 ```bash
