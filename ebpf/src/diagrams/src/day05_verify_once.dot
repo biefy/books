@@ -1,0 +1,46 @@
+digraph verify_once {
+    rankdir=TB;
+    labelloc=t;
+    label="Inline unroll verifies N copies; bpf_loop verifies the callback ONCE";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    subgraph cluster_inline {
+        label="inline  for (i=0; i<10000; i++)";
+        fontname="Helvetica"; fontsize=11;
+        style="filled"; fillcolor="#fef2f2"; color="#dc2626";
+
+        c0 [shape=box, style="filled", fillcolor="#dbeafe", label="copy 0  : body"];
+        c1 [shape=box, style="filled", fillcolor="#dbeafe", label="copy 1  : body"];
+        c2 [shape=box, style="filled", fillcolor="#dbeafe", label="copy 2  : body"];
+        cd [shape=box, style="filled", fillcolor="#fee2e2", label="... 9997 more copies ..."];
+        cN [shape=box, style="filled", fillcolor="#dbeafe", label="copy 9999  : body"];
+        c0 -> c1 -> c2 -> cd -> cN [color="#dc2626"];
+
+        inote [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+            label="verifier cost scales with N\linsns processed grows non-linearly\l-> 1M budget / 8192 jump-seq cap\l"];
+        cN -> inote [style=invis];
+    }
+
+    subgraph cluster_loop {
+        label="bpf_loop(10000, cb, &c, 0)";
+        fontname="Helvetica"; fontsize=11;
+        style="filled"; fillcolor="#f0fdf4"; color="#16a34a";
+
+        stack [shape=record, style="filled", fillcolor="#fef3c7",
+            label="stack frame (fp)|struct cb_ctx c = \{ .s = s \}|&c  =  ARG_PTR_TO_STACK_OR_NULL"];
+
+        cb [shape=box, style="filled", fillcolor="#dbeafe",
+            label="ONE callback walk  (ARG_PTR_TO_FUNC)\lcb(i, ctx)  with i = scalar [0, nr_loops)\lset_loop_callback_state (verifier.c:9661)\lR0 must be in [0, 1] at return\l"];
+
+        kloop [shape=box, style="filled", fillcolor="#dcfce7",
+            label="runtime kernel for-loop  (bpf_iter.c:743)\lfor (i=0; i<nr_loops; i++)\l  ret = callback(i, ctx, 0,0,0)\l  if (ret) return i+1\l"];
+
+        stack -> cb [label="ctx arg = &c", color="#7c3aed", fontsize=9, fontname="Helvetica"];
+        cb -> kloop [label="runtime x N  (not re-verified)", style=dashed, color="#16a34a", fontsize=9, fontname="Helvetica"];
+
+        lnote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+            label="verifier cost independent of N\labout 24 insns on a 7.1 kernel\l"];
+        kloop -> lnote [style=invis];
+    }
+}

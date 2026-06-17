@@ -1,0 +1,45 @@
+digraph trampoline_abi {
+    rankdir=LR;
+    labelloc=t;
+    label="The trampoline bridges two incompatible calling conventions";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.5; ranksep=0.9;
+
+    // Left: SysV native ABI side
+    subgraph cluster_native {
+        label="System V ABI  (how filename_unlinkat is called)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        regs [shape=record, style="filled", fillcolor="#dbeafe",
+              label="native argument registers|rdi = dfd|rsi = name|rdx, rcx, ... (unused here)"];
+    }
+
+    // Middle: the trampoline spilling into ctx[]
+    subgraph cluster_tramp {
+        label="generated trampoline";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#7c3aed";
+        spill [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+               label="SPILL native regs\ninto a u64 ctx[] on the stack"];
+        ctx [shape=record, style="filled", fillcolor="#fef3c7",
+             label="u64 ctx[]|ctx[0] = rdi  (dfd)|ctx[1] = rsi  (name)"];
+        spill -> ctx;
+    }
+
+    // Right: BPF side
+    subgraph cluster_bpf {
+        label="BPF calling convention";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+        r1 [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+            label="R1  ->  ctx\n(the one pointer every\nBPF program receives)"];
+        prog [shape=record, style="filled", fillcolor="#dcfce7",
+              label="BPF_PROG(on_unlink, ...)|casts ctx[0] to int dfd|casts ctx[1] to struct filename *name"];
+        r1 -> prog;
+    }
+
+    regs -> spill [label="ABI mismatch", color="#dc2626", style=bold, fontname="Helvetica", fontsize=9];
+    ctx -> r1 [label="R1 points at array", color="#7c3aed", style=bold, fontname="Helvetica", fontsize=9];
+
+    btf [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+         label="BTF tells fentry the arg types,\lso the trampoline knows how many\lslots to spill and BPF_PROG knows\lhow to cast each one.\l"];
+    prog -> btf [style=invis];
+}

@@ -1,0 +1,30 @@
+digraph cfg_backedge {
+    rankdir=TB;
+    labelloc=t;
+    label="bpf_check_cfg: the DFS finds the loop's back-edge before the main walk";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    subgraph cluster_cfg {
+        label="control-flow graph (instructions = nodes, jumps = edges)";
+        fontname="Helvetica"; fontsize=11;
+        style="filled"; fillcolor="#f8fafc"; color="#94a3b8";
+
+        i0 [shape=box, style="filled", fillcolor="#dbeafe", label="insn 0\li = 0"];
+        i1 [shape=box, style="filled", fillcolor="#dbeafe", label="insn 1\lif (i \>= n) goto exit"];
+        i2 [shape=box, style="filled", fillcolor="#fef3c7", label="insn 2\l*s += ..."];
+        i3 [shape=box, style="filled", fillcolor="#fef3c7", label="insn 3\li++"];
+        i4 [shape=box, style="filled", fillcolor="#dcfce7", label="insn 4\lexit"];
+
+        i0 -> i1 [color="#475569"];
+        i1 -> i2 [label="fall-through", color="#475569", fontsize=9];
+        i2 -> i3 [color="#475569"];
+        i3 -> i1 [label="BACK-EDGE\ljump to already-entered insn", color="#dc2626", style=bold, fontname="Helvetica", fontsize=9, constraint=false];
+        i1 -> i4 [label="i \>= n", color="#475569", fontsize=9];
+    }
+
+    ceilings [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+        label="THREE CEILINGS  ->  THREE MESSAGES\l\l1. \"back-edge from insn N to M\"\l   CFG pass, no provable bound\l   cfg.c:138\l\l2. \"BPF program is too large.\l   Processed N insn\"\l   BPF_COMPLEXITY_LIMIT_INSNS = 1000000\l   bpf.h:2261 / verifier.c:17705\l\l3. \"The sequence of N jumps\l   is too complex.\"\l   BPF_COMPLEXITY_LIMIT_JMP_SEQ = 8192\l   verifier.c:195 / verifier.c:1733\l   (branchy loops hit this FIRST)\l"];
+
+    i4 -> ceilings [style=invis];
+}

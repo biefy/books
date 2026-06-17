@@ -1,0 +1,45 @@
+digraph percpu {
+    rankdir=TB;
+    labelloc=t;
+    label="Per-CPU hash: no shared slot to race over; pay for it at read-out";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.5; ranksep=0.9;
+
+    key [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+         label="one key (PID 14392)"];
+
+    // Per-CPU value cells
+    subgraph cluster_cells {
+        label="one independent value copy per logical CPU";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#7c3aed";
+        c0 [shape=box, style="filled", fillcolor="#fef3c7", label="CPU0 copy\nval = 31"];
+        c1 [shape=box, style="filled", fillcolor="#fef3c7", label="CPU1 copy\nval = 18"];
+        c2 [shape=box, style="filled", fillcolor="#fef3c7", label="CPU2 copy\nval = 27"];
+        c3 [shape=box, style="filled", fillcolor="#fef3c7", label="CPU3 copy\nval = 24"];
+    }
+
+    key -> c0; key -> c1; key -> c2; key -> c3;
+
+    // Lock-free writes label
+    w0 [shape=plaintext, fontname="Helvetica", fontsize=9, fontcolor="#16a34a",
+        label="CPU0 writes\n(no atomic)"];
+    w3 [shape=plaintext, fontname="Helvetica", fontsize=9, fontcolor="#16a34a",
+        label="CPU3 writes\n(no atomic)"];
+    w0 -> c0 [color="#16a34a", style=bold];
+    w3 -> c3 [color="#16a34a", style=bold];
+
+    // Read-out: sum across CPUs
+    total [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+           label="total = 100\n(31+18+27+24)"];
+    c0 -> total [color="#7c3aed"]; c1 -> total [color="#7c3aed"];
+    c2 -> total [color="#7c3aed"]; c3 -> total [color="#7c3aed"];
+
+    sumlbl [shape=plaintext, fontname="Helvetica", fontsize=9,
+            label="userspace lookup copies\nan ARRAY (one entry / CPU),\nthen sums across CPUs"];
+    sumlbl -> total [style=invis];
+
+    note [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+          label="Each CPU touches only its own copy -> no\lshared slot, no atomics, no bucket\lcontention. Cost moves to read-out, and\lvalue size is bounded by PCPU_MIN_UNIT_SIZE.\l"];
+    total -> note [style=invis];
+}
