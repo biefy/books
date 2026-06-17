@@ -1,0 +1,57 @@
+digraph three_rings {
+    rankdir=TB;
+    labelloc=t;
+    label="io_uring: three mmap'd regions shared across the user/kernel boundary";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    compound=true;
+
+    // ---- USERSPACE side ----
+    subgraph cluster_user {
+        label="USERSPACE";
+        fontname="Helvetica"; fontsize=12; style="rounded"; color="#2563eb";
+        u_prod [shape=box, style="filled", fillcolor="#e9d5ff",
+                label="producer: fill SQE,\nbump SQ tail"];
+        u_cons [shape=box, style="filled", fillcolor="#e9d5ff",
+                label="consumer: read CQE,\nbump CQ head"];
+    }
+
+    // ---- SHARED memory regions ----
+    subgraph cluster_shared {
+        label="SHARED MEMORY (mmap'd at fixed offsets — visible to BOTH sides)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+
+        sqring [shape=record, style="filled", fillcolor="#dbeafe",
+                label="{SQ ring  (OFF_SQ_RING 0x0)|{tail (user) | head (kernel)}|index array → SQEs}"];
+        sqes   [shape=record, style="filled", fillcolor="#fef3c7",
+                label="{SQE array  (OFF_SQES 0x10000000)|opcode | fd | buf | len}"];
+        cqring [shape=record, style="filled", fillcolor="#dcfce7",
+                label="{CQ ring  (OFF_CQ_RING 0x8000000)|{tail (kernel) | head (user)}|CQE array: res, flags}"];
+
+        sqring:e -> sqes [color="#94a3b8", label="indexes"];
+    }
+
+    // ---- KERNEL side ----
+    subgraph cluster_kernel {
+        label="KERNEL";
+        fontname="Helvetica"; fontsize=12; style="rounded"; color="#16a34a";
+        k_cons [shape=box, style="filled", fillcolor="#dcfce7",
+                label="consumer: read SQE,\nbump SQ head"];
+        k_prod [shape=box, style="filled", fillcolor="#dcfce7",
+                label="producer: write CQE,\nbump CQ tail"];
+    }
+
+    // SQ flow: user produces, kernel consumes
+    u_prod -> sqring [color="#2563eb", style=bold, label="store SQE\n+ tail++"];
+    sqes  -> k_cons [color="#16a34a", style=bold, label="read op"];
+
+    // CQ flow: kernel produces, user consumes
+    k_prod -> cqring [color="#16a34a", style=bold, label="post CQE\n+ tail++"];
+    cqring -> u_cons [color="#2563eb", style=bold, label="read result\n+ head++"];
+
+    // doorbell syscall (optional under SQPOLL)
+    doorbell [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+              label="io_uring_enter(2)\nthe 'doorbell' syscall:\nannounces new SQEs\nONE per batch"];
+    u_prod -> doorbell [style=dashed, color="#dc2626", arrowhead=none];
+    doorbell -> k_cons [style=dashed, color="#dc2626", label="(skipped under\nIORING_SETUP_SQPOLL —\nkernel thread polls tail)"];
+}

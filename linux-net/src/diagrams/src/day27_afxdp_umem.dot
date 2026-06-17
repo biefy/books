@@ -1,0 +1,48 @@
+digraph afxdp_umem {
+    rankdir=TB;
+    labelloc=t;
+    label="AF_XDP: descriptors move, bytes stay put";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // XDP program (kernel)
+    xdp [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+         label="XDP program (kernel)\nbpf_redirect_map(&xskmap,\n   ctx->rx_queue_index, 0)"];
+
+    subgraph cluster_kernel {
+        label="kernel side";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        fill [shape=box, style="filled", fillcolor="#e9d5ff",
+              label="Fill ring\n(app -> kernel:\nempty frames)"];
+        rx [shape=box, style="filled", fillcolor="#e9d5ff",
+            label="RX ring\n(kernel -> app:\nfilled frames)"];
+        tx [shape=box, style="filled", fillcolor="#e9d5ff",
+            label="TX ring\n(app -> kernel:\ntransmit these)"];
+        comp [shape=box, style="filled", fillcolor="#e9d5ff",
+              label="Completion ring\n(kernel -> app:\nfree again)"];
+    }
+
+    // UMEM straddles the divide
+    umem [shape=record, style="filled", fillcolor="#fef3c7",
+          label="{ UMEM  (shared memory, mapped by BOTH kernel and app) | { frame 0 | frame 1 | frame 2 | frame 3 | frame 4 | ... } }"];
+
+    subgraph cluster_user {
+        label="userspace side";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        app [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+             label="AF_XDP app\nreads frame IN-PLACE\nin the UMEM\n(no skb, no copy)"];
+    }
+
+    xdp -> rx [color="#16a34a", style=bold, label="steer frame\ninto RX ring"];
+    rx -> app [color="#16a34a", style=bold, label="frame index\n(descriptor)"];
+    app -> fill [color="#7c3aed", style=dashed, label="recycle"];
+    app -> tx [color="#2563eb", style=dashed];
+    comp -> app [color="#2563eb", style=dashed];
+
+    umem -> app [style=dashed, color="#d97706", label="payload stays here", constraint=false];
+    umem -> rx [style=invis];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=10,
+          label="Rings carry frame INDICES, never payload.\lZero-copy when the driver supports it:\lthe packet stays in the UMEM; only the descriptor travels.\l"];
+    app -> note [style=invis];
+}

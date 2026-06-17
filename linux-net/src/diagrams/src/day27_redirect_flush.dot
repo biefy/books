@@ -1,0 +1,54 @@
+digraph redirect_flush {
+    rankdir=LR;
+    labelloc=t;
+    label="XDP_REDIRECT: per-poll batching, then one flush";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    subgraph cluster_poll {
+        label="ONE NAPI poll (Day 2 budget) — Phase 1 + Phase 2, per frame";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+
+        // frame 1
+        p1 [shape=box, style="filled", fillcolor="#dbeafe",
+            label="frame 1\nprogram returns XDP_REDIRECT\n(writes target into task-local\nbpf_redirect_info)"];
+        e1 [shape=box, style="filled", fillcolor="#fef3c7",
+            label="driver xdp_do_redirect()\nenqueues frame onto\ntarget bulk queue"];
+        p1 -> e1 [color="#2563eb"];
+
+        // frame 2
+        p2 [shape=box, style="filled", fillcolor="#dbeafe",
+            label="frame 2\nprogram returns XDP_REDIRECT"];
+        e2 [shape=box, style="filled", fillcolor="#fef3c7",
+            label="xdp_do_redirect()\nenqueue"];
+        p2 -> e2 [color="#2563eb"];
+
+        // frame N
+        pN [shape=box, style="filled", fillcolor="#dbeafe",
+            label="frame N\nprogram returns XDP_REDIRECT"];
+        eN [shape=box, style="filled", fillcolor="#fef3c7",
+            label="xdp_do_redirect()\nenqueue"];
+        pN -> eN [color="#2563eb"];
+
+        e1 -> p2 [style=dashed, color="#94a3b8", constraint=false];
+        e2 -> pN [style=dashed, color="#94a3b8", constraint=false, label="...N frames..."];
+    }
+
+    flush [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+           label="xdp_do_flush()\nONCE, at poll end\ndrains ALL bulk queues"];
+
+    e1 -> flush [color="#7c3aed", style=bold];
+    e2 -> flush [color="#7c3aed", style=bold];
+    eN -> flush [color="#7c3aed", style=bold, label="one flush,\nmany frames"];
+
+    dev [shape=box, style="filled", fillcolor="#dcfce7",
+         label="devmap ->\nndo_xdp_xmit\n(batched TX)"];
+    cpu [shape=box, style="filled", fillcolor="#dcfce7",
+         label="cpumap ->\nwake remote\nCPU kthread"];
+    xsk [shape=box, style="filled", fillcolor="#dcfce7",
+         label="xskmap ->\nnotify AF_XDP\nsocket"];
+
+    flush -> dev [color="#16a34a"];
+    flush -> cpu [color="#16a34a"];
+    flush -> xsk [color="#16a34a"];
+}

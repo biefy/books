@@ -1,0 +1,45 @@
+digraph tracepoint_fanout {
+    rankdir=LR;
+    labelloc=t;
+    label="One skb:kfree_skb tracepoint, fanned out to three independent subscribers";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The call site that fires the hook
+    callsite [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+              label="kfree_skb_reason(skb, REASON)\n(drop-path call site)"];
+
+    // The tracepoint itself
+    tp [shape=box, style="filled", fillcolor="#fef3c7",
+        label="skb:kfree_skb tracepoint\n(static key: no-op when off)"];
+
+    // The fixed payload record carried to every listener
+    payload [shape=record, style="filled", fillcolor="#dbeafe",
+             label="{fixed payload record|skbaddr|location|protocol|rx_sk|reason}"];
+
+    callsite -> tp [style=bold, color="#7c3aed", label="fires"];
+    tp -> payload [label="copies"];
+
+    // Three independent subscribers
+    perf [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+          label="perf trace\n(live print each event)"];
+
+    dm [shape=box, style="filled", fillcolor="#dbeafe",
+        label="drop_monitor probe\n(trace_drop_common)"];
+    nl [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+        label="netlink stream"];
+    dw [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+        label="dropwatch\n(aggregate by reason+location)"];
+
+    bpf [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+         label="eBPF program\ntracepoint:skb:kfree_skb\n(in-kernel aggregation)"];
+
+    payload -> perf [color="#16a34a", label="1"];
+    payload -> dm [color="#16a34a", label="2"];
+    dm -> nl -> dw;
+    payload -> bpf [color="#16a34a", label="3"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="reason is a structured enum field, not a log string\lso drops are machine-aggregatable (count by reason).\l"];
+    payload -> note [style=invis];
+}

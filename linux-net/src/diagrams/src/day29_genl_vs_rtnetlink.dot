@@ -1,0 +1,53 @@
+digraph genl_vs_rtnetlink {
+    rankdir=LR;
+    labelloc=t;
+    label="Fixed protocol number (Day 8 rtnetlink) vs. named generic-netlink family";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // Top lane: rtnetlink
+    subgraph cluster_rt {
+        label="Day 8: rtnetlink — fixed, statically-numbered protocol";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        rt_tool [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+                 label="tool (ip / ss / tc)"];
+        rt_sock [shape=box, style="filled", fillcolor="#dbeafe",
+                 label="AF_NETLINK socket\nFIXED protocol = NETLINK_ROUTE"];
+        rt_disp [shape=box, style="filled", fillcolor="#fef3c7",
+                 label="rtnetlink dispatch"];
+        rt_tool -> rt_sock -> rt_disp;
+    }
+
+    // Bottom lane: generic netlink
+    subgraph cluster_gn {
+        label="Generic netlink — named family, dynamic ID resolved at runtime";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        gn_tool [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+                 label="tool (pyynl / devlink)"];
+        nlctrl [shape=box, style="filled", fillcolor="#dcfce7",
+                label="query nlctrl (GENL_ID_CTRL)\nresolve 'psp'/'devlink'/'ethtool'\n-> DYNAMIC family ID"];
+        gn_sock [shape=box, style="filled", fillcolor="#dbeafe",
+                 label="AF_NETLINK socket\nSHARED protocol = NETLINK_GENERIC"];
+        gn_disp [shape=box, style="filled", fillcolor="#fef3c7",
+                 label="genl dispatch ->\nfamily's ops table"];
+        gn_tool -> nlctrl [label="1. resolve name"];
+        nlctrl -> gn_sock [label="2. got ID"];
+        gn_sock -> gn_disp [label="3. talk to family"];
+    }
+
+    // YAML codegen feeding both ends
+    yaml [shape=note, style="filled", fillcolor="#dcfce7",
+          label="YAML spec\l(name + version + ops table)\l"];
+    codegen [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+             label="codegen step"];
+    kfam [shape=box, style="filled", fillcolor="#dbeafe",
+          label="kernel family\nnet/.../netlink_gen.c"];
+    ubind [shape=box, style="filled", fillcolor="#fef3c7",
+           label="userspace binding"];
+
+    yaml -> codegen;
+    codegen -> kfam [label="emits"];
+    codegen -> ubind [label="emits"];
+    ubind -> gn_tool [style=dashed, color="#16a34a", constraint=false];
+    kfam -> gn_disp [style=dashed, color="#16a34a", constraint=false];
+}
