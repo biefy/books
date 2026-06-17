@@ -1,0 +1,38 @@
+digraph kallsyms_resolve {
+    rankdir=TB;
+    labelloc=t;
+    label="Kernel symbolization: nearest-preceding-symbol in /proc/kallsyms";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.5; ranksep=0.7;
+
+    // captured address
+    frame [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+           label="captured return address\nffffffff9a0ea100\n(a few bytes inside vfs_read)"];
+
+    // sorted kallsyms slice as a record
+    subgraph cluster_ks {
+        label="/proc/kallsyms  (sorted numerically by address)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+
+        ks [shape=record, style="filled", fillcolor="#dbeafe",
+            label="{ ffffffff9a0ea0a0  T  rw_verify_area | <hit>ffffffff9a0ea0e0  T  vfs_read | ffffffff9a0ea1c0  T  vfs_write }"];
+    }
+
+    frame -> ks:hit [label="greatest addr <= frame", color="#dc2626", style=bold,
+                     fontname="Helvetica", fontsize=9];
+
+    match [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+           label="selected: vfs_read\n(start <= frame < next symbol)"];
+    ks:hit -> match [color="#16a34a", style=bold];
+
+    // callout about exact match failing
+    exact [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+           label="kallsyms lists symbol START addresses,\lnot ranges. The frame is mid-function,\lso an exact match almost never works.\l"];
+    match -> exact [style=invis];
+
+    // kptr_restrict warning
+    warn [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="kptr_restrict=1 (default): a non-root\lreader sees the address column as\l0000000000000000. Read it as root.\l"];
+    frame -> warn [style=invis];
+}

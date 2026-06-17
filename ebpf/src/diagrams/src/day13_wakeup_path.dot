@@ -1,0 +1,50 @@
+digraph wakeup_path {
+    rankdir=TB;
+    labelloc=t;
+    label="How a sleeping consumer gets woken: default heuristic vs FORCE_WAKEUP";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // ---- Panel 1: the default cons_pos == rec_pos heuristic ----
+    subgraph cluster_default {
+        label="default (flags = 0): wake only if consumer is parked at this exact record";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+
+        d_cons [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+                label="consumer thread\nepoll_wait on rb->waitq\n(parked, 0 CPU)"];
+        d_submit [shape=box, style="filled", fillcolor="#e9d5ff",
+                  label="producer: bpf_ringbuf_submit(rec, 0)\nrec_pos = hdr - rb->data\ncons_pos = consumer_pos & mask"];
+        d_test [shape=diamond, style="filled", fillcolor="#fef3c7",
+                label="cons_pos == rec_pos ?"];
+        d_irq [shape=box, style="filled", fillcolor="#dcfce7",
+               label="irq_work_queue(&rb->work)\n-> bpf_ringbuf_notify\n-> wake_up_all(&rb->waitq)"];
+        d_skip [shape=box, style="filled", fillcolor="#dcfce7",
+                label="consumer is behind, still draining\nNO wakeup (cheap under load)"];
+
+        d_submit -> d_test;
+        d_test -> d_irq [label="yes: must be asleep waiting"];
+        d_test -> d_skip [label="no: busy, a few records back"];
+        d_irq -> d_cons [label="unblocks epoll_wait", color="#2563eb", style=bold];
+    }
+
+    // ---- Panel 2: FORCE_WAKEUP storm ----
+    subgraph cluster_force {
+        label="BPF_RB_FORCE_WAKEUP: irq_work on EVERY submit";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#dc2626";
+
+        f_submit [shape=box, style="filled", fillcolor="#e9d5ff",
+                  label="every submit, regardless of cons_pos:\nirq_work_queue(&rb->work)"];
+        f_storm [shape=box, style="filled", fillcolor="#fee2e2",
+                 label="wake_up_all per event\n= one epoll_wait return per record\nsyscall storm, consumer hammered"];
+        f_cost [shape=box, style="filled", fillcolor="#fee2e2",
+                label="2-5x slower at high rate\ngap widens -> MORE drops"];
+
+        f_submit -> f_storm -> f_cost [color="#dc2626", style=bold];
+    }
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="Wakeup is deferred via irq_work because submit may run in NMI/hard-IRQ\lcontext where calling the scheduler is illegal.\lBPF_RB_NO_WAKEUP (1<<0) never wakes; FORCE_WAKEUP (1<<1) always wakes.\l"];
+
+    d_skip -> f_submit [style=invis];
+    f_cost -> note [style=invis];
+}

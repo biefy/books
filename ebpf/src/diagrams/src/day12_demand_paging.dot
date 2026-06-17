@@ -1,0 +1,46 @@
+digraph demand_paging {
+    rankdir=TB;
+    labelloc=t;
+    label="Demand paging: minor fault (no sleep) vs major fault (deschedule)";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.5; ranksep=0.7;
+
+    // BPF program suspended at the helper call
+    prog [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+          label="sleepable BPF program\nbpf_copy_from_user(dst, sz, upath)"];
+
+    vaddr [shape=box, style="filled", fillcolor="#fef3c7",
+           label="virtual address  upath\n(inside a valid VMA)"];
+
+    mmu [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+         label="MMU / page-table walk\nlook up PTE for upath"];
+
+    decision [shape=diamond, style="filled", fillcolor="#e9d5ff",
+              label="PTE present?", fontname="Helvetica", fontsize=11];
+
+    // Minor-fault path (present)
+    minor [shape=box, style="filled", fillcolor="#dcfce7",
+           label="MINOR FAULT\ndata already in RAM\n(page-cache hit / shared / zero page)\ninstall PTE, re-run instruction"];
+    minor_done [shape=box, style="filled", fillcolor="#dcfce7",
+                label="copy completes in microseconds\nthread NEVER blocks  ->  helper returns 0"];
+
+    // Major-fault path (not present)
+    major [shape=box, style="filled", fillcolor="#fee2e2",
+           label="MAJOR FAULT\npage NOT resident\nhandle_mm_fault -> VM_FAULT_RETRY"];
+    io [shape=box, style="filled", fillcolor="#fee2e2",
+        label="read page from disk / swap  (I/O)"];
+    sleep [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+           label="thread DESCHEDULED (put to sleep)\nBPF program suspended at the helper call\nwoken when I/O completes, then resumes"];
+
+    prog -> vaddr -> mmu -> decision;
+    decision -> minor [label="yes", fontname="Helvetica", fontsize=9, color="#16a34a"];
+    minor -> minor_done;
+    decision -> major [label="no", fontname="Helvetica", fontsize=9, color="#dc2626"];
+    major -> io -> sleep;
+    sleep -> minor_done [label="resume,\ncopy completes", fontname="Helvetica", fontsize=9, style=dashed];
+
+    note [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+          label="\"Valid address\" and \"backed by RAM\" are two\ldifferent questions. Only the major-fault path\lsleeps -- which is exactly why bpf_copy_from_user\lis allowed only in sleepable programs.\l"];
+    minor_done -> note [style=invis];
+}

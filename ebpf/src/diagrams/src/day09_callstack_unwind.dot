@@ -1,0 +1,61 @@
+digraph callstack_unwind {
+    rankdir=TB;
+    labelloc=t;
+    label="Two ways to walk the native stack — both yield the same trace->ip[]";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.45; ranksep=0.55;
+
+    // Left: frame-pointer chain
+    subgraph cluster_fp {
+        label="Frame-pointer unwind  (-fno-omit-frame-pointer)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+
+        rbp [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+             label="%rbp\n(points at current frame)"];
+
+        f1 [shape=record, style="filled", fillcolor="#dbeafe",
+            label="<sav>saved %rbp|ret addr  (leaf)"];
+        f2 [shape=record, style="filled", fillcolor="#dbeafe",
+            label="<sav>saved %rbp|ret addr  (caller)"];
+        f3 [shape=record, style="filled", fillcolor="#dbeafe",
+            label="<sav>saved %rbp|ret addr  (caller's caller)"];
+
+        rbp -> f1:sav [color="#7c3aed", style=bold];
+        f1:sav -> f2:sav [label="follow chain", color="#7c3aed", style=bold,
+                          fontname="Helvetica", fontsize=8];
+        f2:sav -> f3:sav [color="#7c3aed", style=bold];
+
+        fpnote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=8,
+                label="linked list: each saved %rbp\lpoints at the previous pair.\lCosts a register.\l"];
+        f3 -> fpnote [style=invis];
+    }
+
+    // Right: ORC, no frame pointers
+    subgraph cluster_orc {
+        label="ORC unwind  (no frame pointer, how the kernel does it)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+
+        stack [shape=record, style="filled", fillcolor="#fef3c7",
+               label="raw stack bytes|ret addr  (leaf)|...|ret addr  (caller)|...|ret addr"];
+
+        orc [shape=record, style="filled", fillcolor="#fde68a",
+             label="ORC table (keyed by IP)|__start_orc_unwind_ip array|__start_orc_unwind array|at IP X: sp offset locates prev frame"];
+
+        stack -> orc [label="orc_find(IP)\nsupplies sp offset", color="#d97706",
+                      style=bold, fontname="Helvetica", fontsize=8];
+
+        orcnote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=8,
+                 label="out-of-band table built at\lcompile time. No register cost.\lORC_TYPE_CALL is the common case.\l"];
+        orc -> orcnote [style=invis];
+    }
+
+    // Bottom: convergence
+    trace [shape=record, style="filled", fillcolor="#bfdbfe",
+           label="trace ip array  (leaf-first return addresses)|ip0 = leaf | ip1 | ip2 | ...  then hashed by bpf_get_stackid"];
+
+    fpnote -> trace [label="same result", color="#dc2626", style=bold,
+                     fontname="Helvetica", fontsize=9];
+    orcnote -> trace [label="same result", color="#dc2626", style=bold,
+                      fontname="Helvetica", fontsize=9];
+}

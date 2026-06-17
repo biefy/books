@@ -1,0 +1,57 @@
+digraph uretprobe_twotrap {
+    rankdir=TB;
+    labelloc=t;
+    label="Uretprobe (native x86_64): entry trap hijacks the return address; the return runs the uretprobe(2) syscall trampoline";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.5; ranksep=0.7;
+    compound=true;
+
+    // ---- Trap 1: entry ----
+    subgraph cluster_entry {
+        label="TRAP 1 — entry int3 on readline (first instruction)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+
+        stack [shape=record, style="filled", fillcolor="#fef3c7",
+            label="user stack\nret addr slot = REAL caller\nrewritten to TRAMPOLINE addr"];
+
+        lifo [shape=record, style="filled", fillcolor="#e9d5ff",
+            label="utask return_instances  (per-task LIFO)\npush: REAL caller addr\n... nested calls stack here ..."];
+
+        stack -> lifo [label="prepare_uretprobe:\lread REAL ret addr, push it", color="#7c3aed",
+            style=bold, fontname="Helvetica", fontsize=9];
+    }
+
+    // ---- The function body runs ----
+    run [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+        label="readline() runs normally,\nthen executes its `ret`\n-> lands on TRAMPOLINE, not caller"];
+
+    stack -> run [label="ret addr now points to trampoline", color="#2563eb",
+        style=bold, fontname="Helvetica", fontsize=9, ltail=cluster_entry];
+
+    // ---- Stage 2: syscall trampoline ----
+    subgraph cluster_ret {
+        label="STAGE 2 — syscall trampoline (native 64-bit), NOT a second int3";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+
+        tramp [shape=record, style="filled", fillcolor="#fef3c7",
+            label="uretprobe_trampoline_entry\npush rax/rcx/r11\nmov $__NR_uretprobe, rax\nsyscall"];
+        sysc [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+            label="sys_uretprobe (SYSCALL_DEFINE0):\nvalidate caller IP\n-> uprobe_handle_trampoline(regs)"];
+        bpf [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="your uretprobe BPF runs\nPT_REGS_RC (rax) = return value\n(readline's malloc'd char*)"];
+        restore [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+            label="pop REAL caller from LIFO\nset IP -> real caller\ncaller resumes, none the wiser"];
+
+        tramp -> sysc -> bpf -> restore;
+    }
+
+    run -> tramp [label="control lands on trampoline", color="#d97706",
+        style=bold, fontname="Helvetica", fontsize=9];
+    lifo -> restore [label="pop matching entry (LIFO)", color="#7c3aed",
+        style=dashed, fontname="Helvetica", fontsize=9];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+        label="Native 64-bit: the return executes the uretprobe(2) syscall — no second int3.\l32-bit/compat is the fallback that still traps on a trampoline int3 (handle_swbp).\lCalls nest -> per-task LIFO: each hijacked frame pushes one entry, each return pops it.\lAt the return only rax survives — arg registers are long gone.\l"];
+    restore -> note [style=invis];
+}

@@ -1,0 +1,42 @@
+digraph sched_timeline {
+    rankdir=LR;
+    labelloc=t;
+    label="One CPU, one task at a time: sched_switch hands off, wait_ns = B's off-CPU gap";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The run queue feeds the "next" slot of each switch
+    rq [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+        label="run queue (struct rq)\nrunnable tasks waiting\nfor a turn on this CPU"];
+
+    // Timeline cells, left to right
+    a1   [shape=box, style="filled", fillcolor="#fef3c7", label="A running"];
+    sw1  [shape=box, style="filled", fillcolor="#dbeafe",
+          label="sched_switch\nprev=A  next=B"];
+    b1   [shape=box, style="filled", fillcolor="#fef3c7", label="B running"];
+    sw2  [shape=box, style="filled", fillcolor="#dbeafe",
+          label="sched_switch\nprev=B  next=A\n(B blocks on I/O)"];
+    a2   [shape=box, style="filled", fillcolor="#fef3c7", label="A running"];
+    sw3  [shape=box, style="filled", fillcolor="#dbeafe",
+          label="sched_switch\nprev=A  next=B"];
+    b2   [shape=box, style="filled", fillcolor="#fef3c7", label="B running again"];
+
+    // The CPU timeline (one rank, strict left-to-right)
+    a1 -> sw1 -> b1 -> sw2 -> a2 -> sw3 -> b2
+        [color="#1d4ed8", style=bold, arrowsize=0.7];
+    { rank=same; a1; sw1; b1; sw2; a2; sw3; b2; }
+
+    // Run queue feeds the "next" slot of each switch
+    rq -> sw1 [label="picks next=B", color="#16a34a", style=dashed, fontsize=9];
+    rq -> sw3 [label="picks next=B", color="#16a34a", style=dashed, fontsize=9];
+
+    // Bracket B's off-CPU gap: from when B switched out (sw2) until B runs again (b2)
+    gap [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=10,
+         label="wait_ns the lab measures\lB off-CPU between sw2 and b2\lreported as now - last_run[B]\l"];
+    sw2 -> gap [style=invis];
+    gap -> b2  [label="off-CPU gap", color="#7c3aed", style=bold, fontsize=9];
+
+    note [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+          label="One CPU runs exactly one task at a time.\lEvery hand-off is a sched_switch with\lprev (outgoing) and next (incoming) already chosen.\l"];
+    rq -> note [style=invis];
+}
