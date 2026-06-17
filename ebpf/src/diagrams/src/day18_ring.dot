@@ -1,0 +1,52 @@
+digraph ring {
+    rankdir=TB;
+    labelloc=t;
+    label="One ring = one array + two counters, no lock (single-producer / single-consumer)";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The circular array of 8 slots, laid out in a ring via fixed positions
+    subgraph cluster_ring {
+        label="circular array of 8 slots  (index masked: idx & 7)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=record, style="filled", fillcolor="#dbeafe"];
+
+        s0 [label="slot 0|data"];
+        s1 [label="slot 1|data"];
+        s2 [label="slot 2|data"];
+        s3 [label="slot 3|free"];
+        s4 [label="slot 4|free"];
+        s5 [label="slot 5|free"];
+        s6 [label="slot 6|free"];
+        s7 [label="slot 7|free"];
+
+        s0 -> s1 -> s2 -> s3 -> s4 -> s5 -> s6 -> s7 [color="#94a3b8", arrowhead=none];
+        s7 -> s0 [color="#94a3b8", style=dashed, constraint=false, label="wraps around"];
+    }
+
+    // Two counters chasing each other
+    producer [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+              label="producer index = 3\nthe WRITER drops the next entry here"];
+    consumer [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+              label="consumer index = 0\nthe READER takes the next entry here"];
+
+    producer -> s3 [color="#7c3aed", style=bold, label="next write"];
+    consumer -> s0 [color="#16a34a", style=bold, label="next read"];
+
+    // Producer-side protocol note
+    prodproto [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+               label="PRODUCER side (writer):\l  1. reserve  — advance cached producer idx\l  2. write    — fill the reserved slots\l  3. submit   — publish producer idx (release barrier)\l"];
+
+    // Consumer-side protocol note (the mirror)
+    consproto [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+               label="CONSUMER side (reader) — the mirror:\l  1. peek    — see how many were published\l  2. read    — consume those entries\l  3. release — publish consumer idx, frees slots\l"];
+
+    // State note
+    state [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+           label="empty  when  producer == consumer\lfull   when  producer - consumer == size\lBoth counters in shared mmap'd memory:\ladvancing one is a plain write — NO syscall.\l"];
+
+    producer -> prodproto [style=invis];
+    consumer -> consproto [style=invis];
+    state -> consproto [style=invis];
+    { rank=same; prodproto; consproto; }
+}

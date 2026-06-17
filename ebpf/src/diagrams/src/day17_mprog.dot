@@ -1,0 +1,41 @@
+digraph mprog {
+    rankdir=TB;
+    bgcolor="white";
+    labelloc="t";
+    fontname="Helvetica";
+    fontsize=18;
+    label="mprog: ordered insertion on one tcx hook";
+    node [fontname="Monaco", fontsize=11];
+    edge [fontname="Helvetica", fontsize=10];
+
+    /* ---- The existing chain on veth1 tcx-ingress ---- */
+    subgraph cluster_chain {
+        label="Existing chain on veth1 (tcx/ingress), runs left to right";
+        fontname="Helvetica";
+        fontsize=12;
+        style="rounded";
+        color="#9ca3af";
+        rank=same;
+
+        counter [label="counter\nlink_id 3 / prog_id 5", shape=box, style="filled,rounded", fillcolor="#dbeafe"];
+        firewall [label="firewall\nlink_id 4 / prog_id 6", shape=box, style="filled,rounded", fillcolor="#dbeafe"];
+        counter -> firewall [label="chain order"];
+    }
+
+    /* ---- Three positioning operations ---- */
+    before [label="BPF_F_BEFORE  (relative_id = 5)\ninsert NEW just before counter\nresult:  NEW -> counter -> firewall", shape=box, style="filled,rounded", fillcolor="#dcfce7"];
+    after  [label="BPF_F_AFTER  (relative_id = 5)\ninsert NEW just after counter\nresult:  counter -> NEW -> firewall", shape=box, style="filled,rounded", fillcolor="#dcfce7"];
+    replace [label="REPLACE = update the link in place\nbpf_link__update_program(l_counter, NEW)\nresult:  NEW -> firewall  (atomic swap, no empty hook)", shape=box, style="filled,rounded", fillcolor="#e9d5ff"];
+
+    counter -> before  [style=dashed, color="#16a34a", label="name a neighbor"];
+    counter -> after   [style=dashed, color="#16a34a", label="name a neighbor"];
+    counter -> replace [style=dashed, color="#7c3aed", label="hand over the link"];
+
+    /* ---- Naming note: neighbor vs target ---- */
+    naming [label="Two different addressing schemes:\l  BEFORE / AFTER  -> name a NEIGHBOR\l      relative_id (+BPF_F_ID) or relative_fd\l  REPLACE         -> name the TARGET program\l      LINK_UPDATE: the link's own program\l      prog-attach:  replace_bpf_fd\l", shape=note, style="filled", fillcolor="#fef3c7", fontsize=10];
+    replace -> naming [style=invis];
+
+    /* ---- Verdict legend (the central, high-stakes fact) ---- */
+    verdict [label="Each program's return value:\l  TCX_NEXT (-1)               continue down the chain\l  TCX_PASS / TC_ACT_OK (0)    accept, STOP the chain\l  TCX_DROP / TC_ACT_SHOT (2)  drop,   STOP the chain\l  TCX_REDIRECT (7)            redirect, STOP the chain\l\l  ONLY TCX_NEXT advances. TC_ACT_OK STOPS.\l", shape=note, style="filled", fillcolor="#fee2e2", fontsize=11];
+    naming -> verdict [style=invis];
+}

@@ -1,0 +1,59 @@
+digraph tc_pipeline {
+    rankdir=TB;
+    labelloc=t;
+    label="clsact: hooks only, no queueing — vs a real queueing qdisc";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.5; ranksep=0.7;
+
+    // The net_device in the middle
+    netdev [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="net_device  (veth1)"];
+
+    // clsact pseudo-qdisc cluster
+    subgraph cluster_clsact {
+        label="clsact pseudo-qdisc  (handle TC_H_CLSACT)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+
+         in_hook [shape=box, style="filled", fillcolor="#dbeafe",
+                  label="ingress hook\nminor 0xFFF2\n(RX side)"];
+        in_filt [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+                 label="cls_bpf filter\n(your tc_ingress prog)"];
+
+        eg_hook [shape=box, style="filled", fillcolor="#dbeafe",
+                 label="egress hook\nminor 0xFFF3\n(TX side)"];
+        eg_filt [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+                 label="cls_bpf filter\n(your tc_egress prog)"];
+
+        in_hook -> in_filt;
+        eg_hook -> eg_filt;
+    }
+
+    noq [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+         label="hooks only, no queueing\lclsact_init wires two tcf_blocks,\lno .enqueue / .dequeue\l"];
+
+    netdev -> in_hook [label="RX in", color="#2563eb", style=bold, fontname="Helvetica", fontsize=9];
+    netdev -> eg_hook [label="TX out", color="#d97706", style=bold, fontname="Helvetica", fontsize=9];
+    noq -> eg_filt [style=invis];
+
+    // A real queueing qdisc for contrast
+    subgraph cluster_pfifo {
+        label="pfifo_fast egress qdisc  (really queues)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+
+        band0 [shape=record, style="filled", fillcolor="#fde68a",
+               label="band 0 (hi prio) | pkt | pkt"];
+        band1 [shape=record, style="filled", fillcolor="#fde68a",
+               label="band 1 (normal) | pkt | pkt | pkt"];
+        band2 [shape=record, style="filled", fillcolor="#fde68a",
+               label="band 2 (bulk) | pkt"];
+        sched [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+               label="dequeue by priority\n-> driver TX"];
+
+        band0 -> sched;
+        band1 -> sched;
+        band2 -> sched;
+    }
+
+    netdev -> band0 [label="enqueue\n(real bytes)", color="#dc2626", style=bold, fontname="Helvetica", fontsize=9];
+}

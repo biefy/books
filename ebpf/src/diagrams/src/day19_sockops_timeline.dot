@@ -1,0 +1,38 @@
+digraph sockops_timeline {
+    rankdir=LR;
+    labelloc=t;
+    label="One sock_ops program, re-entered at every step of the TCP state machine, dispatched by op";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.4; ranksep=0.9;
+
+    // The TCP timeline across the top, left to right
+    subgraph cluster_timeline {
+        label="TCP connection lifetime (left to right)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+        rank=same;
+
+        syn   [shape=box, style="filled", fillcolor="#fef3c7", label="SYN"];
+        synack[shape=box, style="filled", fillcolor="#fef3c7", label="SYN-ACK"];
+        ack   [shape=box, style="filled", fillcolor="#fef3c7", label="ACK"];
+        data  [shape=box, style="filled", fillcolor="#fef3c7", label="data\n(RTT samples)"];
+        fin   [shape=box, style="filled", fillcolor="#fef3c7", label="FIN"];
+
+        syn -> synack -> ack -> data -> fin [color="#d97706", style=bold];
+    }
+
+    // The single program box below
+    prog [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=11,
+          label="SEC(\"sockops\") tcp_tune(struct bpf_sock_ops *skops)\nswitch (skops->op) { ... }"];
+
+    // Each timeline point drops an arrow into the same program, labelled with its op
+    syn    -> prog [label="TCP_CONNECT_CB",            color="#2563eb", fontname="Helvetica", fontsize=9];
+    synack -> prog [label="ACTIVE_ESTABLISHED_CB",     color="#2563eb", fontname="Helvetica", fontsize=9];
+    ack    -> prog [label="PASSIVE_ESTABLISHED_CB",    color="#2563eb", fontname="Helvetica", fontsize=9];
+    data   -> prog [label="RTT_CB",                    color="#2563eb", fontname="Helvetica", fontsize=9];
+    fin    -> prog [label="STATE_CB",                  color="#2563eb", fontname="Helvetica", fontsize=9];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="Same program, many entries. The kernel re-enters it at each\lTCP event with a different skops->op. The program is a giant\lswitch; this lab sets BBR once the socket is usable.\l"];
+    prog -> note [style=invis];
+}

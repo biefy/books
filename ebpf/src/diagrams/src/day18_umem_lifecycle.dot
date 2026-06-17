@@ -1,0 +1,39 @@
+digraph umem_lifecycle {
+    rankdir=TB;
+    labelloc=t;
+    label="UMEM frame lifecycle: one chunk's journey through the four rings (every addr is a byte OFFSET)";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The UMEM bar: N equal chunks, one highlighted
+    subgraph cluster_umem {
+        label="UMEM: one page-aligned buffer carved into equal FRAME_SIZE chunks";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+        umem [shape=record, style="filled", fillcolor="#fef3c7",
+              label="frame 0\noffset 0|frame 1\noffset 2048|<hot>frame 2\noffset 4096|frame 3\noffset 6144|frame 4\noffset 8192|…|frame N-1"];
+    }
+
+    // highlight chunk note
+    hot [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+         label="frame 2 = offset 4096 = 2 * FRAME_SIZE\loffset, not a pointer. Pointer = buffer + offset\lvia xsk_umem__get_data(buffer, addr)\l"];
+    umem:hot -> hot [style=dashed, color="#7c3aed"];
+
+    // Lifecycle steps
+    fill [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+          label="1. FILL ring  (user -> kernel)\nuser writes offset 4096\nnow the DRIVER owns the frame"];
+    dma [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+         label="2. driver DMA\nNIC writes packet bytes\ninto offset 4096 (still driver-owned, now full)"];
+    rx [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+        label="3. RX ring  (kernel -> user)\nkernel hands back offset 4096 + real len\nnow USERSPACE owns it"];
+    proc [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+          label="4. userspace reads\nbuffer + 4096 -> packet bytes\nprocess in place (zero copy)"];
+
+    fill -> dma [color="#7c3aed", style=bold, label="offset"];
+    dma -> rx [color="#16a34a", style=bold, label="offset + len"];
+    rx -> proc [color="#2563eb", style=bold, label="offset"];
+    proc -> fill [color="#dc2626", style=bold, label="5. return SAME offset to FILL ring\n(close the cycle)", constraint=false];
+
+    breaks [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+            label="Skip step 1 (never fill)  -> Break 1: empty RX ring\lSkip the return to FILL  -> Break 2: driver starves, rx_dropped++\l"];
+    proc -> breaks [style=invis];
+}

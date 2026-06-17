@@ -1,0 +1,31 @@
+digraph pkt_range {
+    rankdir=TB;
+    labelloc=t;
+    label="The verifier's proven-safe range: each x+1 > end compare extends the bracket";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // Stage 0: nothing proven
+    s0 [shape=record, style="filled", fillcolor="#fee2e2",
+        label="{ data |<safe> 0 bytes proven | ... | data_end }|At load: range = 0. ANY deref of data rejected."];
+
+    // Stage 1: after eth check
+    s1 [shape=record, style="filled", fillcolor="#dbeafe",
+        label="{ data |<safe> proven 0..14 (ethhdr) | unproven | data_end }|after the eth+1 check: may read eth-\>h_proto"];
+
+    // Stage 2: after ip check
+    s2 [shape=record, style="filled", fillcolor="#dcfce7",
+        label="{ data |<safe> proven 0..34 (eth + ip) | unproven | data_end }|after the ip+1 check: may read ip-\>protocol (byte 23)"];
+
+    s0 -> s1 [label="eth + 1 > end ?", color="#7c3aed", style=bold, fontname="Helvetica", fontsize=9];
+    s1 -> s2 [label="ip + 1 > end ?", color="#7c3aed", style=bold, fontname="Helvetica", fontsize=9];
+
+    // The bad access
+    bad [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+        label="X  read ip->protocol with NO ip check\n(byte 23 lies beyond range 0..14)"];
+    s1 -> bad [label="skip the check", color="#dc2626", style=bold, fontname="Helvetica", fontsize=9];
+
+    err [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+        label="verifier: invalid access to packet,\loff=23 size=1, R1(...,r=14)\l"];
+    bad -> err [style=invis];
+}
