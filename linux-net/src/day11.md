@@ -52,8 +52,8 @@ When that pointer is set, `__netif_receive_skb_core` calls it **before** the `pt
 
 The handler tells the receive path what to do with the skb via an `enum rx_handler_result` (documented at `include/linux/netdevice.h:461-477`). The two that matter:
 
-- **`RX_HANDLER_CONSUMED`** — "I took the skb; do not process it further." The frame never reaches `ptype_base`, never reaches `ip_rcv`. The bridge returns this for every frame it forwards or floods — which is *why* bridged traffic never climbs into the host's IP stack.
-- **`RX_HANDLER_PASS`** — "Do nothing; proceed as if no handler ran." This is the escape hatch that lets a frame addressed to the bridge's *own* IP (you gave `br0` an address, remember) climb the normal stack.
+- **`RX_HANDLER_CONSUMED`** — "I took the skb; do not process it further." The frame never reaches `ptype_base`, never reaches `ip_rcv` *on the slave NIC*. The bridge returns this for **every** data frame — including one addressed to the bridge's own IP. That last case is the subtle one: `br_handle_frame` still returns CONSUMED, but `br_handle_frame_finish` notices the destination is a `BR_FDB_LOCAL` entry and calls `br_pass_frame_up()`, which **re-injects** the skb onto the bridge netdev (`skb->dev = br0`) via `netif_receive_skb` (`net/bridge/br_input.c:218-220`). So "pinging `br0`" works by re-injection on `br0`, *not* by passing the frame through on the slave port.
+- **`RX_HANDLER_PASS`** — "Do nothing; proceed as if no handler ran." The bridge uses this only for the genuine pass-through cases: `PACKET_LOOPBACK`, and locally-consumed link-local control frames (STP BPDUs, LLDP) handled via `__br_handle_local_finish`. It is **not** how a frame reaches the bridge's own IP.
 
 (There are two more — `RX_HANDLER_ANOTHER`, re-loop because `skb->dev` changed, and `RX_HANDLER_EXACT`, force exact delivery — that the bridge doesn't lean on today.)
 
@@ -79,7 +79,7 @@ static rx_handler_result_t br_handle_frame(struct sk_buff **pskb)
 
 ![rx_handler fires above the L3 demux](diagrams/day11_rx_handler_path.png)
 
-So the picture is: a frame on a slave NIC reaches `__netif_receive_skb_core`, which checks `dev->rx_handler`. It's set, so `br_handle_frame` runs. If the bridge switches the frame (forward or flood), it returns `RX_HANDLER_CONSUMED` and the frame is gone from this host's perspective. Only `RX_HANDLER_PASS` lets the frame fall through to the `ptype_base` demux and on to `ip_rcv` — the Day-2 path.
+So the picture is: a frame on a slave NIC reaches `__netif_receive_skb_core`, which checks `dev->rx_handler`. It's set, so `br_handle_frame` runs. For any data frame — switched *or* destined to the bridge's own IP — it returns `RX_HANDLER_CONSUMED`, so the frame is gone from the slave NIC's perspective. A frame addressed to the bridge's own IP still reaches `ip_rcv`, but by **re-injection** on `br0` (via `br_pass_frame_up` → `netif_receive_skb`), not by falling through the slave's `ptype_base` demux. `RX_HANDLER_PASS` is reserved for loopback and locally-handled link-local control frames.
 
 ## The forwarding decision
 
@@ -174,7 +174,7 @@ sudo bridge vlan add dev v2p vid 100 tagged
 
 Now untagged frames from `v1p` are tagged with VID 100 internally, can be forwarded to `v2p` (which expects them tagged), and on egress the bridge tags them out.
 
-This is the foundation of "VLAN-aware bridges" used in network namespaces (the netns you built in Day 5) and sophisticated container networking (Cilium, Calico's IPVLAN modes).
+This is the foundation of VLAN-aware bridges used in network namespaces (the netns you built in Day 5) and in VLAN-segmented host setups — libvirt/KVM VM hosting and VLAN-partitioned container/namespace networks (`bridge vlan_filtering`).
 
 ![VLAN-aware bridge ingress, FDB key, egress membership gate](diagrams/day11_vlan_filtering.png)
 
@@ -264,9 +264,9 @@ The next section, and one of the "What to break" labs, talk about pushing bridge
 
 **netfilter** is the kernel's packet-filtering framework. Tools like **iptables** and **nftables** install rules into named **chains** that are attached at fixed **hook points** along the IP path — `PREROUTING`, `FORWARD`, `POSTROUTING`, and others. A packet normally encounters these chains only when it is **routed at L3**.
 
-Now the bridge-specific point this section is really about: **by default, bridged frames do not enter netfilter at all.** The bridge operates *below* IP — it switches frames by MAC and returns `RX_HANDLER_CONSUMED` long before any L3 routing decision. So an `iptables` rule in the `FORWARD` chain simply doesn't see bridged traffic.
+Now the bridge-specific point this section is really about: **by default, bridged frames do not enter the IP (iptables) netfilter chains at all.** The bridge operates *below* IP — it switches frames by MAC and returns `RX_HANDLER_CONSUMED` long before any L3 routing decision. So an `iptables` rule in the `FORWARD` chain simply doesn't see bridged traffic. (Bridge-*family* netfilter — ebtables/nft `bridge` — is a separate matter and is always available; see below.)
 
-Loading the optional **`br_netfilter`** module changes that. It sets `net.bridge.bridge-nf-call-iptables=1`, which pushes bridged frames *through the IP netfilter chains* anyway — which is exactly why, in the lab, a `FORWARD -j DROP` rule suddenly kills a ping that never left L2. The glue lives in `net/bridge/br_netfilter_hooks.c`: when `br_netfilter` is loaded, `br_handle_frame`'s finish path runs through the bridge PRE_ROUTING hook (`nf_hook_state_init(&state, NF_BR_PRE_ROUTING, NFPROTO_BRIDGE, ...)` dispatching toward `br_handle_frame_finish`, `net/bridge/br_input.c:288`) instead of jumping straight to `br_handle_frame_finish`.
+Loading the optional **`br_netfilter`** module changes that. It sets `net.bridge.bridge-nf-call-iptables=1`, which pushes bridged frames *through the IP netfilter chains* anyway — which is exactly why, in the lab, a `FORWARD -j DROP` rule suddenly kills a ping that never left L2. The mechanics: for **every** forwarded frame, `br_handle_frame`'s finish path runs through `nf_hook_bridge_pre()` (`net/bridge/br_input.c:267`), which dispatches any registered `NFPROTO_BRIDGE` PRE_ROUTING hooks (used by ebtables/nft bridge family) and otherwise falls straight through to `br_handle_frame_finish` (`if (!e) goto frame_finish;`, `br_input.c:282-284`). That dispatch is **not** what `br_netfilter` adds. What `br_netfilter` (`net/bridge/br_netfilter_hooks.c`) does is *register a hook* at `NF_BR_PRE_ROUTING` which redirects bridged frames into the IP (iptables) chains — and it's that registration, not the dispatch loop, that makes a `FORWARD -j DROP` rule bite.
 
 > **Forward pointer:** netfilter, chains, conntrack, and hooks are covered in full on Days 20–22. For today you only need two facts: iptables rules live on the IP path, and `br_netfilter` is the switch that subjects bridged frames to them. We deliberately stop here — no pre-teaching the rest of Phase 4.
 
@@ -406,7 +406,7 @@ sudo ip netns exec ns1 ping -c 2 -W 1 10.0.0.2   # 100% packet loss, exit code 1
 
 - **`net/bridge/br_fdb.c:263`** — `br_fdb_find_rcu`. Hash lookup. Note the RCU-protected design — readers don't lock, writers update an existing entry's fields lock-free and take `br->hash_lock` only to insert/delete. The FDB is the kernel's `rhashtable` (`br_fdb_rht_params`, line 27), keyed on `{MAC, vlan_id}` (`struct net_bridge_fdb_key`, `br_private.h:286`) and looked up via `rhashtable_lookup` (line 216).
 
-- **`net/bridge/br_fdb.c:972`** — `br_fdb_update`. The learning path — the FDB *writer*. For a known source it refreshes the entry's `dst` and the cache-line-isolated `updated` field in place via `WRITE_ONCE()` (no lock); it takes `br->hash_lock` only to `fdb_create` a new entry. Notice the "added_by_external_learn" flag — this is how SDN controllers push entries from userspace.
+- **`net/bridge/br_fdb.c:972`** — `br_fdb_update`. The learning path — the FDB *writer*. For a known source it refreshes the entry's `dst` and the cache-line-isolated `updated` field in place via `WRITE_ONCE()` (no lock); it takes `br->hash_lock` only to `fdb_create` a new entry. Notice the `BR_FDB_ADDED_BY_EXT_LEARN` flag (`br_private.h:278`, tested via `test_bit` on `fdb->flags`; `NTF_EXT_LEARNED` on the netlink path) — this is how SDN controllers push entries from userspace.
 
 - **`net/bridge/br_forward.c:144`** — `br_forward`. Egress on a single port. Updates stats, applies `BR_HAIRPIN_MODE` (loops the frame back out the input port — used for some virtual networking patterns), then calls `br_forward_finish` which hands off to `dev_queue_xmit`.
 
@@ -426,7 +426,7 @@ sudo ip netns exec ns1 ping -c 2 -W 1 10.0.0.2   # 100% packet loss, exit code 1
 
 - A Linux bridge = software L2 switch. `ip link add br0 type bridge` creates one.
 - **Three operations per frame**: learn (FDB update with src), look up (dst), forward or flood.
-- **`rx_handler`** is the per-netdev hook (`netdevice.h:2189`) that fires inside `__netif_receive_skb_core` *before* the Day-2 `ptype_base` demux. The bridge installs **`br_handle_frame`** there; it returns `RX_HANDLER_CONSUMED` for switched frames (so they never reach `ip_rcv`) and `RX_HANDLER_PASS` for frames addressed to the bridge's own IP. One handler per device — a second register returns `-EBUSY`.
+- **`rx_handler`** is the per-netdev hook (`netdevice.h:2189`) that fires inside `__netif_receive_skb_core` *before* the Day-2 `ptype_base` demux. The bridge installs **`br_handle_frame`** there; it returns `RX_HANDLER_CONSUMED` for every data frame — even one addressed to the bridge's own IP, which reaches `ip_rcv` by re-injection on `br0` (`br_pass_frame_up`), not by passing through. `RX_HANDLER_PASS` is reserved for loopback and link-local control frames (STP/LLDP). One handler per device — a second register returns `-EBUSY`.
 - **FDB** is an RCU-protected **`rhashtable`** keyed on `{MAC, vlan_id}`. **Readers** (`br_fdb_find_rcu`) take no lock; **writers** (`br_fdb_update`) refresh a known source's fields lock-free via `WRITE_ONCE()` and take `br->hash_lock` only to insert/delete an entry. The write-heavy `updated` field is `____cacheline_aligned_in_smp` to avoid false sharing (recall Day 1). Default 300 s aging; `bridge fdb` to inspect.
 - **`vlan_filtering 1`** turns the bridge into a real 802.1Q switch with per-port VLAN config; the `{MAC, vid}` key means the same MAC in two VLANs is two entries.
 - **L2 loops are catastrophic** — Ethernet has no TTL, so a flooded frame multiplies around a loop forever (broadcast storm). **STP** elects a root bridge and BLOCKs redundant links to break the loop; a port walks LISTENING → LEARNING → FORWARDING at 15 s/stage (~30 s), which is why container/VM setups leave it off.

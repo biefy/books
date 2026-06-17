@@ -6,7 +6,7 @@
 
 Every packet that needs to go *somewhere not-here* requires a routing decision: which next-hop, which output interface, which source IP. The decision is fast — sub-microsecond on modern hardware, even against tables with hundreds of thousands of routes.
 
-That speed comes from the **FIB** (Forwarding Information Base) and the **LC-trie** (level-compressed trie) data structure backing it. But before we touch the trie, we have to be honest about three things the rest of this chapter quietly assumes you already know: *what it means for a route to "match,"* *what handle the lookup result is delivered through,* and *how a route got into the table at all.* Days 1–7 never taught any of these. So we teach them first — intuition, then the concrete v7.1 struct — and only then walk the path.
+That speed comes from the **FIB** (Forwarding Information Base) and the **LC-trie** (level-compressed trie) data structure backing it. But before we touch the trie, we have to be honest about some things the rest of this chapter quietly assumes you already know: *what it means for a route to "match,"* *what handle the lookup result is delivered through,* *how the trie itself works,* and *how a route got into the table at all.* Days 1–7 never taught any of these. Two of them we teach up front (what "match" means, and the handle the result rides on); the trie itself and the write-side config channel we build up as we reach them — intuition first, then the concrete v7.1 struct.
 
 ## Background 1: longest-prefix-match — what "the route matches" actually means
 
@@ -53,7 +53,7 @@ struct fib_nh_common {
 };
 ```
 
-It tells you the egress device, the gateway IP (if any), the source IP to use, MTU, etc.
+It tells you the egress device (`nhc_dev`/`nhc_oif`) and the gateway IP (if any) (`nhc_gw_family` + `nhc_gw`). (The preferred source IP and the route MTU are *not* in `fib_nh_common` — they come from the enclosing `fib_nh`'s `nh_saddr` and from the route's metrics on the `dst`, respectively.)
 
 The **`type`** field is why the same machinery answers both "forward this" and "this is for us." `RTN_UNICAST` (`include/uapi/linux/rtnetlink.h:263`) is a gateway or direct route; `RTN_LOCAL` (`:264`) means "accept locally"; `RTN_BROADCAST` (`:265`). The kernel keeps its own host IPs as `RTN_LOCAL` entries in a separate table — more on that below.
 
@@ -188,7 +188,7 @@ struct flowi4 {
 
 (In v7.1 these fields are really `#define` aliases over an inner `struct flowi_common __fl_common` — e.g. `flowi4_oif` is `__fl_common.flowic_oif`. The flattened view above is a fair simplification; the trace lab below uses the real `flp4->__fl_common.flowic_oif` form.)
 
-The result is the `struct fib_result` you met in Background 1 — `prefix`/`prefixlen` record which LPM winner was chosen, and **`nhc`** carries the egress device, gateway IP, source IP, and MTU.
+The result is the `struct fib_result` you met in Background 1 — `prefix`/`prefixlen` record which LPM winner was chosen, and **`nhc`** carries the egress device (`nhc_dev`) and the gateway (`nhc_gw`). (The preferred source IP and MTU live elsewhere — in the enclosing `fib_nh`'s `nh_saddr` and the route's metrics on the `dst` — not in `fib_nh_common`.)
 
 ## Background 3: the LC-trie — what it is and why it's fast
 
@@ -269,7 +269,7 @@ Every lab in this chapter uses `ip route add/del/show`, and the lookup side walk
 - Deleting → **`RTM_DELROUTE`** (`:46`).
 - `ip route show` → an **`RTM_GETROUTE`** dump (`:48`).
 
-The message carries a `struct rtmsg` plus typed attributes (TLVs): `RTA_DST` (the prefix), `RTA_GATEWAY`, `RTA_OIF` (egress interface), and `RTA_TABLE` (`:385`) — the very attribute the "Multiple tables" section mentioned for large table IDs.
+The message carries a `struct rtmsg` plus typed attributes (TLVs — type-length-value records): `RTA_DST` (the prefix), `RTA_GATEWAY`, `RTA_OIF` (egress interface), and `RTA_TABLE` (`:385`) — the very attribute the "Multiple tables" section mentioned for large table IDs.
 
 ### Kernel side: per-message-type handlers that mutate the FIB
 
@@ -327,7 +327,7 @@ ip route show table local
 ip rule show
 ```
 
-`ip rule` is the fib_rules list. Default has just three: local, main, default. (Each `ip route show` you run is an `RTM_GETROUTE` dump handled by `inet_dump_fib` — Background 4.)
+`ip rule` is the fib_rules list. A vanilla kernel installs three rules (local, main, default); some distros or host services add extra rules (e.g. a `220: from all lookup 220` entry), so you may see more. (Each `ip route show` you run is an `RTM_GETROUTE` dump handled by `inet_dump_fib` — Background 4.)
 
 ### Watch a route lookup
 
@@ -409,7 +409,7 @@ sudo ip netns del fibbreak
 
 With `onlink` the route installs, so the FIB lookup succeeds and resolves a next-hop — but 10.99.99.99 answers no ARP, so transmission has nowhere to go and the ping reports 100% packet loss. (Without `onlink` the kernel rejects the off-subnet gateway outright with `Error: Nexthop has invalid gateway.` and the route is never added at all.) Either way your host routing table never changes, and `ip netns del` tears down the namespace and its routes completely.
 
-This is also a clean demonstration of LPM (Background 1): you installed `0.0.0.0/0`, the *only* route in the namespace, and a packet to `8.8.8.8` matched it because there was nothing more specific. The default route is the last resort precisely because its prefix length is 0.
+This is also LPM in miniature (Background 1): the only route present is `0.0.0.0/0`, so a packet to `8.8.8.8` matches it because there was nothing more specific.
 
 ### Inspect rt cache stats (legacy)
 
@@ -417,7 +417,7 @@ This is also a clean demonstration of LPM (Background 1): you installed `0.0.0.0
 cat /proc/net/stat/rt_cache
 ```
 
-Mostly zeros nowadays — the cache is gone, but the proc file remains for compatibility.
+The per-flow cache-hit columns (`in_hit`/`out_hit`) are zero because the per-flow `rt_cache` is gone — that's the teaching point. The `in_slow_tot`/`out_slow_tot`/`in_martian_src` columns are just cumulative lookup counters, so they will be non-zero. The proc file remains for compatibility.
 
 ---
 
@@ -425,7 +425,7 @@ Mostly zeros nowadays — the cache is gone, but the proc file remains for compa
 
 - **`net/ipv4/route.c`** — `ip_route_input_noref` (line 2546), `ip_route_output_flow` (line 2929). Also the `rt->dst.input`/`rt->dst.output` assignments (lines 1666–1668, 1894, 2442).
 - **`net/ipv4/fib_trie.c`** — `fib_table_lookup` (line 1420). The LC-trie implementation; `struct key_vector` (line 121), `IS_TNODE`/`IS_LEAF` (lines 118–119).
-- **`net/ipv4/fib_frontend.c`** — netlink interface: `inet_rtm_newroute` (line 910), `inet_rtm_delroute` (line 876), `inet_dump_fib` (line 1018), the handler table (line 1694), `fib_magic` (line 1156), and the `fib_lookup` wrapper.
+- **`net/ipv4/fib_frontend.c`** — netlink interface: `inet_rtm_newroute` (line 910), `inet_rtm_delroute` (line 876), `inet_dump_fib` (line 1018), the handler table (line 1694), `fib_magic` (definition at line 1099; the `RTN_LOCAL` call site is line 1156), and the `fib_lookup` wrapper.
 - **`net/ipv4/fib_rules.c`** — fib_rules implementation.
 - **`include/net/dst.h`** — `struct dst_entry` (line 26), `dst_input` (line 478).
 - **`include/net/route.h`** — `struct rtable` (line 57), `dst_rtable` (line 80).
@@ -438,7 +438,7 @@ Mostly zeros nowadays — the cache is gone, but the proc file remains for compa
 ## Bullet Points
 
 - A **route is a (prefix, prefixlen) pair**. Many routes can match one address; the **longest prefix wins** (LPM). `0.0.0.0/0` (the default) matches everything and is the last resort.
-- The lookup result is a `struct fib_result`: `prefix`/`prefixlen` record the LPM winner; `nhc` (a `fib_nh_common`) carries the egress dev, gateway IP, source IP, MTU. `type` (`RTN_UNICAST`/`RTN_LOCAL`/`RTN_BROADCAST`) is why the same machinery handles "forward" and "for us."
+- The lookup result is a `struct fib_result`: `prefix`/`prefixlen` record the LPM winner; `nhc` (a `fib_nh_common`) carries the egress dev and gateway IP — the preferred source IP (`nh_saddr`) and MTU live in the enclosing `fib_nh`/route metrics, not in `nhc`. `type` (`RTN_UNICAST`/`RTN_LOCAL`/`RTN_BROADCAST`) is why the same machinery handles "forward" and "for us."
 - A **`dst_entry`** is the per-packet "next step" handle, carrying `input(skb)` (RX/forward) and `output(net,sk,skb)` (TX) function pointers. The route lookup builds a `struct rtable` whose **first member is a `dst_entry`** (so `rtable* == dst*`; recover with `dst_rtable`). `skb_dst_set` staples it on; **`dst_input` just calls `skb_dst(skb)->input(skb)`** — that's the entire dispatch.
 - `rt->dst.input` is set to `ip_local_deliver` / `ip_forward` / `ip_error`. `skb_valid_dst` is the fast-path check that skips the lookup when a real dst is already attached.
 - **FIB** is the kernel's routing table; lookups go through `fib_table_lookup` against an **LC-trie**. A naive binary trie is 32 levels deep; **path compression** skips single-child chains and **level compression** uses multi-bit (2^bits-way) nodes, so lookups average ~5–10 node visits regardless of table size. `struct key_vector{pos,bits}` encodes both (`bits==0` = leaf).

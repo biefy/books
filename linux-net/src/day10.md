@@ -160,6 +160,16 @@ enum in6_addr_gen_mode {
 
 ![IPv6 address anatomy: prefix and interface ID](diagrams/day10_addr_anatomy.png)
 
+### There are no Dumb Questions
+
+**Q: If a link-local address is auto-generated the instant the link comes up — before any router is heard from — why do I still need a Router Advertisement at all?**
+
+A: Because link-local is *non-routable*. `fe80::/10` never leaves the link; a router will not forward it. It's enough to talk to neighbors on the same segment (and to run DAD and NDP), but to reach anything off-link you need a **globally-routable prefix**, and the only way a host learns one via autoconfig is from an RA. Link-local gets you bootstrapped; the RA gets you on the internet.
+
+**Q: Why is the split always /64? Why not some other prefix/host boundary?**
+
+A: Because SLAAC and EUI-64 assume a **64-bit interface identifier**. The whole "append the host portion to the prefix" trick — EUI-64 stuffing `fffe` into a 48-bit MAC, stable-privacy hashing into 64 bits — produces a 64-bit lower half by construction. A prefix longer than /64 wouldn't leave room for it, so SLAAC simply won't run on non-/64 prefixes. The /64 boundary is baked into the autoconfig machinery, not just a convention.
+
 ---
 
 ## Autoconfiguration
@@ -438,7 +448,7 @@ sudo bpftrace -e 'fentry:ipv6_skip_exthdr { printf("skip nexthdr=%d start=%d\n",
 
 ## Bullet Points
 
-- The **base header is fixed at 40 bytes**: version=6, flow label, `payload_len` (length **after** the header — unlike IPv4 `tot_len`), `nexthdr`, `hop_limit` (TTL renamed), two 16-byte addresses. **No IHL, no header checksum** — options moved to the extension-header chain.
+- The **base header is fixed at 40 bytes**: version=6, a `priority` nibble plus `flow_lbl[3]` (together holding the 8-bit traffic class — priority + top 4 bits of flow_lbl — and the 20-bit flow label in the low 20 bits of flow_lbl), `payload_len` (length **after** the header — unlike IPv4 `tot_len`), `nexthdr`, `hop_limit` (TTL renamed), two 16-byte addresses. **No IHL, no header checksum** — options moved to the extension-header chain.
 - `nexthdr` is **one shared protocol-number space** (6=TCP, 0=HopByHop, 43=Routing, 44=Fragment, 59=None, 60=DestOpts): parse it as a loop until you hit an L4 protocol.
 - An **IPv6 address is 128 bits** (`struct in6_addr`, 16 bytes), split into a **64-bit prefix + 64-bit host portion**. `::` = unspecified, `fe80::/64` = link-local (always present), `ff00::/8` = multicast.
 - IPv6 hosts auto-configure: link-local (fe80::/64) immediately, global addresses from RAs.
@@ -458,7 +468,7 @@ A node receives an IPv6 packet whose first extension header is `nexthdr=0` (Hop-
 <details>
 <summary>Click to reveal answer</summary>
 
-**Answer:** Process the Hop-by-Hop options. HopByHop is special — every router on the path must inspect it, regardless of whether the packet's destination is local. (That's what "hop-by-hop" means.) The kernel calls `ipv6_parse_hopopts` immediately after the base header. If an option is unknown and has the high bits in the option-type byte set to indicate "discard packet on unknown option," the packet is dropped (and possibly an ICMPv6 Parameter Problem returned). Other extensions like Destination Options are processed only at the destination — the kernel skips them on a forwarding path. The Hop-by-Hop processing requirement is also why this header **must** be the first extension if present; later positions are spec-illegal.
+**Answer:** Process the Hop-by-Hop options. HopByHop is special — every router on the path must inspect it, regardless of whether the packet's destination is local. (That's what "hop-by-hop" means.) The kernel parses the Hop-by-Hop options via the same `ip6_parse_tlv` walker you saw above (its `hopbyhop` caller), immediately after the base header. If an option is unknown and has the high bits in the option-type byte set to indicate "discard packet on unknown option," the packet is dropped (and possibly an ICMPv6 Parameter Problem returned). Other extensions like Destination Options are processed only at the destination — the kernel skips them on a forwarding path. The Hop-by-Hop processing requirement is also why this header **must** be the first extension if present; later positions are spec-illegal.
 
 </details>
 
