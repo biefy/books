@@ -1,0 +1,25 @@
+digraph vtime_wrap {
+    rankdir=TB;
+    labelloc=t;
+    label="u64 vtime: a big decrement underflows past 0 and wraps to near 2^64 (scheduled last)";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    line [shape=record, style="filled", fillcolor="#dbeafe",
+          label="{ 0  (runs first) | small vtime | ... | near 2^64  (runs last / never) }"];
+
+    start [shape=note, style="filled", fillcolor="#dcfce7", fontsize=10,
+           label="task vtime = small value\le.g. 5,000,000\l"];
+
+    bad [shape=note, style="filled", fillcolor="#fee2e2", fontsize=10,
+         label="vtime -= 1,000,000,000   (b > a)\lu64 has no negatives:\la - b + 2^64\l→ wraps to ~18.4 quintillion\l→ DSQ orders it LAST, task starves\l→ watchdog ejects scheduler in ~30s\l"];
+
+    good [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=10,
+          label="the fix: bound the decrement\lkeep vtime >= 0 worth of headroom\lor use a separate PRIO_DSQ lane\l"];
+
+    start -> line:w [color="#16a34a", style=bold, label="before"];
+    bad -> line:e [color="#dc2626", style=bold, label="after"];
+
+    { rank=same; start; bad; }
+    bad -> good [style=dashed];
+}
