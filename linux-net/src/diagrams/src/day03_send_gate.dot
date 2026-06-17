@@ -1,0 +1,42 @@
+digraph send_gate {
+    rankdir=LR;
+    labelloc=t;
+    label="tcp_write_xmit: two independent gates, each in its own units";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // queued skbs waiting behind the gate
+    subgraph cluster_q {
+        label="sk_write_queue (queued, waiting)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", fillcolor="#fef3c7"];
+        q0 [label="skb"]; q1 [label="skb"]; q2 [label="skb"];
+        q0 -> q1 -> q2 [style=invis];
+    }
+
+    gate [shape=box, style="filled", fillcolor="#e9d5ff",
+          label="tcp_write_xmit\n(checks BOTH gates\nper skb)"];
+
+    // Gate 1: congestion, in PACKETS
+    cwnd [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="Gate 1 — congestion (PACKETS)\ntcp_cwnd_test\nin-flight packets < snd_cwnd\nsnd_cwnd counts MSS-sized segments\n(init = 10 packets)"];
+
+    // Gate 2: flow control, in BYTES
+    swnd [shape=note, style="filled", fillcolor="#dbeafe", fontsize=9,
+          label="Gate 2 — flow control (BYTES)\ntcp_snd_wnd_test\nend_seq must not pass\nsnd_una + snd_wnd"];
+
+    peer [shape=box, style="filled", fillcolor="#dbeafe", label="peer"];
+
+    q0 -> gate [color="#94a3b8"];
+    gate -> cwnd [style=bold, color="#16a34a"];
+    gate -> swnd [style=bold, color="#2563eb"];
+    cwnd -> peer [label="send only if\nBOTH allow", color="#7c3aed"];
+    swnd -> peer [style=invis];
+
+    peer -> gate [style=dashed, color="#16a34a", constraint=false,
+                  label="ACKs return -> in-flight drops -> gates open"];
+
+    note [shape=box, style="filled,rounded", fillcolor="#fee2e2", fontsize=9,
+          label="Linux snd_cwnd is in PACKETS, snd_wnd is in BYTES.\nThe kernel never min()s them: they are two separate tests."];
+    note -> gate [style=invis];
+}

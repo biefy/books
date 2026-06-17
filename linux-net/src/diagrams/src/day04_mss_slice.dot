@@ -1,0 +1,29 @@
+digraph mss_slice {
+    rankdir=TB;
+    labelloc=t;
+    label="One 64 KB skb sliced into ~44 MSS-sized segments";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The big payload bar, sliced into MSS chunks
+    subgraph cluster_bar {
+        label="big skb payload  (up to GSO_LEGACY_MAX_SIZE = 65536 B)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+        bar [shape=record, style="filled", fillcolor="#fef3c7",
+             label="{1460|1460|1460|1460| … |1460|tail}"];
+    }
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="each slice width = gso_size = 1460 B (the MSS)\lslice count    = gso_segs ≈ 44\l65536 / 1460 ≈ 44.9  →  ceil = 45 segments\l"];
+
+    // One slice expanded to a wire frame
+    subgraph cluster_frame {
+        label="one MSS slice wrapped in headers = one wire frame (1514 B)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        frame [shape=record, style="filled", fillcolor="#dbeafe",
+               label="{Eth\n14|IP\n20|TCP\n20|<d> data (MSS)\n1460}"];
+    }
+
+    bar -> frame [label="expand one 1460-B slice", color="#dc2626", style=bold];
+    bar -> note  [style=invis];
+}

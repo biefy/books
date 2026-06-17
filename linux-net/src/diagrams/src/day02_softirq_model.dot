@@ -1,0 +1,44 @@
+digraph softirq_model {
+    rankdir=TB;
+    labelloc=t;
+    label="The softirq model: top half raises, __do_softirq drains";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // Top half: the hardware IRQ handler
+    subgraph cluster_top {
+        label="TOP HALF — hardware IRQ context (tiny, cannot sleep)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#7c3aed";
+        irq [shape=box, style="filled", fillcolor="#e9d5ff",
+             label="driver IRQ handler\n1. ack the device\n2. or_softirq_pending(1<<NET_RX_SOFTIRQ)\n3. return"];
+    }
+
+    // The per-CPU pending mask
+    mask [shape=record, style="filled", fillcolor="#dbeafe",
+          label="{per-CPU pending mask|{HI|TIMER|NET_TX|<rx>NET_RX=1|BLOCK|...|RCU}}"];
+
+    irq -> mask [style=bold, color="#7c3aed", label="sets the NET_RX bit"];
+
+    // The drain
+    dosoftirq [shape=box, style="filled", fillcolor="#fef3c7",
+               label="__do_softirq()\n(on IRQ-exit)\ncheck mask, run each\npending action function"];
+    mask:rx -> dosoftirq [style=bold, color="#d97706", label="bit is set"];
+
+    action [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+            label="net_rx_action()\n(the RX bottom half)"];
+    dosoftirq -> action [label="NET_RX_SOFTIRQ\n→ registered action"];
+
+    // The overflow safety valve
+    restart [shape=diamond, style="filled", fillcolor="#fee2e2", fontsize=9,
+             label="still pending after\nMAX_SOFTIRQ_RESTART\n= 10 loops?"];
+    action -> restart [label="more work?"];
+    restart -> dosoftirq [label="no: loop again", color="#16a34a"];
+
+    ksoftirqd [shape=box, style="filled", fillcolor="#fee2e2",
+               label="wake ksoftirqd\n(per-CPU kernel thread)\ncompetes fairly with\nuser tasks — no starvation"];
+    restart -> ksoftirqd [label="yes: hand off", style=bold, color="#dc2626"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="Everything here is per-CPU:\lthe pending mask, __do_softirq,\land ksoftirqd all run per-CPU.\l"];
+    ksoftirqd -> note [style=invis];
+}

@@ -1,0 +1,43 @@
+digraph gro_merge {
+    rankdir=TB;
+    labelloc=t;
+    label="GRO: coalesce same-flow segments into one skb (a chain of page frags)";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // Three same-flow segments
+    subgraph cluster_flow {
+        label="one flow: same src/dst IP + ports, contiguous seq, compatible flags";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+        node [shape=box, style="filled", fillcolor="#fef3c7"];
+        s0 [label="seg 0\nseq 1000..2459"];
+        s1 [label="seg 1\nseq 2460..3919"];
+        s2 [label="seg 2\nseq 3920..5379"];
+        s0 -> s1 -> s2 [color="#16a34a", arrowhead=none, label="next in seq"];
+    }
+
+    // The merged superpacket
+    merged [shape=record, style="filled", fillcolor="#dbeafe",
+            label="{merged skb (one trip up the stack)|<h>tiny linear head\n(IP+TCP headers)|<f0>frags[0]\nseg 0 payload|<f1>frags[1]\nseg 1 payload|<f2>frags[2]\nseg 2 payload}"];
+
+    s0 -> merged:h [style=bold, color="#16a34a"];
+    s0 -> merged:f0 [style=dashed, color="#16a34a", label="append as page frag"];
+    s1 -> merged:f1 [style=dashed, color="#16a34a"];
+    s2 -> merged:f2 [style=dashed, color="#16a34a"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="No 64KB allocation: a superpacket is a small\llinear header + a chain of page frags\l(same MAX_SKB_FRAGS design as Day 1).\l"];
+    merged -> note [style=invis];
+
+    // The non-mergeable packet
+    other [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+           label="different flow,\nOR PSH/FIN flag,\nOR sequence gap"];
+    flush [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+           label="NOT merged:\nflush held skb,\nstart fresh — its own\nseparate trip up the stack"];
+    other -> flush [style=bold, color="#dc2626"];
+
+    merged -> stack [label="flush → netif_receive_skb"];
+    flush -> stack;
+    stack [shape=box, style="filled", fillcolor="#e9d5ff",
+           label="up the stack\n(route, netfilter, socket)"];
+}
