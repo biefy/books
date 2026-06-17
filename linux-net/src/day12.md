@@ -63,11 +63,9 @@ int inet_add_protocol(const struct net_protocol *prot, unsigned char protocol)
 }
 ```
 
-So the chapter's phrases are literal, not metaphor:
+So slot-ownership in `inet_protos[]` is literal — but watch *who actually owns the slot*, because it isn't always the driver you'd guess:
 
-- **IPIP "is proto=4"** because `ipip.c` registers `.handler = ipip_rcv` (`net/ipv4/ipip.c:614`) at slot `IPPROTO_IPIP = 4` (`include/uapi/linux/in.h:36`). A proto-4 packet → `inet_protos[4]->handler` → `ipip_rcv`.
-- **6in4 "is proto=41"** — `IPPROTO_IPV6 = 41` (`in.h:52`), the IPv6-in-IPv4 slot.
-- **GRE "is registered as proto=47"** because `gre_demux.c` installs a single handler at slot 47 (`net/ipv4/gre_demux.c:199`):
+- **GRE "is registered as proto=47"** and genuinely owns its slot directly: `gre_demux.c` installs a single handler at slot 47 (`net/ipv4/gre_demux.c:199`):
 
   ```c
   static const struct net_protocol net_gre_protocol = {
@@ -80,11 +78,18 @@ So the chapter's phrases are literal, not metaphor:
 
   That one `gre_rcv` then *sub-dispatches by GRE-header version* (v0 standard GRE, v1 PPTP). "Dispatches by GRE-header version" means: the protocol table got you to GRE; GRE's own header tells it which GRE variant you are.
 
-**The key organizing fact of this whole chapter:** IPIP and GRE each own a slot in `inet_protos[]` and branch *at the IP-protocol table*. UDP-based tunnels (VXLAN, GENEVE, FoU/GUE) do **not** get their own slot — they ride inside UDP (proto 17), reach `udp_rcv` like any UDP packet, and are demuxed a *second* time, one layer deeper, at the UDP socket. That second demux is the next background section. Hold the two-table picture: IPIP/GRE branch at the protocol array; VXLAN/GENEVE branch at the UDP encap hook.
+- **IPIP "is proto=4"** in the sense that a proto-4 packet *ends up* at `ipip_rcv` — but slot 4 is **not** owned by `ipip.c`. `inet_protos[IPPROTO_IPIP=4]` is registered by `net/ipv4/tunnel4.c` via `inet_add_protocol(&tunnel4_protocol, IPPROTO_IPIP)` (`tunnel4.c:241`), whose handler is `tunnel4_rcv` (`tunnel4.c:218`, body at `:95`). `tunnel4_rcv` then walks a second-level list of `struct xfrm_tunnel` handlers, and `ipip.c` joins that list with `xfrm4_tunnel_register(&ipip_handler, AF_INET)` (`ipip.c:654`). So the real chain is `inet_protos[4] = tunnel4_rcv → tunnel4_handlers list → ipip_rcv`. There is an intermediate dispatcher — structurally the *same* shape as GRE's version branch, one layer below the protocol table.
+- **6in4 "is proto=41"** the same way: `inet_protos[41]` is `tunnel64_protocol`/`tunnel64_rcv` (`tunnel4.c:244`), and `sit.c`'s `ipip6_rcv` hooks the `tunnel64_handlers` list via `xfrm4_tunnel_register(..., AF_INET6)`. Again a shared demux, not a direct slot grab.
+
+**The lesson to keep:** owning a slot in `inet_protos[]` is literal, but only GRE here grabs its slot directly; IPIP and 6in4 reach their handlers through the shared `tunnel4`/`tunnel64` demux, which adds an intermediate dispatch step just like GRE's version branch. Don't assume `grep ipip_rcv` will turn up an `inet_add_protocol` call — it won't.
+
+**The key organizing fact of this whole chapter:** IPIP and GRE are reached through `inet_protos[]` — they have their own IP-protocol number and branch *at (or just below) the IP-protocol table*. UDP-based tunnels (VXLAN, GENEVE, FoU/GUE) do **not** get a protocol slot at all — they ride inside UDP (proto 17), reach `udp_rcv` like any UDP packet, and are demuxed a *second* time, one layer deeper, at the UDP socket. That second demux is the next background section. Hold the two-table picture: IPIP/GRE branch at the protocol array (possibly with a small second hop to the exact handler); VXLAN/GENEVE branch at the UDP encap hook.
 
 ![L3 protocol demux: inet_protos[] indexed by the IPv4 Protocol byte](diagrams/day12_ip_proto_demux.png)
 
 ## The tunnel zoo
+
+The five tunnels below differ only in what they wrap with and what metadata they carry — the diagram lines them up side by side so you can see the family resemblance before the prose enumerates each one.
 
 ![tunnel types](diagrams/day12_tunnels.png)
 
@@ -110,21 +115,21 @@ Outer IP + 4-byte GRE header + inner packet. The GRE header is variable: optiona
 
 ### VXLAN — Virtual eXtensible LAN (RFC 7348)
 
-The standard for datacenter overlays. Outer Ethernet + outer IP + outer UDP (port 4789) + 8-byte VXLAN header + inner Ethernet frame. (4789 is the IANA-assigned port; the Linux module's legacy default is 8472 for backward compatibility, so always set `dstport` explicitly as the labs do.)
+The standard for datacenter overlays. Outer Ethernet + outer IP + outer UDP (port 4789) + 8-byte VXLAN header + inner Ethernet frame.
 
 - **What:** Ethernet-in-UDP. The 24-bit VNI ("VXLAN Network Identifier") in the VXLAN header identifies the overlay — 16 million possible overlays per IP underlay.
 - **Why:** scale beyond 4096 VLANs (the 802.1Q limit). Lets a single physical IP network carry many isolated L2 networks. Each VNI is its own broadcast domain.
 - **When:** Kubernetes pod networking (Flannel, Calico in some modes, Cilium), datacenter SDN, multi-tenant cloud platforms. The dominant overlay today.
-- **Gotcha:** **MTU.** Outer headers cost ~50 bytes. If the underlay MTU is 1500, the tunnel netdev should be MTU 1450. Otherwise inner 1500-byte packets won't fit; either path-MTU discovery saves you (if ICMP works) or you get black-holed connections. Solutions: (1) set tunnel MTU correctly; (2) **MSS-clamp TCP** via iptables/nftables (`tcp option maxseg size set 1410`) — rewrite the *Maximum Segment Size* (MSS) option in each TCP SYN so both ends agree to send segments small enough to fit after the ~50B tunnel overhead (we cover TCP MSS properly in Phase 3); (3) jumbo-frame underlay. The fragmentation section below makes this mechanism concrete.
+- **Gotcha:** **MTU.** Outer headers cost ~50 bytes. If the underlay MTU is 1500, the tunnel netdev should be MTU 1450. Otherwise inner 1500-byte packets won't fit; either path-MTU discovery saves you (if ICMP works) or you get black-holed connections. Solutions: (1) set tunnel MTU correctly; (2) **MSS-clamp TCP** via nftables (`tcp option maxseg size set 1410`) or iptables (`-j TCPMSS --set-mss 1410`) — rewrite the *Maximum Segment Size* (MSS) option in each TCP SYN so both ends agree to send segments small enough to fit after the ~50B tunnel overhead (we cover TCP MSS properly in Phase 3); (3) jumbo-frame underlay. The fragmentation section below makes this mechanism concrete. (Second deployment trap: 4789 is the IANA-assigned port, but the Linux module's *legacy default* is 8472 for backward compatibility — always set `dstport` explicitly, as the labs do.)
 - **Where:** `drivers/net/vxlan/vxlan_core.c`. RX `vxlan_rcv` (line 1643) — registered as a UDP encap handler. TX `vxlan_xmit` (line 2722).
 
 ### GENEVE — successor to VXLAN
 
-Same Ethernet-in-UDP idea, but with extensible TLV options in the header. Designed to subsume VXLAN, NVGRE, and STT into one protocol with room to grow. UDP port 6081. Heavier in the option-parsing path, but production-deployed (some Kubernetes deployments, OVN). Like VXLAN, it has no `inet_protos[]` slot — it rides UDP and registers an encap handler. Code: `drivers/net/geneve.c`.
+Same Ethernet-in-UDP idea, but think VXLAN with room to bolt extra typed fields onto the header: extensible TLV options. Designed to subsume VXLAN, NVGRE, and STT into one protocol with room to grow. UDP port 6081. Heavier in the option-parsing path, but production-deployed (some Kubernetes deployments, OVN). Like VXLAN, it has no `inet_protos[]` slot — it rides UDP and registers an encap handler. Code: `drivers/net/geneve.c`.
 
 ### WireGuard — modern VPN (in-tree since 5.6)
 
-Outer UDP + WireGuard's own framing (handshake messages or transport messages with ChaCha20-Poly1305). Crypto-routed: peers identified by Curve25519 public keys, not by IP.
+Outer UDP + WireGuard's own framing (handshake messages or transport messages with ChaCha20-Poly1305). It is **crypto-routed**: the kernel decides where a packet goes by which key signed it, not by a configured tunnel endpoint — peers are identified by Curve25519 public keys, not by IP.
 
 - **What:** authenticated, encrypted L3 VPN over UDP.
 - **Why:** the only modern in-kernel VPN with serious cryptographic and code review. Replaces OpenVPN (userspace, slow), IPsec (complex), and other options for most use cases.
@@ -209,7 +214,7 @@ VXLAN passes `vxlan_rcv` as `cfg->encap_rcv` (`drivers/net/vxlan/vxlan_core.c:36
 IP proto 17 → inet_protos[17] → udp_rcv → (encap_rcv set?) → vxlan_rcv
 ```
 
-— the first stage at `inet_protos[]` (the section above), the second at the UDP socket. The `encap_rcv` **contract** is the three-way return value seen in the code: `0` = consumed (or dropped by the handler), `>0` = "not mine, resubmit as a normal UDP datagram" (it falls through to `sk_receive_queue`), `<0` = resubmit as IP proto `-ret`. That return value is *why* a stray UDP packet to port 4789 that isn't valid VXLAN still behaves like ordinary UDP — it just gets handed back.
+— the first stage at `inet_protos[]` (the section above), the second at the UDP socket. The `encap_rcv` **contract** is the three-way return value seen in the code: `0` = consumed (or dropped by the handler), `>0` = "not mine, resubmit as a normal UDP datagram" (it falls through to `sk_receive_queue`), `<0` = resubmit as IP proto `-ret`. VXLAN itself only ever uses the `0` path: `vxlan_rcv` returns `0` whether it successfully decaps and re-injects a frame *or* hits its `drop:` label (malformed header, missing VNI flag, unknown VNI, reserved bits set) — so a stray UDP packet to port 4789 that isn't valid VXLAN is **dropped**, not handed back to the socket queue. The `>0` "resubmit as ordinary UDP" path is real but used by *other* encap handlers (e.g. ESP-in-UDP), not VXLAN.
 
 ![UDP encap hook: encap_rcv diverts a tunnel socket to vxlan_rcv before sk_receive_queue](diagrams/day12_udp_encap_hook.png)
 
@@ -362,18 +367,15 @@ ping: sendmsg: Message too long
 2 packets transmitted, 1 received, +1 errors, 50% packet loss
 ```
 
-With the default `df unset`, the outer IP header's Don't-Fragment bit is *clear*,
-so the underlay would happily IP-fragment the ~1550-byte outer packet (1500-byte
-inner + ~50B overhead) and the peer would reassemble it. But the kernel's tunnel
-PMTU check (`skb_tunnel_check_pmtu`, defined in `net/ipv4/ip_tunnel_core.c` and
-called from `vxlan_core.c`) lowers the *inner* route's
-PMTU to 1450 as soon as it sees an oversize frame. The very first DF probe is sent
-before that cached PMTU exists, so `icmp_seq=1` succeeds; every subsequent DF send
-hits the cached 1450 PMTU and is rejected *locally* with `EMSGSIZE` — `ping:
-sendmsg: Message too long`. It is **not** an on-wire ICMP "fragmentation needed"
-and **not** a silent drop. (Append `df set` to the `ip link add ... type vxlan`
-lines to make it deterministic: then *every* packet fails with `Message too long`,
-100% loss, because the outer header now refuses to fragment.)
+This is the local `EMSGSIZE` short-circuit from the fragmentation Background above:
+`skb_tunnel_check_pmtu` caches a lowered inner-route PMTU the first time it sees an
+oversize frame, so the very first DF probe (sent before that cache exists) succeeds
+at `icmp_seq=1`, and every later DF send hits the cached 1450 PMTU and is rejected
+*locally* with `EMSGSIZE` — `ping: sendmsg: Message too long`. It is **not** an
+on-wire ICMP "fragmentation needed" and **not** a silent drop. (Append `df set` to
+the `ip link add ... type vxlan` lines to make it deterministic: then *every* packet
+fails with `Message too long`, 100% loss, because the outer header now refuses to
+fragment.)
 
 This is the classic VXLAN deployment failure. Production datacenters either use jumbo frames on the underlay (MTU 9000) or rigorously MSS-clamp TCP.
 
@@ -399,7 +401,7 @@ sudo ip link del br-underlay
 
 - **`net/ipv4/ip_input.c:189`** — `ip_protocol_deliver_rcu`. The L3 protocol demux: `inet_protos[protocol]->handler`. See how `ip_local_deliver_finish` (line 229) feeds it the IPv4 Protocol byte.
 
-- **`net/ipv4/protocol.c:32`** — `inet_add_protocol`. How IPIP (`ipip.c:614`) and GRE (`gre_demux.c:208`) claim slots 4 and 47 in `inet_protos[]`.
+- **`net/ipv4/protocol.c:32`** — `inet_add_protocol`. How GRE (`gre_demux.c:208`) claims slot 47 in `inet_protos[]` directly. IPIP and 6in4 do *not* call this themselves: slots 4 and 41 are owned by `tunnel4.c`'s `tunnel4_rcv`/`tunnel64_rcv` (`tunnel4.c:241`, `:244`), which dispatch to `ipip_rcv`/`ipip6_rcv` via the second-level `xfrm_tunnel` list (`ipip.c:654`).
 
 - **`net/ipv4/udp.c:2349`** — `udp_queue_rcv_one_skb`. The UDP encap divert (`encap_rcv` at line 2380) — the second demux that sends a VXLAN packet to `vxlan_rcv` instead of a socket queue.
 
@@ -424,7 +426,7 @@ sudo ip link del br-underlay
 ## Bullet Points
 
 - All tunnels are netdevs; their `ndo_start_xmit` encapsulates, a paired RX hook decapsulates.
-- **Two demux tables get a packet to a tunnel handler.** The L3 demux indexes `inet_protos[]` by the IPv4 Protocol byte (the L3 mirror of Day 2's EtherType `ptype_base[]`): proto 4 → `ipip_rcv`, 41 → 6in4, 47 → `gre_rcv`. UDP tunnels have **no** slot — they ride proto 17 → `udp_rcv` and branch a second time at the UDP `encap_rcv` hook.
+- **Two demux tables get a packet to a tunnel handler.** The L3 demux indexes `inet_protos[]` by the IPv4 Protocol byte (the L3 mirror of Day 2's EtherType `ptype_base[]`): proto 47 → `gre_rcv` (which owns its slot directly), proto 4 → `tunnel4_rcv` → `ipip_rcv`, proto 41 → `tunnel64_rcv` → 6in4 (these reach their handler via a shared second-level dispatch). UDP tunnels have **no** slot — they ride proto 17 → `udp_rcv` and branch a second time at the UDP `encap_rcv` hook.
 - **`encap_rcv`** is the pointer that makes a UDP socket a tunnel ingress: `setup_udp_tunnel_sock` installs it, `udp_queue_rcv_one_skb` diverts to it before `sk_receive_queue`. Returns 0=consumed, >0=normal UDP, <0=resubmit.
 - **Overlay vs underlay:** the underlay is the real IP network carrying outer packets; the overlay is the virtual network the inner packets live on. After decap, `gro_cells_receive` re-injects the inner frame (Day 2's RX entry, second time around).
 - **VTEP** = the encap/decap endpoint (a `vxlan` netdev); the **VXLAN FDB** maps inner MAC → remote VTEP IP (Day 11's bridge FDB mapped MAC → local port).
@@ -453,4 +455,4 @@ A VXLAN tunnel is set up between two hosts (underlay MTU 1500). A user complains
 
 You can now read the L2/L3 layers of the kernel network stack. Ethernet parsing, VLANs, ARP/NDP, the FIB and routing rules, IPv6 specifics, bridges, tunnels.
 
-Phase 3 (Days 13–19) goes up to L4: sockets, UDP, TCP state machine, congestion control, retransmission, sockopts, epoll/io_uring.
+Phase 3 (Days 13–19) goes up to L4: sockets, UDP, TCP state machine, congestion control, retransmission, sockopts, epoll/io_uring. Day 13 opens at the socket layer — the `struct sock` behind every connection — and works up to the TCP state machine.

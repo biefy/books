@@ -41,6 +41,8 @@ struct neigh_table arp_tbl = {
 
 So when this chapter says "REACHABLE for 30s" or "retrans 1s," the struct literally holds `30 * HZ` and `1 * HZ` *jiffies* — not seconds, not milliseconds.
 
+> **The 30s is a *base*, not a fixed window.** `.reachable_time = 30 * HZ` is only the seed: each entry's effective `reachable_time` is randomized by `neigh_rand_reach_time` (`net/core/neighbour.c:130`) to a value in `(1/2)*base … (3/2)*base` — roughly **15–45s** — and re-randomized periodically. The point is to avoid a fleet of entries all expiring on the same jiffy. So "~30s" throughout this chapter means "30s base, 15–45s in practice."
+
 The neighbour's timestamp fields are jiffies snapshots too. In `struct neighbour` (`include/net/neighbour.h:140`):
 
 ```c
@@ -176,7 +178,7 @@ A neighbour entry walks through states — and now you know the timer is what mo
 - **STALE** — has MAC but old. Next packet triggers a confirmation probe.
 - **DELAY** — sent a packet expecting the L4 to confirm reachability quickly.
 - **PROBE** — actively probing via ARP.
-- **FAILED** — ARP timed out. Probe limits are state-dependent. INCOMPLETE resolution sends up to `mcast_solicit` (default 3) **multicast** ARP requests, spaced by `retrans_time` (1s), then → FAILED; no unicast is possible here because the MAC is still unknown. (`neigh_max_probes()` returns `ucast + mcast = 6` for INCOMPLETE, but `__neigh_event_send` seeds the probe counter to `UCAST_PROBES` = 3 on entry — `neighbour.c:1224` — so `arp_solicit`'s `probes -= UCAST_PROBES` is always ≥ 0 and it always takes the *multicast* branch. Net result: 3 multicast requests, then FAILED.) PROBE-state revalidation — when an entry already **has** an old MAC — sends up to `ucast_solicit` (default 3) **unicast** probes instead.
+- **FAILED** — resolution timed out. INCOMPLETE sends ~3 multicast ARP requests ~1s apart, then fails; PROBE-state revalidation (entry already has a stale MAC) sends up to 3 *unicast* probes instead. (Full derivation — why the budget is 6 but only 3 are sent — is in the timer-background section above.)
 
 The state machine is the canonical answer to "why does my first ping take 1ms longer than subsequent ones?" — first packet goes through INCOMPLETE → REACHABLE; later packets hit a cached entry directly.
 
@@ -233,7 +235,7 @@ if (entries >= gc_thresh3 ||
 
 That's the whole three-tier behaviour, grounded:
 
-- **Below `gc_thresh1` (128):** the periodic GC doesn't even bother — `neigh_periodic_work` early-outs with `if (atomic_read(&tbl->entries) < gc_thresh1) return;` (`net/core/neighbour.c:1000`). (That periodic GC is a `delayed_work` running in the process context Day 5 introduced for netns teardown — no need to re-teach it.)
+- **Below `gc_thresh1` (128):** the periodic GC doesn't even bother — `neigh_periodic_work` skips the bucket scan with `if (atomic_read(&tbl->entries) < gc_thresh1) goto out;` (`net/core/neighbour.c:1000`), and the `out:` path still re-queues the delayed_work, so the worker keeps rescheduling itself. (That periodic GC is a `delayed_work` running in the process context Day 5 introduced for netns teardown — no need to re-teach it.)
 - **At/above `gc_thresh2` (512)** *and* more than 5 s (`5 * HZ`) since the last flush: a **forced synchronous GC** runs, `neigh_forced_gc` (`net/core/neighbour.c:253`), reclaiming stale entries back down toward `gc_thresh2`.
 - **At/above `gc_thresh3` (1024):** if even forced GC can't get back under the cap, creation **fails with `-ENOBUFS`** and emits the rate-limited **`"%s: neighbor table overflow!"`** — the exact dmesg symptom this chapter and the Check question describe.
 
