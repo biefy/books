@@ -1,0 +1,50 @@
+digraph lock_backlog {
+    rankdir=TB;
+    labelloc=t;
+    label="The socket lock, the backlog, and the receive wakeup";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.5; ranksep=0.8;
+
+    subgraph cluster_proc {
+        label="process context (syscall: recv/send)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        lock [shape=box, style="filled", fillcolor="#dbeafe",
+              label="lock_sock(sk)\nsleeping owner lock held"];
+        rel [shape=box, style="filled", fillcolor="#dbeafe",
+             label="release_sock(sk)\n→ __release_sock()\ndrains sk_backlog"];
+        lock -> rel [style=dashed, label="syscall finishes"];
+    }
+
+    subgraph cluster_softirq {
+        label="softirq context (NET_RX) — must not sleep";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+        arrive [shape=box, style="filled", fillcolor="#fef3c7",
+                label="skb arrives\nfor this sock"];
+        branch [shape=diamond, style="filled", fillcolor="#e9d5ff",
+                label="socket\nlocked?"];
+        arrive -> branch;
+    }
+
+    backlog [shape=box, style="filled", fillcolor="#fee2e2",
+             label="sk_backlog\n(second queue inside struct sock)\nparked until lock released"];
+    rxq [shape=box, style="filled", fillcolor="#dcfce7",
+         label="sk_receive_queue\n__skb_queue_tail(list, skb)"];
+
+    branch -> backlog [label="yes", color="#dc2626", style=bold];
+    branch -> rxq [label="no", color="#16a34a", style=bold];
+
+    rel -> rxq [color="#16a34a", style=bold, label="drain through\nreal recv path"];
+
+    ready [shape=box, style="filled", fillcolor="#dcfce7",
+           label="sk->sk_data_ready(sk)\n= sock_def_readable"];
+    wake [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+          label="wake sleeper on socket_wq\n(blocked recv / connect / accept)"];
+
+    rxq -> ready [label="then"];
+    ready -> wake [color="#7c3aed", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+          label="the same wait queue is what poll()/epoll()\lregister on for readiness (Day 19).\l"];
+    wake -> note [style=invis];
+}

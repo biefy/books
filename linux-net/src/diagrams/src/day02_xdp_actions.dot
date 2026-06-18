@@ -1,0 +1,50 @@
+digraph xdp_actions {
+    rankdir=TB;
+    labelloc=t;
+    label="XDP: five actions on the raw frame, before any sk_buff exists";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    dma [shape=box, style="filled", fillcolor="#fef3c7",
+         label="DMA frame\n(raw bytes in driver RX page)"];
+
+    xdpbuff [shape=record, style="filled", fillcolor="#dbeafe",
+             label="{xdp_buff (stack-allocated lens)|data|data_end|data_meta|data_hard_start}"];
+
+    prog [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+          label="XDP BPF program\nruns in driver poll, pre-skb"];
+
+    dma -> xdpbuff [label="wrap (4 pointers)"];
+    xdpbuff -> prog [style=bold, color="#7c3aed"];
+
+    // Consuming actions
+    subgraph cluster_consume {
+        label="consume the frame — no skb ever built";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#dc2626";
+        aborted [shape=box, style="filled", fillcolor="#fee2e2", label="XDP_ABORTED\ndrop + tracepoint"];
+        drop [shape=box, style="filled", fillcolor="#fee2e2", label="XDP_DROP\nfree in-driver"];
+        tx [shape=box, style="filled", fillcolor="#fee2e2", label="XDP_TX\nbounce out same NIC"];
+        redir [shape=box, style="filled", fillcolor="#fee2e2", label="XDP_REDIRECT\nother dev / CPU / AF_XDP"];
+    }
+
+    pass [shape=box, style="filled", fillcolor="#dcfce7",
+          label="XDP_PASS\nthe ONLY code that\nbuilds a real packet"];
+
+    prog -> aborted;
+    prog -> drop;
+    prog -> tx;
+    prog -> redir;
+    prog -> pass [style=bold, color="#16a34a"];
+
+    buildskb [shape=box, style="filled", fillcolor="#fef3c7",
+              label="build_skb()\nwrap the DMA page (zero-copy)"];
+    stack [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+           label="→ the normal stack\n(eth_type_trans, GRO, ip_rcv...)"];
+    pass -> buildskb [style=bold, color="#16a34a"];
+    buildskb -> stack [style=bold, color="#16a34a"];
+
+    // Inset contrast
+    contrast [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+              label="xdp_buff: 4 stack pointers, no refcounts,\lthrown away when XDP returns.\lsk_buff: slab descriptor + users/dataref\lrefcounts + headroom machinery.\l"];
+    xdpbuff -> contrast [style=invis];
+}

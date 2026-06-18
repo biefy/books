@@ -1,0 +1,33 @@
+digraph nfct_word {
+    rankdir=TB;
+    labelloc=t;
+    label="skb->_nfct: one machine word holds a pointer AND the per-packet state";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The packed 64-bit word
+    word [shape=record, style="filled", fillcolor="#dbeafe",
+          label="{ skb-\>_nfct  (one unsigned long, 64 bits) | { <ptr> struct nf_conn *  (high 61 bits) | <info> low 3 bits = ip_conntrack_info } }"];
+
+    // The two masks
+    ptrmask [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+             label="skb_nfct():\nword & NFCT_PTRMASK\n(~7UL -> clears low 3 bits)"];
+    infomask [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+              label="ctinfo:\nword & NFCT_INFOMASK\n(7UL -> keeps low 3 bits)"];
+
+    word:ptr -> ptrmask [color="#7c3aed", style=bold, label="recover pointer"];
+    word:info -> infomask [color="#d97706", style=bold, label="recover state"];
+
+    // Results
+    conn [shape=box, style="filled", fillcolor="#dbeafe",
+          label="struct nf_conn\n(which connection)"];
+    ptrmask -> conn [color="#7c3aed"];
+
+    states [shape=record, style="filled", fillcolor="#fef3c7",
+            label="{ what this packet is | 0 ESTABLISHED | 1 RELATED | 2 NEW | 3 = IP_CT_IS_REPLY | 3 ESTABLISHED_REPLY | 4 RELATED_REPLY }"];
+    infomask -> states [color="#d97706"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="Pointers are aligned, so the low 3 bits\lare always 0 and free to reuse.\lThat is why the state enum must fit in\l3 bits (0..7), and why IP_CT_IS_REPLY = 3\ldoubles as a direction divider.\l"];
+    states -> note [style=invis];
+}

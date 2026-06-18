@@ -1,0 +1,36 @@
+digraph gso_marker_fork {
+    rankdir=TB;
+    labelloc=t;
+    label="The GSO marker rides the TX path; the driver boundary forks on netif_needs_gso";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The big skb travelling down
+    skb [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+         label="one big skb (up to 64 KB)\ntravels down TX path\ntcp_transmit_skb → ip_queue_xmit → __dev_queue_xmit"];
+
+    marker [shape=record, style="filled", fillcolor="#dcfce7",
+            label="{skb_shared_info|gso_size = 1460|gso_segs = 44|gso_type = SKB_GSO_TCPV4}"];
+
+    skb -> marker [style=dashed, color="#16a34a", label="carries"];
+
+    // The fork
+    fork [shape=diamond, style="filled", fillcolor="#e9d5ff",
+          label="netif_needs_gso?\n(validate_xmit_skb,\ndev.c:4019/4036)"];
+    skb -> fork [style=bold];
+
+    // TSO branch
+    tso [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+         label="NIC supports TSO  →  false\nwhole skb handed to\nndo_start_xmit as-is\n(hardware does the split)"];
+
+    // GSO branch
+    gso [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+         label="NIC can't  →  true\nskb_gso_segment() (dev.c:4039)\nsplits in software first"];
+
+    chain [shape=record, style="filled", fillcolor="#dbeafe",
+           label="{skb|skb|skb| … |skb}"];
+
+    fork -> tso [label="hardware", color="#2563eb", style=bold];
+    fork -> gso [label="software", color="#dc2626", style=bold];
+    gso -> chain [label="chain of MTU-sized skbs"];
+}

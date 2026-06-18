@@ -1,0 +1,47 @@
+digraph static_key {
+    rankdir=TB;
+    labelloc=t;
+    label="The NF_HOOK call site: a static key patches the machine code in place";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    compound=true;
+
+    // LEFT panel: key OFF
+    subgraph cluster_off {
+        label="LEFT — key OFF (no hooks registered): site is a nop";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+
+        off_site [shape=record, style="filled", fillcolor="#dbeafe",
+                  label="{NF_HOOK call site|nop  (fall through)}"];
+        off_okfn [shape=box, style="filled", fillcolor="#fef3c7",
+                  label="okfn(skb)\nnext pipeline stage"];
+        off_slow [shape=box, style="filled,rounded", fillcolor="#e2e8f0", fontcolor="#94a3b8",
+                  label="nf_hook_slow(...)\n(NOT reached — greyed out)\nwalk priority list"];
+
+        off_site -> off_okfn [style=bold, color="#16a34a", label="CPU sails through:\nno load, no compare,\nno predictor slot"];
+        off_site -> off_slow [style=dashed, color="#cbd5e1"];
+    }
+
+    // RIGHT panel: key ON
+    subgraph cluster_on {
+        label="RIGHT — key ON (a hook registered): site live-patched to a jmp";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#7c3aed";
+
+        on_site [shape=record, style="filled", fillcolor="#dbeafe",
+                 label="{NF_HOOK call site|jmp  nf_hook_slow}"];
+        on_slow [shape=box, style="filled", fillcolor="#dcfce7",
+                 label="nf_hook_slow(...)\nwalk net->nf.hooks_<fam>[hook]\nin priority order"];
+        on_okfn [shape=box, style="filled", fillcolor="#fef3c7",
+                 label="okfn(skb)\n(only if all verdicts ACCEPT)"];
+
+        on_site -> on_slow [style=bold, color="#7c3aed", label="jumps into\nslow path"];
+        on_slow -> on_okfn [label="all ACCEPT"];
+    }
+
+    // center transition arrow
+    transition [shape=note, style="filled", fillcolor="#dcfce7", fontsize=10,
+                label="nf_register_net_hook\l   -> static_key_slow_inc(&nf_hooks_needed[pf][hook])\l      -> text_poke rewrites the exact bytes:  nop  =>  jmp\l(paid ONCE at registration, never per-packet)\l"];
+
+    off_site -> transition [ltail=cluster_off, color="#dc2626", style=bold, label="register"];
+    transition -> on_site [lhead=cluster_on, color="#dc2626", style=bold];
+}

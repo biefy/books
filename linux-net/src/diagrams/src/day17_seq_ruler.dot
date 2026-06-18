@@ -1,0 +1,50 @@
+digraph seq_ruler {
+    rankdir=TB;
+    labelloc=t;
+    label="The byte-stream ruler: snd_una, snd_nxt, write_seq, and the recovery point";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The ruler: a horizontal row of colored cells, edge to edge.
+    subgraph cluster_ruler {
+        label="byte stream  (low seq --------------------------------> high seq)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", height=0.9, width=1.5];
+
+        c_ack  [fillcolor="#dcfce7", label="acknowledged\n(snd_una has\nslid past)"];
+        c_hole [fillcolor="#fee2e2", label="6000-6999\nSACKed HOLE\n(lost)"];
+        c_inf  [fillcolor="#dbeafe", label="in-flight\n[snd_una, snd_nxt)\n(shaded)"];
+        c_buf  [fillcolor="#fef3c7", label="buffered, unsent\n(in send buffer)"];
+
+        c_ack -> c_hole -> c_inf -> c_buf [arrowhead=none, color="#475569", penwidth=2];
+    }
+
+    // Boundary markers above the ruler
+    una  [shape=box, style="filled,rounded", fillcolor="#dbeafe", fontsize=10,
+          label="snd_una\nLEFT edge:\noldest unacked byte"];
+    nxt  [shape=box, style="filled,rounded", fillcolor="#dbeafe", fontsize=10,
+          label="snd_nxt\nRIGHT edge:\nfirst byte not yet sent"];
+    wseq [shape=box, style="filled,rounded", fillcolor="#fef3c7", fontsize=10,
+          label="write_seq\ntail of data app\nhas handed to socket"];
+
+    una  -> c_hole [color="#2563eb", arrowhead=vee, label="left edge"];
+    nxt  -> c_buf  [color="#2563eb", arrowhead=vee, label="right edge"];
+    wseq -> c_buf  [color="#d97706", arrowhead=vee];
+
+    // Recovery point = high_seq
+    hseq [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=10,
+          label="high_seq (recovery point)\n= snd_nxt at onset of loss.\nRecovery ends when\nsnd_una crosses it."];
+    hseq -> c_inf [color="#7c3aed", style=dashed, arrowhead=vee];
+
+    // Receiver cumulative-ACK + duplicate-ACK story (below the ruler)
+    rcv  [shape=box, style="filled,rounded", fillcolor="#dcfce7", fontsize=10,
+          label="receiver: cumulative ACK\nalways re-advertises the\nfirst gap = ACK 6000"];
+    c_hole -> rcv [color="#16a34a", style=bold, arrowhead=vee, label="ACK 6000"];
+
+    later [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+           label="7000-7999, 8000-8999 arrive but sit\lPAST the hole, so each re-triggers the\lSAME ACK 6000 = the duplicate-ACK signal.\l"];
+    rcv -> later [color="#dc2626", style=dashed, arrowhead=vee, label="bounce off\nstuck number"];
+
+    { rank=same; una; nxt; wseq; }
+    { rank=same; rcv; later; }
+}

@@ -1,0 +1,34 @@
+digraph tcp_option_budget {
+    rankdir=TB;
+    labelloc=t;
+    label="A TCP segment's option area is a hard 40-byte shared budget — MPTCP rents space in it";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The full segment laid out top to bottom
+    header [shape=record, style="filled", fillcolor="#dbeafe",
+            label="{20-byte fixed TCP header|{ports|seq|ack_seq|<doff> doff:4 (header length in 32-bit words)|flags / window / checksum}}"];
+
+    note_doff [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+               label="doff is only 4 bits -> max 15 words = 60-byte header.\l60 - 20 = 40 bytes of options, no more.\l"];
+    header:doff -> note_doff [style=dashed, color="#dc2626", constraint=false];
+
+    // The 40-byte budget bar: competing options as one record
+    budget [shape=record, style="filled", fillcolor="#fef3c7",
+            label="{40-byte option region  (MAX_TCP_OPTION_SPACE = 40)|{<mptcp> mptcp DSS\nKind=30 | Len | sub=DSS | data_seq/subseq/len|<ts> Timestamp\n(10 bytes)|<sack> SACK blocks\n(up to ~34 bytes)|<pad> NOP / EOL\npad}}"];
+
+    payload [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+             label="payload bytes\n(doff tells the receiver where this begins)"];
+
+    header -> budget [label="options follow the fixed header", color="#2563eb"];
+    budget -> payload [label="payload follows the options", color="#16a34a"];
+
+    // Highlight the competition
+    note_budget [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+                 label="Every DSS byte spent is a byte unavailable\lto Timestamp or SACK. This scarcity is why\lDSS is packed into a terse {data_seq, subflow_seq, data_len}.\l"];
+    budget:mptcp -> note_budget [style=dashed, color="#7c3aed", constraint=false];
+
+    note_kind [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+               label="One Kind for all MPTCP: TCPOPT_MPTCP = 30.\lThe 4-bit subtype nibble selects MP_CAPABLE / MP_JOIN / DSS / ADD_ADDR.\l"];
+    budget:mptcp -> note_kind [style=invis];
+}

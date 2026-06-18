@@ -1,0 +1,37 @@
+digraph cc_framework {
+    rankdir=TB;
+    labelloc=t;
+    label="TCP CC framework: one ops struct (vtable), many algorithms, runtime selection";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    ops [shape=box, style="filled", fillcolor="#dbeafe", fontname="Helvetica", fontsize=11,
+         label=<<b>struct tcp_congestion_ops</b><br/><br/>
+<font face="Monaco" point-size="9">cong_avoid / cong_control &mdash; increase side (Bg 1)<br align="left"/>
+ssthresh &mdash; decrease side on loss (Bg 1)<br align="left"/>
+set_state &mdash; ca_state moves (Bg 2)<br align="left"/>
+cwnd_event &mdash; ca_event stream incl. ECN (Bg 2/3)<br align="left"/>
+in_ack_event &mdash; ECN/alpha hook, DCTCP (Bg 3)<br align="left"/>
+pkts_acked &mdash; RTT feedback (Bg 4)<br align="left"/>
+ssthresh / undo_cwnd / init / name / owner<br align="left"/></font>>];
+
+    algos [shape=box, style="filled", fillcolor="#fef3c7", fontname="Helvetica", fontsize=10,
+           label=<<b>Algorithms in tree</b><br/><br/>
+<font face="Monaco" point-size="9">tcp_cubic &mdash; default since 2.6.19, cubic growth<br align="left"/>
+tcp_bbr &mdash; model-based, cong_control (4.9+)<br align="left"/>
+tcp_reno &mdash; classic AIMD reference<br align="left"/>
+tcp_dctcp &mdash; ECN/alpha, datacenter only<br align="left"/>
+tcp_vegas / bic / westwood / yeah / ...<br align="left"/><br/></font>
+<font point-size="9">each registers via tcp_register_congestion_control;<br align="left"/>
+modules in /lib/modules/.../net/ipv4/tcp_*.ko<br align="left"/></font>>];
+
+    sel [shape=box, style="filled", fillcolor="#dcfce7", fontname="Helvetica", fontsize=10,
+         label=<<b>Selection</b><br/><br/>
+<font face="Monaco" point-size="9">system default: sysctl net.ipv4.tcp_congestion_control<br align="left"/>
+per-socket: setsockopt(TCP_CONGESTION, "bbr")<br align="left"/>
+per-route: ip route ... congctl bbr<br align="left"/>
+available: sysctl net.ipv4.tcp_available_congestion_control<br align="left"/></font>>];
+
+    ops -> algos [label="  each fills in\nthe callbacks", fontname="Helvetica", fontsize=9, color="#2563eb"];
+    algos -> sel [label="  a socket points at\none registered instance", fontname="Helvetica", fontsize=9, color="#16a34a"];
+}

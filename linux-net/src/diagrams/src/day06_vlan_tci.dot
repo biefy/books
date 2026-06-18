@@ -1,0 +1,28 @@
+digraph vlan_tci {
+    rankdir=TB;
+    labelloc=t;
+    label="802.1Q tag — 4 bytes inserted between src MAC and the original EtherType";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // Where the tag sits in the frame
+    frame [shape=record, style="filled", fillcolor="#dbeafe",
+           label="{ dst MAC[6] | src MAC[6] | <tag> 802.1Q tag[4]\n(inserted) | orig EtherType[2]\n= h_vlan_encapsulated_proto } "];
+
+    // The 4-byte tag exploded into TPID + TCI
+    tag [shape=record, style="filled", fillcolor="#fef3c7",
+         label="{ <tpid> TPID[16 bits]\n0x8100 C-VLAN\n0x88A8 S-VLAN (QinQ) | <tci> TCI[16 bits] } "];
+
+    frame:tag -> tag:tpid [color="#d97706", style=bold, label="expand 4 bytes"];
+
+    // The TCI split three ways
+    tci [shape=record, style="filled", fillcolor="#dcfce7",
+         label="{ <pcp> PCP[3]\n802.1p priority\nVLAN_PRIO_MASK 0xe000 | <dei> DEI/CFI[1]\nDrop Eligible\nVLAN_CFI_MASK 0x1000 | <vid> VID[12]\nVLAN ID\nVLAN_VID_MASK 0x0fff } "];
+
+    tag:tci -> tci:dei [color="#16a34a", style=bold, label="split 16 bits"];
+
+    // The 4096 consequence
+    note [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+          label="VID is only 12 bits ->\l  2^12 = VLAN_N_VID 4096 VLAN IDs\l  (0 and 4095 reserved)\l  a VID of 100 fits comfortably\l"];
+    tci:vid -> note [color="#7c3aed", style=dashed, constraint=false];
+}

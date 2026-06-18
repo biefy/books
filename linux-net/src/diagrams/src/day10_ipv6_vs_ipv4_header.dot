@@ -1,0 +1,42 @@
+digraph ipv6_vs_ipv4_header {
+    rankdir=TB;
+    labelloc=t;
+    label="IPv4 header vs IPv6 base header: what's gone, and the nexthdr chain";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // LEFT: IPv4 header
+    subgraph cluster_v4 {
+        label="IPv4 header (variable length: IHL words of header + options)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        v4 [shape=record, style="filled", fillcolor="#dbeafe",
+            label="{ ver | IHL (GONE) | TOS | tot_len = header + payload }|{ id | flags/frag-off }|{ TTL | proto | hdr checksum (GONE) }|{ 4-byte src addr }|{ 4-byte dst addr }|{ options ... (variable) }"];
+        v4note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+                label="IHL + header-checksum GONE in IPv6\loptions moved to the exthdr chain\lintegrity now handled by L4 (pseudo-hdr)\ltot_len INCLUDES the 20-byte header\l"];
+    }
+
+    // RIGHT: IPv6 base header
+    subgraph cluster_v6 {
+        label="IPv6 base header (always exactly 40 bytes, no options inside)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        v6 [shape=record, style="filled", fillcolor="#dbeafe",
+            label="{ version=6 | traffic class | 20-bit flow label }|{ payload_len }|{ <nh> nexthdr | hop_limit (= TTL) }|{ 16-byte src addr (saddr) }|{ 16-byte dst addr (daddr) }"];
+        v6note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+                label="payload_len = length AFTER the 40 bytes\l(does NOT include the header)\lno IHL, no checksum\l"];
+    }
+
+    // The extension-header chain that nexthdr points into
+    ext0 [shape=record, style="filled", fillcolor="#fef3c7",
+          label="<h> ext header (e.g. Hop-by-Hop=0)| <nh> nexthdr"];
+    ext1 [shape=record, style="filled", fillcolor="#fef3c7",
+          label="<h> ext header (e.g. Routing=43)| <nh> nexthdr"];
+    l4 [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+        label="L4 payload\n(nexthdr=6 TCP, 17 UDP,\n58 ICMPv6, or NEXTHDR_NONE=59)"];
+
+    v6:nh -> ext0:h [style=bold, color="#d97706", label="nexthdr names\nthe first ext header"];
+    ext0:nh -> ext1:h [style=bold, color="#d97706"];
+    ext1:nh -> l4 [style=bold, color="#16a34a", label="ends at L4"];
+
+    // layout glue
+    v4 -> v6 [style=invis];
+}

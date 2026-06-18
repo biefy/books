@@ -1,0 +1,51 @@
+digraph rx_reframe {
+    rankdir=TB;
+    labelloc=t;
+    label="RX re-framing: TCP smears TLS records across segment cuts; tls_strp buffers until each record is whole";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // ---------- TCP byte stream as it arrives ----------
+    subgraph cluster_tcp {
+        label="TCP byte stream (Day 17: no message boundaries — segments cut arbitrarily)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", fillcolor="#fef3c7"];
+        seg1 [label="seg 1"];
+        seg2 [label="seg 2"];
+        seg3 [label="seg 3"];
+        seg1 -> seg2 -> seg3 [arrowhead=none, color="#94a3b8"];
+    }
+
+    // ---------- true TLS record boundaries ----------
+    subgraph cluster_recs {
+        label="true TLS record boundaries (do NOT align to segments)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        node [shape=record, style="filled", fillcolor="#dbeafe"];
+        recA [label="{record A|hdr 5B|ciphertext|tag}"];
+        recB [label="{record B|hdr 5B|ciphertext|tag}"];
+    }
+
+    // misalignment: segments map onto records crossing the cuts
+    seg1 -> recA [style=dashed, color="#dc2626", label="seg1 = recA head"];
+    seg2 -> recA [style=dashed, color="#dc2626", label="seg2 = recA tail + recB head"];
+    seg2 -> recB [style=dashed, color="#dc2626"];
+    seg3 -> recB [style=dashed, color="#dc2626", label="seg3 = recB tail"];
+
+    // ---------- the strparser ----------
+    strp [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+          label="tls_strp (net/tls/tls_strp.c)\n1. accumulate incoming bytes\n2. read 5B header -> declared length\n3. wait until a FULL record arrived\n   (may span several segments)"];
+    recA -> strp [color="#7c3aed"];
+    recB -> strp [color="#7c3aed"];
+
+    decrypt [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+             label="AES-GCM decrypt + verify tag\n(one complete record at a time)"];
+    strp -> decrypt [style=bold, color="#16a34a", label="hand off exactly\none whole record"];
+
+    plain [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+           label="plaintext -> read()"];
+    decrypt -> plain [color="#d97706"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="Mirror image of TX framing (Background 2).\lRX-only: peer chose record sizes; TCP smeared them.\lYou cannot authenticate a partial record.\l(cf. Day 17 sequence-number ruler diagram.)\l"];
+    decrypt -> note [style=invis];
+}

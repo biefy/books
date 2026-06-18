@@ -1,0 +1,49 @@
+digraph token_bucket {
+    rankdir=LR;
+    labelloc=t;
+    label="The token bucket: rate fills it, packets spend L tokens to pass";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The tap + bucket
+    subgraph cluster_bucket {
+        label="the bucket (tbf_sched_data)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        tap [shape=box, style="filled", fillcolor="#e9d5ff",
+             label="tap drips at\nrate (tokens/s)"];
+        bucket [shape=record, style="filled", fillcolor="#fef3c7",
+                label="{ depth = burst (MTU or more) | tokens (current fill) | overflow lost }"];
+        tap -> bucket [label="drip", color="#d97706", style=bold];
+    }
+
+    // incoming packets
+    pkt [shape=circle, style="filled", fillcolor="#dbeafe", width=0.5,
+         label="pkt\nL"];
+
+    pkt -> bucket [label="spend L tokens", color="#2563eb"];
+
+    // top path: tokens available
+    sent [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+          label="tokens >= L:\npacket flows through,\ntokens -= L"];
+    // bottom path: empty
+    dropped [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+             label="bucket empty:\nwait would exceed latency\n=> DROP\n(overlimits/dropped climb)"];
+
+    bucket -> sent [label="enough", color="#16a34a", style=bold];
+    bucket -> dropped [label="short + slow refill", color="#dc2626", style=bold];
+
+    // HTB borrowing inset
+    subgraph cluster_htb {
+        label="inset: HTB child borrows from parent up to ceil";
+        fontname="Helvetica"; fontsize=10; style="rounded"; color="#7c3aed";
+        parent [shape=box, style="filled", fillcolor="#dbeafe",
+                label="parent class\n(spare tokens)"];
+        child [shape=box, style="filled", fillcolor="#dbeafe",
+               label="child class\nrate -> ceil"];
+        parent -> child [label="borrow up to ceil", color="#7c3aed", style=dashed];
+    }
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="rate  = steady-state ceiling\lburst = idle head-start (depth)\llatency = max wait before drop\l"];
+    sent -> note [style=invis];
+}

@@ -1,0 +1,48 @@
+digraph funcgraph_line {
+    rankdir=TB;
+    labelloc=t;
+    label="Anatomy of one raw trace-cmd report line (function_graph)";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The literal line, split into labeled record cells
+    line [shape=record, style="filled", fillcolor="#fef3c7", fontsize=11,
+          label="{ nc-506899 | [001] | ...1. | 245526.239429: | funcgraph_entry: | \|  tcp_sendmsg() \{ }"];
+
+    // Callout notes, one per column
+    pid    [shape=note, style="filled", fillcolor="#dbeafe", fontsize=9,
+            label="process-PID\lthe task running\lwhen recorded\l"];
+    cpu    [shape=note, style="filled", fillcolor="#dbeafe", fontsize=9,
+            label="CPU number\lthis event on CPU 1\l"];
+    flags  [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+            label="four context flags\l1 irqs-off  (. = on)\l2 need-resched (. = none)\l3 hardirq/softirq\l   . = process (SEND)\l   s = softirq (RECV)\l4 preempt-depth (1)\l"];
+    ts     [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+            label="timestamp sec.usec\lsubtract these\lto get durations (us)\l"];
+    kind   [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+            label="entry vs exit\lfuncgraph_entry: opens\lfuncgraph_exit: closes\l"];
+    brace  [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+            label="depth-indented fn + \{\lindent = call depth\lmatching \} on exit line\l"];
+
+    pid   -> line [style=dashed, color="#2563eb", arrowhead=vee];
+    cpu   -> line [style=dashed, color="#2563eb", arrowhead=vee];
+    flags -> line [style=dashed, color="#16a34a", arrowhead=vee];
+    ts    -> line [style=dashed, color="#d97706", arrowhead=vee];
+    kind  -> line [style=dashed, color="#7c3aed", arrowhead=vee];
+    brace -> line [style=dashed, color="#7c3aed", arrowhead=vee];
+
+    // Duration mini-panel below
+    subgraph cluster_dur {
+        label="Computing total elapsed time";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        entry [shape=box, style="filled", fillcolor="#dcfce7", fontsize=9,
+               label="first entry\ntcp_sendmsg() \{\n245526.239429"];
+        exit  [shape=box, style="filled", fillcolor="#fee2e2", fontsize=9,
+               label="matching outer exit\n}\n245526.239XYZ"];
+        dur   [shape=box, style="filled,rounded", fillcolor="#fde68a", fontsize=10,
+               label="duration =\n239XYZ - 239429 us"];
+        entry -> dur [label="start", color="#16a34a"];
+        exit  -> dur [label="end", color="#dc2626"];
+    }
+
+    line -> entry [style=invis];
+}

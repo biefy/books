@@ -1,0 +1,51 @@
+digraph hol_blocking {
+    rankdir=TB;
+    labelloc=t;
+    label="Head-of-line blocking lives in the msk reassembly rbtree — buffer requirement is BDP x N";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The two subflows feeding the receiver
+    subgraph cluster_paths {
+        label="Two subflows feeding ONE msk receiver";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        slow [shape=box, style="filled", fillcolor="#fee2e2",
+              label="SLOW subflow (high RTT)\nlow-DSN bytes 100..199\nSTILL IN FLIGHT"];
+        fast [shape=box, style="filled", fillcolor="#dbeafe",
+              label="FAST subflow (low RTT)\nhigh-DSN bytes 200..499\nalready arrived"];
+    }
+
+    // The msk out-of-order reassembly rbtree
+    subgraph cluster_ooo {
+        label="msk-level out_of_order_queue — an rbtree keyed by DSN (above all subflows)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#7c3aed";
+        node [shape=record, style="filled", fillcolor="#fef3c7"];
+        s2 [label="{skb|map_seq=200|end_seq=299}"];
+        s3 [label="{skb|map_seq=300|end_seq=399}"];
+        s4 [label="{skb|map_seq=400|end_seq=499}"];
+        s2 -> s3 -> s4 [color="#7c3aed", arrowhead=none, label="rbtree order by DSN"];
+        last [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+              label="ooo_last_skb -> fast-path coalesce\lwhen new data follows the last queued skb\l(skip the O(log N) lookup).\l"];
+        s4 -> last [style=dashed, color="#16a34a"];
+    }
+
+    fast -> s2 [label="deposit high-DSN skbs", color="#2563eb", style=bold];
+
+    // The delivery cursor blocked at the gap
+    cursor [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+            label="DSN delivery cursor\nnext-needed = DSN 100\nGAP: the app must get bytes in DSN order"];
+    slow -> cursor [label="cursor waits on these", color="#dc2626", style=bold];
+
+    hol [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+         label="HEAD-OF-LINE BLOCKING (across subflows):\lthe queued high-DSN skbs cannot be delivered until\lthe slow path's low-DSN bytes 100..199 fill the gap.\l"];
+    cursor -> hol [style=dashed, color="#dc2626", constraint=false];
+
+    // Receive buffer filling toward limit
+    rmem [shape=record, style="filled", fillcolor="#fef3c7",
+          label="{receive buffer (tcp_rmem max)|<f> filling: each subflow can hold up to its own BDP in flight}"];
+    s4 -> rmem [label="consumes rcvbuf while waiting", color="#d97706"];
+
+    note_n [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+            label="Plain TCP: one out_of_order_queue sized to one path's BDP.\lMPTCP: the queue sits at msk level above N subflows, so the\lrequirement multiplies -> receive buffer >= BDP x N.\lToo small -> stall/drop, path diversity wasted.\l"];
+    rmem:f -> note_n [style=dashed, color="#7c3aed", constraint=false];
+}

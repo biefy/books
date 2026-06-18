@@ -1,0 +1,44 @@
+digraph packet_type_demux {
+    rankdir=TB;
+    labelloc=t;
+    label="packet_type demux: __netif_receive_skb_core dispatches by skb->protocol";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    skb [shape=record, style="filled", fillcolor="#fef3c7",
+         label="{incoming skb|skb-\>protocol = ETH_P_IP\n(the EtherType eth_type_trans returned)}"];
+
+    core [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+          label="__netif_receive_skb_core()"];
+    skb -> core [style=bold, color="#d97706"];
+
+    // ptype_all: taps
+    subgraph cluster_all {
+        label="1. walk ptype_all — receivers wanting EVERY packet";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        tap [shape=box, style="filled", fillcolor="#dbeafe",
+             label="tcpdump / AF_PACKET tap"];
+    }
+    core -> tap [label="for each extra taker"];
+
+    clone [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+           label="skb_clone()\nnew descriptor,\nshared data (dataref)"];
+    tap -> clone [style=dashed, color="#16a34a", label="deliver via pt_prev"];
+
+    // ptype_base: the L3 hash table
+    subgraph cluster_base {
+        label="2. index ptype_base[ hash(skb->protocol) ] — exactly-one-type receivers";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        node [shape=record, style="filled", fillcolor="#dbeafe"];
+        base [label="{ptype_base[]|...|<ip>ETH_P_IP → ip_packet_type|ETH_P_IPV6 → ipv6_rcv|ETH_P_ARP → arp_rcv|...}"];
+    }
+    core -> base:ip [style=bold, color="#2563eb", label="hash(ETH_P_IP)"];
+
+    iprcv [shape=box, style="filled", fillcolor="#dcfce7",
+           label="ip_packet_type.func = ip_rcv\nthe one real L3 handler"];
+    base:ip -> iprcv [style=bold, color="#16a34a"];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="pt_prev deferral: the core remembers the LAST\lmatch and only invokes it when a later taker\lappears. With exactly one receiver (just ip_rcv,\lno tcpdump) the final call skips the extra\lrefcount_inc(&skb->users) atomic bump.\l"];
+    iprcv -> note [style=invis];
+}

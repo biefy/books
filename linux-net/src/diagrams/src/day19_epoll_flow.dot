@@ -1,0 +1,48 @@
+digraph epoll_flow {
+    rankdir=TB;
+    labelloc=t;
+    label="epoll end-to-end: data arrives → ep_poll_callback → rdllist → epoll_wait returns";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // Left column: the wake chain
+    subgraph cluster_chain {
+        label="1. wake chain (Background 2)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#7c3aed";
+        arrive [shape=box, style="filled", fillcolor="#fef3c7",
+                label="packet arrives\nudp/tcp rcv enqueues skb"];
+        sdr [shape=box, style="filled", fillcolor="#e9d5ff",
+             label="sk_data_ready =\nsock_def_readable()"];
+        wk [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="wake_up_*_poll(EPOLLIN)\nwalks socket wait queue"];
+        arrive -> sdr -> wk [style=bold, color="#7c3aed"];
+    }
+
+    // The three eventpoll structures
+    subgraph cluster_ep {
+        label="struct eventpoll  (the epoll instance)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        skq [shape=record, style="filled", fillcolor="#dbeafe",
+             label="{FD wait queue|sk_sleep(sk)|epoll entry:\n.func = ep_poll_callback}"];
+        rbr [shape=record, style="filled", fillcolor="#dbeafe",
+             label="{rbr (rb-tree)|every ADDed FD|O(log N) registry}"];
+        rdl [shape=record, style="filled", fillcolor="#dcfce7",
+             label="{rdllist (ready list)|epitems that fired|drained by epoll_wait}"];
+        wq [shape=record, style="filled", fillcolor="#e9d5ff",
+            label="{wq|where epoll_wait()\ncallers sleep}"];
+    }
+
+    cb [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+        label="ep_poll_callback() runs\nlist_add_tail(&epi->rdllink, &ep->rdllist)\nthen wakes ep->wq"];
+
+    wait [shape=box, style="filled", fillcolor="#fef3c7",
+          label="epoll_wait() wakes →\nep_send_events() copies\nready FDs to epoll_event[]"];
+
+    wk -> skq [style=bold, color="#7c3aed", label="2. calls epoll's .func"];
+    skq -> cb [style=bold, color="#16a34a", label="3."];
+    rbr -> skq [style=dashed, color="#94a3b8", label="ADD registered\nthe entry"];
+    cb -> rdl [style=bold, color="#16a34a", label="append epitem"];
+    cb -> wq [style=bold, color="#16a34a", label="wake sleeper"];
+    wq -> wait [style=bold, color="#16a34a", label="4."];
+    rdl -> wait [style=dashed, color="#16a34a", label="copied out"];
+}

@@ -1,0 +1,53 @@
+digraph zc_refcount {
+    rankdir=TB;
+    labelloc=t;
+    label="Zero-copy send: ubuf_info.refcnt tracks the page-pin; 0 → F_NOTIF CQE";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // User pages (pinned)
+    subgraph cluster_pages {
+        label="userspace buffer pages (PINNED — locked in RAM, NIC DMAs from here)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+        node [shape=box, style="filled", fillcolor="#fef3c7"];
+        pg0 [label="page 0\n[payload]"];
+        pg1 [label="page 1\n[payload]"];
+    }
+
+    // The skb with frag pointers
+    skb [shape=record, style="filled", fillcolor="#dbeafe",
+         label="{skb (+ clones on retransmit)|skb_shinfo:|frag[0] →|frag[1] →|SKBFL_ZEROCOPY_ENABLE}"];
+
+    skb -> pg0 [color="#2563eb", style=bold, label="frag points\nDIRECTLY at page"];
+    skb -> pg1 [color="#2563eb", style=bold];
+
+    // ubuf_info
+    ubuf [shape=record, style="filled", fillcolor="#e9d5ff",
+          label="{ubuf_info (io_notif_data.uarg)|refcnt: page-pin reference count|ops|flags}"];
+    skb -> ubuf [color="#7c3aed", style=bold, label="msg_ubuf"];
+
+    // refcount walk
+    subgraph cluster_walk {
+        label="refcount lifetime";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled,rounded"];
+        r1 [fillcolor="#dcfce7", label="refcnt = 1\n(first skb holds a ref)"];
+        r2 [fillcolor="#dcfce7", label="refcnt = 2\n(retransmit clone\nbumps it)"];
+        rdots [shape=plaintext, style="", label="…  drops as each\nskb frag is freed"];
+        r0 [fillcolor="#fee2e2", label="refcnt = 0\nLAST ref gone\nrefcount_dec_and_test()\nnotif.c:57"];
+        r1 -> r2 -> rdots -> r0 [color="#94a3b8"];
+    }
+    ubuf -> r1 [style=dashed, color="#7c3aed"];
+
+    // The two CQEs
+    fmore [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+           label="CQE 1: F_MORE\nposted at ENQUEUE\nres = bytes handed to stack\n(NIC may not be done yet)"];
+    fnotif [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+            label="CQE 2: F_NOTIF\nio_tx_ubuf_complete()\n'pages free — safe to reuse'"];
+
+    skb -> fmore [style=dotted, color="#2563eb", label="early"];
+    r0 -> fnotif [color="#16a34a", style=bold, label="0-transition fires"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="A THIRD lifetime layer (Day 1):\lskb->users  = descriptor refs\ldataref     = data-buffer refs\lubuf_info.refcnt = page-pin refs\l"];
+}

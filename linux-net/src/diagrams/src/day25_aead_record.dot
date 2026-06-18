@@ -1,0 +1,62 @@
+digraph aead_record {
+    rankdir=TB;
+    labelloc=t;
+    label="A TLS record on the wire = [header | ciphertext | tag], and how AES-GCM builds it";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // ---------- the record strip ----------
+    subgraph cluster_record {
+        label="one TLS record (on the wire)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        rec [shape=record, style="filled",
+             label="{<h>header 5B\ntype(1)|ver(2)|len(2)|<c>ciphertext\nAES-GCM-CTR(plaintext)|<t>tag 16B\nGHASH integrity}"];
+    }
+    // color cells via separate nodes is hard in one record; annotate with notes instead
+    hnote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+           label="on-wire 5B header: clear + authenticated\l(TLS_HEADER_SIZE = 5)\lTLS 1.2 AAD also prepends 8B rec_seq\l(authenticated, NOT transmitted)\l"];
+    cnote [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+           label="encrypted payload\l"];
+    tnote [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+           label="tag_size = 16 (AES-GCM)\lreject record if mismatch\l"];
+    rec:h -> hnote [style=dashed, color="#16a34a", arrowhead=none];
+    rec:c -> cnote [style=dashed, color="#d97706", arrowhead=none];
+    rec:t -> tnote [style=dashed, color="#dc2626", arrowhead=none];
+
+    // ---------- the crypto inputs ----------
+    subgraph cluster_struct {
+        label="struct tls12_crypto_info_aes_gcm_128 (the four pushed fields)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        node [shape=box, style="filled", fillcolor="#dbeafe"];
+        f_key  [label="key[16]\nAES-128 session key"];
+        f_salt [label="salt[4]\nfixed nonce prefix"];
+        f_iv   [label="iv[8]\nexplicit nonce\nsent on wire, ++/record"];
+        f_seq  [label="rec_seq[8]\nseq number -> AAD"];
+    }
+
+    nonce [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+           label="12-byte GCM nonce\n= salt(4B) || iv(8B)\nMUST never repeat"];
+    f_salt -> nonce [color="#7c3aed"];
+    f_iv   -> nonce [color="#7c3aed", label="increments\nper record"];
+
+    aad [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+         label="AAD (TLS 1.2)\n= rec_seq(8B) || header(5B)\nauthenticated, not encrypted"];
+    f_seq -> aad [color="#16a34a"];
+
+    gcm [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+         label="AES-GCM\nencrypt + authenticate"];
+    f_key -> gcm [color="#dc2626", style=bold, label="cipher key"];
+    nonce -> gcm [color="#7c3aed"];
+
+    plain [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+           label="plaintext payload\n(your write())"];
+    plain -> gcm [label="encrypted ->"];
+
+    // AAD (rec_seq + header) feeds GCM as associated data
+    aad -> gcm [style=bold, color="#16a34a", constraint=false,
+                label="fed as AAD\n(authenticated)"];
+    rec:h -> aad [style=dashed, color="#16a34a", arrowhead=none, constraint=false];
+
+    gcm -> rec:c [color="#d97706", style=bold, label="ciphertext"];
+    gcm -> rec:t [color="#dc2626", style=bold, label="tag"];
+}

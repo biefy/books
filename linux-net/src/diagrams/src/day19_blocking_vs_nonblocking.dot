@@ -1,0 +1,48 @@
+digraph blocking_vs_nonblocking {
+    rankdir=TB;
+    labelloc=t;
+    label="Blocking vs non-blocking recv() on an empty socket";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // LEFT: blocking
+    subgraph cluster_block {
+        label="BLOCKING (default)";
+        fontname="Helvetica"; fontsize=12; style="rounded"; color="#dc2626";
+        bcall [shape=box, style="filled", fillcolor="#dbeafe",
+               label="recv(fd, ...)\nsocket empty"];
+        bsleep [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+                label="thread PARKED on\nsocket wait queue\n(off the run queue)"];
+        bwake [shape=box, style="filled", fillcolor="#fef3c7",
+               label="data arrives → wake →\nrecv() returns bytes"];
+        bnote [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+               label="1 thread = 1 client\lother clients starve while\lthis one syscall sleeps\l"];
+        bcall -> bsleep [label="no data"];
+        bsleep -> bwake [style=dashed, label="much later"];
+        bsleep -> bnote [style=invis];
+    }
+
+    // RIGHT: non-blocking
+    subgraph cluster_nb {
+        label="NON-BLOCKING (O_NONBLOCK)";
+        fontname="Helvetica"; fontsize=12; style="rounded"; color="#16a34a";
+        ncall [shape=box, style="filled", fillcolor="#dbeafe",
+               label="recv(fd, ...)\nsocket empty"];
+        nret [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+              label="returns -1, errno=EAGAIN\nimmediately (never sleeps)"];
+        nloop [shape=box, style="filled", fillcolor="#e9d5ff",
+               label="epoll event loop\nserves the next ready FD"];
+        nnote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+               label="EAGAIN is NOT an error\l= would have slept / drained\lone thread, many clients\l"];
+        ncall -> nret [label="no data"];
+        nret -> nloop [color="#16a34a", style=bold];
+        nret -> nnote [style=invis];
+    }
+
+    // ET drain loop at bottom
+    drain [shape=box, style="filled,rounded", fillcolor="#fef3c7", fontsize=10,
+           label="Edge-triggered drain idiom\nfor (;;) { n = recv(fd, buf, len, 0);\n  if (n > 0)  { consume(buf, n); continue; }\n  if (n == 0) { close_peer(fd); break; }\n  if (errno == EAGAIN) break;   // drained\n  handle_error(fd); break; }"];
+
+    nloop -> drain [color="#16a34a", style=bold, label="do the read yourself,\ndrain to EAGAIN"];
+    bnote -> drain [style=invis];
+}

@@ -1,0 +1,36 @@
+digraph refcount_lifecycle {
+    rankdir=TB;
+    labelloc=t;
+    label="nf_conn refcount lifecycle: the leak-free two-phase commit";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // Birth
+    born [shape=box, style="filled", fillcolor="#fef3c7",
+          label="first packet (e.g. SYN) misses the hash\ninit_conntrack -> new UNCONFIRMED nf_conn\nrefcount = 1  (held by skb only)\non per-CPU unconfirmed list, NOT in hash"];
+
+    decide [shape=diamond, style="filled", fillcolor="#e9d5ff",
+            label="netfilter\npipeline\nverdict?"];
+
+    born -> decide;
+
+    // Branch A: DROP
+    drop [shape=box, style="filled", fillcolor="#fee2e2",
+          label="A. rule DROPs the packet\nskb freed -> nf_conntrack_put(skb_nfct)\nrefcount 1 -> 0"];
+    freed [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+           label="entry freed\nno pollution of the global table"];
+    decide -> drop [color="#dc2626", style=bold, label="DROP"];
+    drop -> freed [color="#dc2626", style=bold];
+
+    // Branch B: ACCEPT
+    confirm [shape=box, style="filled", fillcolor="#dbeafe",
+             label="B. NF_ACCEPT\n__nf_conntrack_confirm inserts into\nnf_conntrack_hash, sets IPS_CONFIRMED\n+1 for hash -> refcount = 2 (hash + skb)"];
+    persist [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+             label="skb released -> refcount = 1 (hash)\nentry persists until ct->timeout deadline\n(GC worker reaps when timeout - now < 0)"];
+    decide -> confirm [color="#16a34a", style=bold, label="ACCEPT"];
+    confirm -> persist [color="#16a34a", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="refcount rule (struct nf_conn comment):\l  +1 for being in the hash table\l  +1 per in-flight skb referencing it\l  +1 for each conn it is master of\lUNCONFIRMED lacks the hash reference, so a\lsingle DROP collapses it to zero.\l"];
+    persist -> note [style=invis];
+}

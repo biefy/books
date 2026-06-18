@@ -1,0 +1,43 @@
+digraph pacing {
+    rankdir=LR;
+    labelloc=t;
+    label="Bursty vs paced: spreading one cwnd of packets across the RTT";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // Top: bursty
+    subgraph cluster_bursty {
+        label="BURSTY (classic loss-based CC): all packets back-to-back the instant the ACK arrives";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#dc2626";
+        node [shape=box, style="filled", fillcolor="#dbeafe", width=0.4];
+
+        b0 [label="p"]; b1 [label="p"]; b2 [label="p"]; b3 [label="p"]; b4 [label="p"]; b5 [label="p"];
+        b0 -> b1 -> b2 -> b3 -> b4 -> b5 [arrowhead=none, color="#94a3b8"];
+
+        bqueue [shape=box, style="filled", fillcolor="#fee2e2",
+                label="bottleneck buffer:\nDEEP standing queue\n(packets pile up,\nRTT inflates)"];
+        b5 -> bqueue [color="#dc2626", style=bold, label="floods"];
+    }
+
+    // Bottom: paced
+    subgraph cluster_paced {
+        label="PACED (BBR): same packets evenly spaced across the RTT";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+        node [shape=box, style="filled", fillcolor="#dbeafe", width=0.4];
+
+        p0 [label="p"]; g1 [label="gap", shape=plaintext, fillcolor=none, style=""];
+        p1 [label="p"]; g2 [label="gap", shape=plaintext, fillcolor=none, style=""];
+        p2 [label="p"]; g3 [label="gap", shape=plaintext, fillcolor=none, style=""];
+        p3 [label="p"];
+        p0 -> g1 -> p1 -> g2 -> p2 -> g3 -> p3 [arrowhead=none, color="#94a3b8"];
+
+        pqueue [shape=box, style="filled", fillcolor="#dcfce7",
+                label="bottleneck buffer:\nSHALLOW queue\n(RTT stays low)"];
+        p3 -> pqueue [color="#16a34a", style=bold, label="trickles"];
+    }
+
+    pacer [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+        label="The pacer: fq qdisc stamps each packet with a target departure\ltime (sk_pacing_status = SK_PACING_FQ). When the qdisc is not fq,\lthe TCP stack's internal fallback paces (SK_PACING_NEEDED), less\lprecise but functional - which is why loopback netem still shows BBR.\l"];
+
+    bqueue -> pacer [style=invis];
+}

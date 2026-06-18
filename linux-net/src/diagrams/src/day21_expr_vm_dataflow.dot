@@ -1,0 +1,40 @@
+digraph expr_vm_dataflow {
+    rankdir=LR;
+    labelloc=t;
+    label="'tcp dport 22 accept' through the register VM (nft_do_chain)";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    pkt [shape=box, style="filled", fillcolor="#fef3c7",
+         label="packet bytes\n[ ... TCP hdr ... ]\ndport field = 22"];
+
+    // The three expressions, top to bottom
+    subgraph cluster_exprs {
+        label="rule = sequence of expressions";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", fillcolor="#dbeafe"];
+        payload [label="1. nft_payload\nload 16-bit dport\n-> reg 1"];
+        cmp [label="2. nft_cmp\nreg 1 == 22 ?\nmatch: leave NFT_CONTINUE\nmiss: write NFT_BREAK"];
+        imm [label="3. nft_immediate\ncopy NF_ACCEPT\n-> verdict reg"];
+        payload -> cmp -> imm [color="#94a3b8"];
+    }
+
+    // The register file
+    regfile [shape=record, style="filled", fillcolor="#e9d5ff", fontsize=9,
+             label="{ struct nft_regs : 20 x 32-bit scratch slots (NFT_REG32_NUM=20) }|\
+{ <v>verdict\n(aliases data[0..3]) | REG32_00\n=data[4] | REG32_01 | ... | REG32_15\n=data[19] }|\
+{ 4 slots verdict + 16 data registers = 20 }"];
+
+    pkt -> payload [label="bytes", color="#d97706", style=bold];
+    payload -> regfile [label="write reg1", color="#2563eb"];
+    cmp -> regfile [label="read reg1", color="#2563eb", style=dashed, dir=back];
+    imm -> regfile [label="write verdict\n= NF_ACCEPT", color="#16a34a", style=bold];
+
+    ret [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+         label="terminal switch:\nNF_ACCEPT not in NFT_* range\n-> return NF_ACCEPT to hook"];
+    regfile:v -> ret [label="verdict reg", color="#16a34a", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="First 4 data registers union with struct nft_verdict.\lThat aliasing lets ONE loop carry both compared\ldata and the running verdict.\l"];
+    regfile -> note [style=invis];
+}

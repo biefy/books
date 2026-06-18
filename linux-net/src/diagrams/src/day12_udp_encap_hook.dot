@@ -1,0 +1,51 @@
+digraph udp_encap_hook {
+    rankdir=TB;
+    labelloc=t;
+    label="The UDP encap hook: how a UDP socket becomes a tunnel decap entry";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    arrive [shape=record, style="filled", fillcolor="#fef3c7",
+            label="{outer UDP datagram\narrives at udp_rcv|dst port 4789}"];
+
+    lookup [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="4-tuple socket lookup\n(src IP, dst IP, src port, dst port)\n→ struct udp_sock"];
+    arrive -> lookup [style=bold, color="#d97706"];
+
+    branch [shape=diamond, style="filled", fillcolor="#dbeafe",
+            label="up-\>encap_rcv\nset?"];
+    lookup -> branch [style=bold];
+
+    // The divert: tunnel ingress
+    subgraph cluster_divert {
+        label="DIVERT — udp_queue_rcv_one_skb (net/ipv4/udp.c:2364)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+        encap [shape=box, style="filled", fillcolor="#dcfce7",
+               label="encap_rcv(sk, skb) = vxlan_rcv\nconsume IN-KERNEL, never wake userspace"];
+        decap [shape=box, style="filled", fillcolor="#dcfce7",
+               label="vxlan_rcv:\nparse VXLAN hdr, extract VNI\nstrip outer hdrs (skb_pull)\nhand inner frame to gro_cells_receive"];
+        encap -> decap [style=bold, color="#16a34a"];
+    }
+    branch -> encap [label="yes  (tunnel socket)", style=bold, color="#16a34a"];
+
+    inner [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+           label="inner Ethernet frame re-enters\nthe stack as if received on vxlan0"];
+    decap -> inner [style=bold, color="#16a34a"];
+
+    // The normal UDP path
+    subgraph cluster_normal {
+        label="NORMAL — plain UDP datagram";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        queue [shape=box, style="filled", fillcolor="#dbeafe",
+               label="append to sk_receive_queue"];
+        recv [shape=box, style="filled", fillcolor="#dbeafe",
+              label="recvmsg() reads it in userspace"];
+        queue -> recv [style=bold, color="#2563eb"];
+    }
+    branch -> queue [label="no", style=bold, color="#2563eb"];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="encap_rcv return contract:\l  0  = consumed (or dropped)\l  \>0 = not mine → fall through to sk_receive_queue\l  \<0 = resubmit as IP proto -ret\lThis is why a stray non-VXLAN packet to :4789 still behaves like ordinary UDP.\l"];
+    inner -> note [style=invis];
+    recv -> note [style=invis];
+}

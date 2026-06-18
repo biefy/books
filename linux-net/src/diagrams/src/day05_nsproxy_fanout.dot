@@ -1,0 +1,44 @@
+digraph nsproxy_fanout {
+    rankdir=LR;
+    labelloc=t;
+    label="task_struct → nsproxy → net_ns: the pointer that IS the namespace";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // Two tasks
+    taskA [shape=box, style="filled", fillcolor="#dbeafe",
+           label="task_struct A\n(in netns red)"];
+    taskB [shape=box, style="filled", fillcolor="#dbeafe",
+           label="task_struct B\n(in init_net)"];
+
+    // Two nsproxies
+    nsA [shape=record, style="filled", fillcolor="#e9d5ff",
+         label="nsproxy A|count|uts_ns|ipc_ns|mnt_ns|pid_ns|<net>net_ns|time_ns|cgroup_ns"];
+    nsB [shape=record, style="filled", fillcolor="#e9d5ff",
+         label="nsproxy B|count|uts_ns|ipc_ns|mnt_ns|pid_ns|<net>net_ns|time_ns|cgroup_ns"];
+
+    taskA -> nsA [label="nsproxy"];
+    taskB -> nsB [label="nsproxy"];
+
+    // Two struct net
+    netRed [shape=record, style="filled", fillcolor="#fef3c7",
+            label="struct net (red)|{ns_common.inum|4026532243}"];
+    netInit [shape=record, style="filled", fillcolor="#fef3c7",
+             label="struct net (init_net)|{ns_common.inum|4026531833}"];
+
+    nsA:net -> netRed [style=bold, color="#d97706", label="net_ns"];
+    nsB:net -> netInit [style=bold, color="#d97706", label="net_ns"];
+
+    // nsfs magic symlinks
+    linkRed [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+             label="/proc/<pidA>/ns/net\l(nsfs magic symlink)\lreadlink → net:[4026532243]\l"];
+    linkInit [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+              label="/proc/<pidB>/ns/net\l(nsfs magic symlink)\lreadlink → net:[4026531833]\l"];
+
+    linkRed -> netRed [style=dashed, color="#16a34a", label="resolves to\nmatching inum"];
+    linkInit -> netInit [style=dashed, color="#16a34a", label="resolves to\nmatching inum"];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="Every task in the same netns shares\lthe very same struct net *.\lEqual inum ⇒ same stack.\l"];
+    netRed -> note [style=invis];
+}

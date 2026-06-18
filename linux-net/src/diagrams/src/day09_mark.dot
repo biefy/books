@@ -1,0 +1,46 @@
+digraph mark {
+    rankdir=TB;
+    labelloc=t;
+    label="The packet mark: written by netfilter or a socket, read by a routing rule";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The two writers
+    subgraph cluster_writers {
+        label="WRITERS — something sets the mark (mark starts at 0)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#7c3aed";
+        nft [shape=box, style="filled", fillcolor="#e9d5ff",
+             label="nftables / iptables hook\nmeta mark set 0x42\n-j MARK --set-mark 0x42"];
+        sock [shape=box, style="filled", fillcolor="#e9d5ff",
+              label="originating socket\nsetsockopt(SO_MARK, 0x42)\n(SO_MARK = 36)"];
+    }
+
+    // The skb carrying the mark
+    subgraph cluster_skb {
+        label="the skb (lives only inside THIS kernel)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        skb [shape=record, style="filled", fillcolor="#dbeafe",
+             label="{struct sk_buff|<m> __u32 mark = 0x42|... packet bytes ...}"];
+    }
+
+    nft -> skb:m [label="writes", color="#7c3aed", style=bold];
+    sock -> skb:m [label="writes", color="#7c3aed", style=bold];
+
+    // Into the lookup key
+    flowi [shape=box, style="filled", fillcolor="#dbeafe",
+           label="struct flowi4\nflowi4_mark = 0x42\n(copied at route time)"];
+    skb:m -> flowi [label="copied into lookup key", color="#dc2626", style=bold];
+
+    // The masked compare
+    cmp [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+         label="masked compare (net/core/fib_rules.c:292)\n(rule->mark ^ fl->flowi_mark) & rule->mark_mask\n== 0  means MATCH"];
+    flowi -> cmp;
+
+    rule [shape=box, style="filled", fillcolor="#dcfce7",
+          label="fib_rule (READER only)\nmark      = 0x42\nmark_mask = 0xff\nip rule add fwmark 0x42/0xff"];
+    rule -> cmp [label="reads", color="#16a34a", style=bold];
+
+    wire [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="NEVER on the wire: the mark is not an IP/Ethernet field.\lA remote host can never see it. Local scratch tag only.\l"];
+    skb -> wire [style=invis];
+}

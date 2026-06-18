@@ -1,0 +1,53 @@
+digraph rx_handler_path {
+    rankdir=TB;
+    labelloc=t;
+    label="rx_handler fires inside __netif_receive_skb_core, ABOVE the L3 demux";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    frame [shape=box, style="filled", fillcolor="#fef3c7",
+           label="frame on eth0\n(bridged port)"];
+
+    vlan [shape=box, style="filled", fillcolor="#dbeafe",
+          label="vlan_do_receive()"];
+
+    check [shape=diamond, style="filled", fillcolor="#e9d5ff",
+           label="rx_handler =\nrcu_dereference(\nskb->dev->rx_handler)\nset?"];
+
+    handler [shape=box, style="filled", fillcolor="#dcfce7",
+             label="br_handle_frame(&skb)\n(the bridge rx_handler)"];
+
+    consumed [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+              label="RX_HANDLER_CONSUMED\nbridge forwarded/flooded\nSTOP — host never sees it"];
+    pass [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+          label="RX_HANDLER_PASS\nframe for bridge's own IP\nfall through to L3 demux"];
+    another [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+             label="RX_HANDLER_ANOTHER\nskb->dev changed (macvlan)\nredo receive loop"];
+    exact [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+           label="RX_HANDLER_EXACT\nexact ptype delivery only"];
+
+    demux [shape=box, style="filled", fillcolor="#dbeafe",
+           label="ptype_base[] demux\n(keyed on skb->protocol)"];
+    iprcv [shape=box, style="filled,rounded", fillcolor="#bfdbfe",
+           label="ip_rcv()  — L3 / host IP stack"];
+
+    frame -> vlan;
+    vlan -> check;
+    check -> handler [label="yes", color="#7c3aed", style=bold];
+    check -> demux [label="no handler", color="#94a3b8", style=dashed];
+
+    handler -> consumed;
+    handler -> pass;
+    handler -> another;
+    handler -> exact;
+
+    pass -> demux [color="#16a34a", style=bold, label="fall through"];
+    exact -> demux [color="#94a3b8", style=dashed];
+    another -> frame [color="#d97706", style=dashed, constraint=false,
+                      label="re-loop on new skb->dev"];
+    demux -> iprcv;
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="The bridge sits ABOVE the L3 demux:\lit gets first crack at every frame on the port,\lso a bridged eth0 stops delivering to its own IP\lstack unless br_handle_frame returns PASS.\l"];
+    note -> handler [style=invis];
+}

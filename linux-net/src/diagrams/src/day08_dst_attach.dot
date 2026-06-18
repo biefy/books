@@ -1,0 +1,40 @@
+digraph dst_attach {
+    rankdir=LR;
+    labelloc=t;
+    label="The route lookup builds an rtable; skb_dst_set staples it on; dst_input jumps through dst->input";
+    fontname="Helvetica"; fontsize=13;
+    node [fontname="Monaco", fontsize=10];
+
+    // the skb
+    skb [shape=record, style="filled", fillcolor="#fef3c7",
+         label="struct sk_buff|...|skb-\>_skb_refdst|(ptr + low refcount bit)"];
+
+    // the rtable embedding a dst_entry
+    subgraph cluster_rt {
+        label="struct rtable";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        rt [shape=record, style="filled", fillcolor="#dbeafe",
+            label="{ <d> struct dst_entry dst|(FIRST member: rtable* == dst*) }|{ input(skb)|output(net,sk,skb) }|rt_flags / rt_type / rt_gw4 / mtu"];
+    }
+
+    skb -> rt:d [style=bold, color="#dc2626", label="skb_dst_set\n(_skb_refdst)"];
+
+    // dst_input dispatch
+    di [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+        label="dst_input(skb)\ncalls skb_dst(skb)->input(skb)"];
+    rt -> di [style=bold, color="#7c3aed", label="dst-\>input"];
+
+    // fan-out targets
+    subgraph cluster_targets {
+        label="input() targets (pre-loaded by the lookup)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", fillcolor="#dcfce7"];
+        local [label="ip_local_deliver\n(packet is for us)"];
+        fwd   [label="ip_forward\n(transit traffic)"];
+        err   [label="ip_error\n(unreachable; ICMP)", fillcolor="#fee2e2"];
+    }
+
+    di -> local [color="#16a34a"];
+    di -> fwd   [color="#16a34a"];
+    di -> err   [color="#dc2626"];
+}

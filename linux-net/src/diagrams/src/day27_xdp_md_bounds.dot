@@ -1,0 +1,31 @@
+digraph xdp_md_bounds {
+    rankdir=TB;
+    labelloc=t;
+    label="struct xdp_md: same bytes, program-safe view";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // program view (above)
+    prog [shape=record, style="filled", fillcolor="#dbeafe",
+          label="{ struct xdp_md  (program view, __u32 offsets) | { data | data_meta | data_end } }"];
+
+    // the byte ruler (one frame)
+    ruler [shape=record, style="filled", fillcolor="#fef3c7",
+           label="{ <hs> data_hard_start | 256B XDP_PACKET_HEADROOM | <d> data : ethhdr (14B) | iphdr (20B) | payload ... | <de> data_end }"];
+
+    // kernel view (below)
+    kern [shape=record, style="filled", fillcolor="#dcfce7",
+          label="{ struct xdp_buff  (kernel view, real void* pointers) | { data | data_meta | data_end } }"];
+
+    prog:nw -> ruler:hs [style=invis];
+    prog -> ruler [color="#2563eb", style=bold, label="verifier rewrites\n__u32 -> pointers"];
+    ruler -> kern [color="#16a34a", style=bold, label="same DMA bytes"];
+
+    check [shape=note, style="filled", fillcolor="#fee2e2", fontsize=10,
+           label="verifier check (MANDATORY before any access):\l   if ((void *)(eth + 1) > data_end) return XDP_DROP;\l   i.e. is  data + 14 <= data_end ?\lSkip it and the program is rejected at load time.\l"];
+    ruler:d -> check [color="#dc2626", style=bold, label="gate every access"];
+
+    cap [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+         label="Same bytes Day 2's xdp_buff pointed at;\lthe verifier presents a bounds-checked window.\l"];
+    kern -> cap [style=invis];
+}

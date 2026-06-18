@@ -1,0 +1,65 @@
+digraph tunnel_pmtu {
+    rankdir=TB;
+    labelloc=t;
+    label="Tunnel MTU trap: encapsulation overhead, the DF bit, and the local EMSGSIZE short-circuit";
+    fontname="Helvetica"; fontsize=13;
+    node [fontname="Monaco", fontsize=10];
+
+    inner [shape=record, style="filled", fillcolor="#fef3c7",
+           label="{inner frame 1500B|fits vxlan0 if MTU=1450, but here forced to 1500}"];
+
+    encap [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+           label="VXLAN encap: + ~50B outer\n(Ethernet 14 + IP 20 + UDP 8 + VXLAN 8)"];
+    inner -> encap [style=bold, color="#d97706"];
+
+    oversize [shape=box, style="filled", fillcolor="#fde68a",
+              label="outer packet ~1550B — oversize for underlay MTU 1500"];
+    encap -> oversize [style=bold, color="#d97706"];
+
+    branch [shape=diamond, style="filled", fillcolor="#dbeafe", label="outer DF bit?"];
+    oversize -> branch [style=bold];
+
+    // DF clear: fragment + reassemble
+    subgraph cluster_clear {
+        label="DF clear (df unset, the lab default)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        frag [shape=box, style="filled", fillcolor="#dbeafe",
+              label="underlay ip_do_fragment()\nsplit, set IP_MF on all but last"];
+        reasm [shape=box, style="filled", fillcolor="#dbeafe",
+               label="peer reassembles by offset"];
+        frag -> reasm [style=bold, color="#2563eb"];
+    }
+    branch -> frag [label="clear", color="#2563eb"];
+
+    // DF set: drop + ICMP
+    subgraph cluster_set {
+        label="DF set (would-be on-wire behavior)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#dc2626";
+        drop [shape=box, style="filled", fillcolor="#fee2e2",
+              label="router DROPS the packet"];
+        icmp [shape=box, style="filled", fillcolor="#fee2e2",
+              label="ICMP frag-needed\ntype 3 / code 4, carries next-hop MTU\n(if filtered → BLACK-HOLE)"];
+        drop -> icmp [style=bold, color="#dc2626"];
+    }
+    branch -> drop [label="set", color="#dc2626"];
+
+    // The local short-circuit that the lab actually shows
+    subgraph cluster_local {
+        label="What the LAB actually shows (locally-originated tunnel)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+        first [shape=box, style="filled", fillcolor="#dcfce7",
+               label="1st DF probe: sent before cache exists → SUCCEEDS"];
+        cache [shape=box, style="filled", fillcolor="#dcfce7",
+               label="skb_tunnel_check_pmtu()\ncaches inner-route PMTU = 1450"];
+        later [shape=box, style="filled", fillcolor="#fee2e2",
+               label="every later send hits cached 1450\n→ rejected LOCALLY: EMSGSIZE\n\"sendmsg: Message too long\""];
+        first -> cache -> later [style=bold, color="#16a34a"];
+    }
+    oversize -> first [style=dashed, color="#16a34a", constraint=false, label="local tunnel"];
+
+    // Durable fix
+    fix [shape=note, style="filled", fillcolor="#dcfce7", fontsize=10,
+         label="Durable fix — MSS clamping:\lrewrite the TCP MSS option in passing SYN/SYN-ACK down to 1410.\lBoth ends negotiate a smaller MSS and never emit a too-big segment.\l"];
+    later -> fix [style=invis];
+    icmp -> fix [style=invis];
+}

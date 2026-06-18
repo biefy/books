@@ -1,0 +1,28 @@
+digraph eth_type_trans {
+  rankdir=TB;
+  bgcolor="white";
+  labelloc="t";
+  label="Ethernet on RX";
+  fontname="Helvetica";
+  fontsize=18;
+  node [shape=box, style=filled, fontname="Monaco", fontsize=11];
+
+  driver [label="Driver receives bytes,\nsets skb->len to wire length", fillcolor="#dbeafe"];
+
+  ett [fillcolor="#fef3c7", fontsize=10, label="\
+eth_type_trans(skb, dev)   net/ethernet/eth.c:155\l\
+\l\
+1. skb_reset_mac_header(skb) — record mac_header offset\l\
+2. eth_skb_pull_mac(skb): read eth = (struct ethhdr *)skb->data\l\
+   AND skb_pull(skb, ETH_HLEN) — read + advance 14 bytes, one helper\l\
+3. eth_skb_pkt_type(skb, dev) — set pkt_type (uses eth_hdr/mac_header):\l\
+   - PACKET_BROADCAST (FF:FF:FF:FF:FF:FF dst)\l\
+   - PACKET_MULTICAST (group MAC)\l\
+   - PACKET_HOST (matches dev dev_addr)\l\
+   - PACKET_OTHERHOST (someone else's MAC)\l\
+4. Return eth->h_proto if eth_proto_is_802_3; else DSA/802.3 fallback\l"];
+
+  after [label="skb->data now at the L3 header.\nDriver assigns return value to skb->protocol\n(ETH_P_IP / ETH_P_IPV6 / ETH_P_8021Q / ...)", fillcolor="#dcfce7"];
+
+  driver -> ett -> after;
+}

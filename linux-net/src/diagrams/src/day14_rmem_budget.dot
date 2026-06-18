@@ -1,0 +1,38 @@
+digraph rmem_budget {
+    rankdir=TB;
+    labelloc=t;
+    label="The receive-memory budget: sk_rmem_alloc (truesize) vs sk_rcvbuf";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The budget meter as a stacked record: filled portion + free headroom
+    subgraph cluster_meter {
+        label="sk_rcvbuf — the full budget bar";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        meter [shape=record, style="filled", fontsize=9,
+               label="{ <a> skb A truesize\n(payload + overhead) | <b> skb B truesize\n(payload + overhead) | <c> skb C truesize\n(payload + overhead) | <free> free headroom }"];
+    }
+
+    legend [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+            label="sk_rmem_alloc = sum of skb->truesize already queued\ltruesize = payload + headers + sk_buff overhead + page slack\lso many small datagrams exhaust the budget far below\l'rcvbuf bytes of payload'.\l"];
+
+    // Incoming packet hitting the gate
+    incoming [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+              label="incoming skb\n(truesize = size)"];
+
+    gate [shape=diamond, style="filled", fillcolor="#dbeafe",
+          label="rmem + size\n> rcvbuf ?"];
+
+    accept [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+            label="accept:\natomic_add(size, &sk_rmem_alloc)\nthen sk_data_ready wake\n(empty queue always accepts one)"];
+
+    drop [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+          label="goto drop:\nRcvbufErrors++ / sk_drops++\n(the d<N> in ss -uam)"];
+
+    incoming -> gate;
+    gate -> drop [color="#dc2626", style=bold, label="yes\n(and rmem != 0)"];
+    gate -> accept [color="#16a34a", style=bold, label="no"];
+    accept -> meter:free [color="#16a34a", style=dashed, label="fills budget", constraint=false];
+
+    meter -> legend [style=invis];
+}

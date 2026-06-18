@@ -1,0 +1,51 @@
+digraph hash_pipeline {
+    rankdir=LR;
+    labelloc=t;
+    label="The flow-hash pipeline: SYN 4-tuple → phash → scaled index → worker";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    tuple [shape=record, style="filled", fillcolor="#fef3c7",
+           label="SYN 4-tuple|saddr : sport|daddr : dport"];
+
+    ehash [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+           label="inet_ehashfn()\n(same hash that keys\nthe ehash table, Day 13)"];
+
+    secret [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+            label="+ inet_ehash_secret\l   (random, once per boot)\l+ net_hash_mix(net)\l   (per-netns salt)\l"];
+
+    phash [shape=box, style="filled", fillcolor="#dbeafe",
+           label="u32 phash\n(= arg1 of\nreuseport_select_sock)"];
+
+    scale [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+           label="reciprocal_scale(phash, N)\n= (u64)phash * N >> 32\nmultiply-shift into [0, N)"];
+
+    idx [shape=box, style="filled", fillcolor="#dbeafe",
+         label="index i in [0, N)"];
+
+    subgraph cluster_socks {
+        label="struct sock_reuseport.socks[]  (flat array, O(1) index)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=record, style="filled", fillcolor="#dbeafe"];
+        s0 [label="socks[0]"];
+        s1 [label="socks[1]"];
+        s2 [label="socks[2]"];
+        sn [label="socks[N-1]"];
+        s0 -> s1 -> s2 -> sn [style=invis];
+    }
+
+    worker [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+            label="chosen worker\n(its accept queue\ngets the connection)"];
+
+    tuple -> ehash;
+    secret -> ehash [style=dashed, color="#16a34a", constraint=false];
+    ehash -> phash;
+    phash -> scale;
+    scale -> idx;
+    idx -> s2 [label="socks[i]", color="#dc2626", style=bold];
+    s2 -> worker [color="#dc2626", style=bold];
+
+    caveat [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+            label="Secret fixed per boot  → affinity holds (same client → same worker)\lReboot regenerates secret → whole mapping reshuffles\lDifferent netns → different mapping for the same 4-tuple\l"];
+    scale -> caveat [style=invis];
+}

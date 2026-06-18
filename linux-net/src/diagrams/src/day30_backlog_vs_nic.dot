@@ -1,0 +1,51 @@
+digraph backlog_vs_nic {
+    rankdir=TB;
+    labelloc=t;
+    label="Two RX doorways: hardware NIC NAPI vs loopback backlog";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // LEFT: hardware NIC path
+    subgraph cluster_nic {
+        label="hardware NIC (real driver, real NAPI)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        node [shape=box, style="filled", fillcolor="#dbeafe"];
+        irq    [label="hardware IRQ"];
+        sched  [label="napi_schedule()"];
+        poll   [label="driver ->poll\n(e.g. e1000_clean,\ndrains RX ring)"];
+        gro    [label="napi_gro_receive()"];
+        nrs_e  [shape=box, style="filled", fillcolor="#dcfce7",
+                label="gro_normal_list() ->\nnetif_receive_skb_list_internal()\n(BATCHED LIST path) ->\n__netif_receive_skb_core()"];
+        irq -> sched -> poll -> gro -> nrs_e;
+    }
+
+    // RIGHT: loopback backlog path
+    subgraph cluster_lo {
+        label="loopback / any non-NAPI path (software backlog)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+        node [shape=box, style="filled", fillcolor="#fef3c7"];
+        lxmit  [label="loopback_xmit()\n(no driver, no IRQ)"];
+        nrx    [label="__netif_rx()"];
+        enq    [label="enqueue_to_backlog()"];
+        q      [shape=box, style="filled", fillcolor="#fde68a",
+                label="sd->input_pkt_queue\n(per-CPU backlog queue)"];
+        pbl    [label="process_backlog()\n(software NAPI poll)"];
+        nrs_i  [shape=box, style="filled", fillcolor="#dcfce7",
+                label="__netif_receive_skb()\n(INTERNAL, two underscores)"];
+        lxmit -> nrx -> enq -> q -> pbl -> nrs_i;
+    }
+
+    // The skipped exported symbol: legacy scalar entry, on neither GRO path
+    skip [shape=box, style="filled", fillcolor="#fee2e2",
+          label="netif_receive_skb()\nEXPORTED scalar (legacy)\nused by non-GRO callers\n(e.g. software bridge),\nNOT by backlog or NIC GRO\n=> -g netif_receive_skb EMPTY"];
+    pbl -> skip [style=dashed, color="#dc2626", arrowhead=none,
+                 label="X  not this", fontcolor="#dc2626"];
+    nrs_e -> skip [style=dashed, color="#dc2626", arrowhead=none,
+                 label="X  not this", fontcolor="#dc2626"];
+
+    // Both converge note
+    conv [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="Both reach tcp_v4_rcv\l=> graph -g tcp_v4_rcv,\lworks on both paths\l"];
+    nrs_e -> conv [style=dashed, color="#16a34a"];
+    nrs_i -> conv [style=dashed, color="#16a34a"];
+}
