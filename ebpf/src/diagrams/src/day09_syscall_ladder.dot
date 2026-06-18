@@ -1,0 +1,39 @@
+digraph syscall_ladder {
+    rankdir=TB;
+    labelloc=t;
+    label="The read() dispatch ladder — the common base every read() shares";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10, shape=box, style="filled,rounded", width=3.2];
+    nodesep=0.4; ranksep=0.4;
+
+    // userspace
+    cat   [fillcolor="#e9d5ff", label="cat   (process, base of folded line)"];
+    libc  [fillcolor="#e9d5ff", label="__libc_read   (libc syscall wrapper)"];
+
+    // boundary
+    boundary [shape=note, fillcolor="#fef3c7", style="filled",
+              label="SYSCALL instruction  —  user/kernel boundary"];
+
+    // kernel ladder
+    entry [fillcolor="#dbeafe", label="entry_SYSCALL_64   (asm stub)"];
+    dosys [fillcolor="#dbeafe", label="do_syscall_64(regs, nr)\nsyscall_64.c:87"];
+    x64   [fillcolor="#dbeafe", label="__x64_sys_read   (SYSCALL_DEFINE3)\nread_write.c:724"];
+    ksys  [fillcolor="#dbeafe", label="ksys_read()\nread_write.c:706"];
+    vfs   [fillcolor="#bfdbfe", label="vfs_read()   (the leaf you trace)\nread_write.c:554"];
+
+    cat -> libc -> boundary -> entry -> dosys -> x64 -> ksys -> vfs
+        [color="#7c3aed", style=bold];
+
+    // annotations on the side
+    day7 [shape=note, fillcolor="#dcfce7", style="filled", fontsize=9,
+          label="Day-7 read tracepoint sits\lhere, one layer up at syscall entry.\l"];
+    fhook [shape=note, fillcolor="#fee2e2", style="filled", fontsize=9,
+           label="fentry/vfs_read hook point\l(the bottom leaf, today's target).\l"];
+
+    day7  -> entry [style=dashed, color="#16a34a", constraint=false];
+    fhook -> vfs   [style=dashed, color="#dc2626", constraint=false];
+
+    folded [shape=note, fillcolor="#fef3c7", style="filled", fontsize=9,
+            label="folded line (root-to-leaf):\lcat;__libc_read;entry_SYSCALL_64;\ldo_syscall_64;__x64_sys_read;\lksys_read;vfs_read 137\l"];
+    vfs -> folded [style=invis];
+}

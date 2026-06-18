@@ -1,0 +1,40 @@
+digraph log2_histogram {
+    rankdir=LR;
+    labelloc=t;
+    label="Latency histogram: floor(log2) picks a slot, one atomic add per event";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.4; ranksep=0.9;
+
+    // Input event
+    dur [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+         label="duration = 4200 ns"];
+
+    // log2 box
+    log2 [shape=box, style="filled", fillcolor="#e9d5ff",
+          label="slot = floor(log2(dur))\nlog2l(4200) = 12"];
+
+    dur -> log2 [label="  one atomic increment\l  per event", fontname="Helvetica",
+                 fontsize=9, fontcolor="#16a34a", color="#16a34a"];
+
+    // The 64-slot array as a horizontal bar chart (record)
+    hist [shape=record, style="filled", fillcolor="#dbeafe", fontsize=9,
+          label="{ slot 09  | slot 10 ## | slot 11 ##### | <s>slot 12 ######## (+1) | slot 13 #### | slot 14 # | ... up to slot 63 }"];
+
+    log2 -> hist:s [label="  index 12", fontname="Helvetica", fontsize=9,
+                    fontcolor="#2563eb", color="#2563eb"];
+
+    arrlbl [shape=plaintext, fontname="Helvetica", fontsize=9,
+            label="BPF_MAP_TYPE_ARRAY\n64 x u64 counters\n(one per power-of-two bucket)"];
+    arrlbl -> hist [style=invis];
+
+    // Read-out on exit
+    readout [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+             label="userspace: read the\nwhole array once on exit\nand print bars"];
+    hist -> readout [label="  read all 64 slots\l  exactly once", fontname="Helvetica",
+                     fontsize=9, fontcolor="#16a34a", color="#16a34a"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="Hot path costs one __sync_fetch_and_add per event;\lthe full array is read just once, on exit.\lPennies per event vs. a ringbuf reserve/commit/wakeup.\l"];
+    readout -> note [style=invis];
+}

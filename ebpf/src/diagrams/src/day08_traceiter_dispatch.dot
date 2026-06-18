@@ -1,0 +1,40 @@
+digraph traceiter_dispatch {
+    rankdir=TB;
+    labelloc=t;
+    label="sched_switch fires: __traceiter walks the probe list, no copy at this layer";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    fire [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+          label="sched_switch fires\n(static branch: ~0 cost when off)"];
+
+    iter [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+          label="__traceiter_sched_switch(NULL, args)\nwalks the registered probe list,\npasses raw args UNCHANGED to each"];
+
+    args [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+          label="raw TP_PROTO args (in registers):\l(preempt, prev, next, prev_state)\lsame pointers handed to every probe\l"];
+
+    // The probe list entries
+    copy [shape=box, style="filled", fillcolor="#e5e7eb", fontcolor="#6b7280",
+          label="ftrace copy probe\nTP_fast_assign memcpy()\nfills flat event struct"];
+    perf [shape=box, style="filled", fillcolor="#e5e7eb", fontcolor="#6b7280",
+          label="perf probe\n(perf_trace_sched_switch)"];
+    bpf  [shape=box, style="filled", fillcolor="#dcfce7",
+          label="__bpf_trace_run\n-> your tp_btf prog\n(typed prev/next, zero copy)"];
+
+    fire -> iter;
+    iter -> copy [style=dashed, color="#9ca3af"];
+    iter -> perf [style=dashed, color="#9ca3af"];
+    iter -> bpf  [color="#16a34a", style=bold];
+
+    // raw args flow unchanged to every entry
+    args -> copy [style=dotted, color="#d97706", arrowsize=0.6];
+    args -> perf [style=dotted, color="#d97706", arrowsize=0.6];
+    args -> bpf  [style=dotted, color="#d97706", arrowsize=0.6];
+    { rank=same; copy; perf; bpf; }
+    iter -> args [style=invis];
+
+    callout [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+             label="The grey copy/perf probes are ON THE LIST\lONLY if a tracepoint/ or ftrace/perf listener\lis attached -> this is why the copy cost is bounded.\ltp_btf-only? the memcpy never runs.\l"];
+    copy -> callout [style=invis];
+}

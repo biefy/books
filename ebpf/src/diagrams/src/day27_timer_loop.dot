@@ -1,0 +1,35 @@
+digraph timer_loop {
+    rankdir=TB;
+    labelloc=t;
+    label="central_timerfn: the only source of preemption";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.4; ranksep=0.5;
+
+    fire [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+          label="central_timerfn fires\n(every 1 ms, in softirq)"];
+
+    scan [shape=box, style="filled", fillcolor="#dbeafe",
+          label="scan all CPUs\nbpf_for(c, 0, nr_cpu_ids)"];
+
+    check [shape=diamond, style="filled", fillcolor="#fef3c7", fontsize=9,
+           label="non-central CPU c:\n(now - started_at) >= slice_ns\nAND work pending?"];
+
+    kick [shape=box, style="filled", fillcolor="#fee2e2",
+          label="kick CPU c\nSCX_KICK_PREEMPT\n(force reschedule)"];
+
+    rearm [shape=box, style="filled", fillcolor="#dcfce7",
+           label="re-arm timer\nbpf_timer_start(TIMER_INTERVAL_NS,\nBPF_F_TIMER_CPU_PIN)"];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="Every task is dispatched with SCX_SLICE_INF\l(infinite slice, implies nohz). With the tick off,\lthis 1 ms timer is the ONLY thing that preempts.\l"];
+
+    fire -> scan;
+    scan -> check;
+    check -> kick [label="yes", color="#dc2626", style=bold, fontname="Helvetica", fontsize=9];
+    check -> rearm [label="no / done scanning", color="#2563eb", style=bold, fontname="Helvetica", fontsize=9];
+    kick -> rearm [color="#2563eb"];
+    rearm -> fire [label="self-rearm (one-shot -> periodic)", color="#7c3aed", style="bold,dashed", fontname="Helvetica", fontsize=9];
+
+    scan -> note [style=invis];
+}

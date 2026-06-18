@@ -1,6 +1,6 @@
 # Day 6 — fentry/fexit and the latency-measurement pattern
 
-> **Today's mission:** measure the latency of every `vfs_read` on your system. Build a map keyed by thread, store the entry timestamp on call-in, retrieve it on call-out, emit duration to userspace. Total time: ~90 minutes.
+> **Today's mission:** measure the latency of every `vfs_read` on your system. Build a map keyed by thread, store the entry timestamp on call-in, retrieve it on call-out, emit duration to userspace. Along the way: meet `fexit` and understand *exactly* how it differs from the older `kretprobe` (the return-address swap, the instance pool, why bursts get missed), learn what `vfs_read` actually is and what its return value means, and pick the right per-thread key. Total time: ~110 minutes.
 
 > **Phase 2 starts here.** Days 1–5 made you fluent with libbpf, CO-RE, maps, and the Verifier. Days 6–13 turn that fluency into tracing: typed kernel-function tracing at scale, tracepoints, stack traces, uprobes, and sleepable programs. By Day 13 you'll be able to write the kind of tracer that ships in production observability tools.
 
@@ -18,19 +18,118 @@ Yesterday you saw `fentry`. Today you meet its other half — `fexit` — and us
 
 The fentry program runs *before* the function body. The fexit program runs *after* it. Both are connected to the same trampoline; the kernel installs them as a coordinated pair when you load the BPF object. Between entry and exit, the function does its work — could be 100 ns, could be 100 ms.
 
+## What is `vfs_read`, and what does its return value mean?
+
+Before we hook anything, know your target. Today we trace `vfs_read`, and the lab only makes sense if you know two facts about it.
+
+**First: `vfs_read` is the kernel's single central entry point for the `read(2)`/`pread(2)` family of syscalls.** Every file-descriptor read — whether the fd is a regular file, a socket, a pipe, `/dev/zero`, or a procfs node — funnels through `vfs_read` before the kernel dispatches to that particular filesystem's own read handler. That makes it a perfect chokepoint: hook `vfs_read` once and you see *all* reads on the box. (You actually used `fentry/vfs_read` back in a Day 2 break without explanation — now you know why it's such a popular target.)
+
+**Second: its signature is exactly the four typed arguments our fentry program will declare, and its return type is exactly what fexit captures.** In v7.1:
+
+```c
+/* fs/read_write.c:554 */
+ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
+```
+
+- `struct file *file` — the open file the fd refers to (Day 1 noted `struct file` lives in `vmlinux.h`; that's all we need).
+- `char __user *buf` — the userspace destination buffer.
+- `size_t count` — how many bytes the caller asked for.
+- `loff_t *pos` — pointer to the file offset.
+
+The return type `ssize_t` is the contract our fexit program reads. On success it's the **number of bytes actually read** — which can be *less* than `count` (a short read, or EOF returning 0). On failure it's a **negative errno**. You can see all three failure returns right at the top of the function:
+
+```c
+/* fs/read_write.c:558-563 */
+if (!(file->f_mode & FMODE_READ))
+    return -EBADF;
+if (!(file->f_mode & FMODE_CAN_READ))
+    return -EINVAL;
+if (unlikely(!access_ok(buf, count)))
+    return -EFAULT;
+```
+
+and the success value comes straight from the filesystem's own read op:
+
+```c
+/* fs/read_write.c:571-573 */
+if (file->f_op->read)
+    ret = file->f_op->read(file, buf, count, pos);
+else if (file->f_op->read_iter)
+    ret = new_sync_read(file, buf, count, pos);
+```
+
+That's why today's lab prints the return value as a *signed* number labelled "bytes": `vfs_read → 2543 bytes` is a successful 2543-byte read; a negative number would be an errno. We don't need the full VFS read path (`->read` vs `->read_iter` dispatch) — just "central read chokepoint" and "return = bytes-or-negative-errno," so the output isn't magic.
+
 ## Meet `fexit`
 
 `fexit` is the counterpart to `fentry`: it attaches at function *return*. But unlike `fentry`, you also get the return value handed to you as a typed argument. That last argument matters — it's what makes fexit strictly more powerful than the older `kretprobe`.
 
+To appreciate *why* fexit is the better tool, you have to understand how the old return-probe machinery works — because the chapter is about to contrast against it repeatedly, and a kretprobe hooks a function's return in a fundamentally trickier way than the entry kprobe you already know.
+
+### Refresher: the entry kprobe (Day 1)
+
+Day 1 already explained the **entry** kprobe: it overwrites the probed function's first instruction with an `int3` breakpoint byte. When the CPU executes that byte it traps, the kprobe handler runs, then the original instruction is single-stepped or emulated and execution continues. On x86 the emulation helpers are right there — `int3_emulate_call`, `int3_emulate_ret`, `int3_emulate_jmp` (`arch/x86/kernel/kprobes/core.c:507-525`). We do **not** re-teach that here. The *entry* hook is solved.
+
+The new question is: how do you run code at the **return**? There's no single instruction to breakpoint — a function can `ret` from many places, and the same code runs for every caller.
+
+### How a kretprobe hijacks the return address
+
+A kretprobe is layered *on top of* an entry kprobe, and it plays a stack trick:
+
+1. At function **entry**, the kprobe handler reads the function's real return address off the kernel stack and **saves it** in a per-call object. Then it **overwrites** that saved return address on the stack with the address of a kernel trampoline.
+2. The function runs normally and eventually does `ret`. But `ret` now pops the *trampoline* address, not the real caller — so control lands in the trampoline.
+3. The trampoline runs your return handler (which can read the return value), then **jumps to the real saved caller address** so the program continues as if nothing happened.
+
+On x86 that trampoline is hand-written assembly whose address is what gets stuffed onto the stack:
+
+```asm
+/* arch/x86/kernel/rethook.c:26-38 */
+"arch_rethook_trampoline:\n"
+    ...
+    "   pushq $arch_rethook_trampoline\n"   /* fake return addr for the unwinder */
+    ...
+    "   call arch_rethook_trampoline_callback\n"
+```
+
+![kretprobe return-address swap and the instance pool](diagrams/day06_kretprobe_return_swap.png)
+
+**The instance pool.** To save that real return address you need *one object per in-flight call*. Recursion, preemption, and many CPUs all mean several calls to the same function can be "in flight" at once, each needing its own saved address. So the kernel pre-allocates a **fixed pool** of these objects, sized by `maxactive`. The fields live right in `struct kretprobe`:
+
+```c
+/* include/linux/kprobes.h:150-154 */
+int maxactive;
+int nmissed;
+...
+struct rethook *rh;
+```
+
+and the per-call save object is:
+
+```c
+/* include/linux/kprobes.h:162-164 */
+struct kretprobe_instance {
+    ...
+    struct rethook_node node;
+    ...
+};
+```
+
+The in-tree comment spells out the sizing contract: *"maxactive - The maximum number of instances of the probed function that can be active concurrently"* and *"nmissed - tracks the number of times the probed function's return was ignored, due to maxactive being too low"* (`include/linux/kprobes.h:135-138`). **If more calls are in flight simultaneously than the pool size, the extra returns simply aren't probed** — the kernel bumps `nmissed` and moves on. That's what "bursts can exhaust the instances pool" means, made concrete: a sudden flood of concurrent calls silently loses return events.
+
+**The unwinder problem.** Because the kretprobe rewrote the saved return address, anything that *walks the kernel stack* to reconstruct caller frames sees the trampoline address where the true caller should be. In the kernel this means the in-kernel stack unwinders (ORC on x86_64, frame-pointer unwinding) that back `dump_stack()`, `/proc/<pid>/stack`, perf/ftrace backtraces, and `bpf_get_stack` — there is no C++ exception machinery in the kernel; it's all C. (The x86 trampoline even pushes a fake `$arch_rethook_trampoline` frame to *tell* the unwinder "this is a rethook," precisely because the real return address is hidden.) This is the "stack-modifying tricks break unwinding" remark, made concrete.
+
+### Why fexit avoids all of that
+
+`fexit` is part of the same *trampoline* fentry uses. The trampoline saves arguments on entry, calls fentry programs, calls the original function, gets the return value, **appends it to the context array**, then calls fexit programs.
+
 ![fexit vs kretprobe](diagrams/day06_fexit_vs_kretprobe.png)
 
-The mechanics differ:
+Compare the two mechanisms point for point:
 
-- **kretprobe** patches the *return address* on the kernel stack at function entry. The function returns to a kernel trampoline that calls your handler. Effective but invasive — bursts can exhaust the limited "instances pool," and stack-modifying tricks break C++ exception unwinding.
+- **kretprobe** rewrites the saved return address, needs a finite per-probe instance pool, drops returns (`nmissed++`) on bursts, and confuses stack unwinders. Effective, but invasive.
+- **fexit** never touches the return address. The original function returns normally to its real caller; the trampoline captured the return value alongside, so there's no stack rewrite, no finite pool, and no missed-on-burst failure mode.
 
-- **fexit** is part of the same *trampoline* fentry uses. The trampoline saves arguments on entry, calls fentry programs, calls the original function, gets the return value, **appends it to the context array**, then calls fexit programs. Stack untouched. No pool. Fewer ways to fail.
-
-In modern code, **prefer fexit** wherever it's available — that means: any function with BTF info (essentially every non-`__attribute__((always_inline))` kernel function on a modern build). Use `kretprobe` only when fexit isn't available.
+That's the whole argument: **prefer fexit** wherever it's available — any function with BTF info (essentially every non-`__attribute__((always_inline))` kernel function on a modern build). Use `kretprobe` only when fexit isn't available.
 
 > ### There are no Dumb Questions
 >
@@ -52,7 +151,7 @@ In modern code, **prefer fexit** wherever it's available — that means: any fun
 __u64 ts = bpf_ktime_get_ns();
 ```
 
-Returns nanoseconds since system boot, monotonic. Cheap — implemented as `ktime_get_mono_fast_ns` under the hood, no locking, single read of a kernel timekeeping cache. ~10ns to invoke. Don't use it for wall-clock time; use `bpf_ktime_get_boot_ns` (includes suspend) or `bpf_ktime_get_tai_ns` (TAI clock) instead.
+Returns nanoseconds on the **monotonic** clock (`CLOCK_MONOTONIC`): time advances steadily and never goes backward, but it *excludes* any interval the machine spent suspended, so it isn't literally "elapsed since boot." That's exactly what you want for measuring a latency *delta* — both reads use the same clock and the difference is meaningful. Cheap — implemented as `ktime_get_mono_fast_ns` under the hood, no locking, single read of a kernel timekeeping cache. ~10ns to invoke. It is **not** calendar/wall-clock time and you can't correlate it with userspace `clock_gettime(CLOCK_REALTIME)` timestamps. If you need elapsed real time that also counts suspend, use `bpf_ktime_get_boot_ns` (`CLOCK_BOOTTIME` — still a monotonic count from boot, just inclusive of suspend, *not* wall-clock). The closest thing to wall-clock here is `bpf_ktime_get_tai_ns` (`CLOCK_TAI`, which tracks UTC up to a fixed leap-second offset).
 
 ## TID vs TGID — pick the right key
 
@@ -92,7 +191,7 @@ If you key by TGID, four threads of the same process all hit the same map slot, 
 > .  
 > .
 >
-> **Answer:** because one helper call is cheaper than two. The kernel only ever exposed the combined helper `bpf_get_current_pid_tgid` (helper id 14) — there was never a separate `bpf_get_current_pid` or `bpf_get_current_tgid` in the UAPI. The single call returns both fields packed together, mirroring what `task_struct` itself carries: both `pid` (kernel meaning) and `tgid`. The naming confusion is historical — userspace called processes "PIDs" before threads existed.
+> **Answer:** because one helper call is cheaper than two. The kernel only ever exposed the combined helper `bpf_get_current_pid_tgid` (helper id 14) — there was never a separate `bpf_get_current_pid` or `bpf_get_current_tgid` in the UAPI. The single call returns both fields packed together, mirroring what `task_struct` itself carries: both `pid` (kernel meaning) and `tgid`. The body is literally `return (u64) task->tgid << 32 | task->pid;` (`kernel/bpf/helpers.c:225-233`). The naming confusion is historical — userspace called processes "PIDs" before threads existed.
 
 ## The lifecycle, explicitly
 
@@ -167,6 +266,8 @@ int BPF_PROG(on_exit, struct file *f, char *buf, size_t n, loff_t *pos, ssize_t 
 }
 ```
 
+The fentry signature `(struct file *f, char *buf, size_t n, loff_t *pos)` is exactly the four `vfs_read` arguments we read off `fs/read_write.c:554` above. The fexit signature is those same four args plus the captured `ssize_t ret` — the byte-count-or-negative-errno we discussed, which is what `e->ret` carries to userspace.
+
 ### What's new since Day 1–5
 
 - **Two programs in one object**, sharing maps. The skeleton exposes both as `skel->progs.on_enter` and `skel->progs.on_exit`. Both auto-attach when you call `latency_bpf__attach(skel)`.
@@ -214,6 +315,8 @@ PID 14002 TID 14002 vfs_read → 1024 bytes in 6 µs (dd)
 ...
 ```
 
+The `→ N bytes` column is `vfs_read`'s return value: 2543 bytes read by `cat`, 1024 per `dd` block. A negative value there would be an errno (e.g. `-9` for `-EBADF`) — that's the contract we read off `fs/read_write.c:558-573`.
+
 This traces *every* `vfs_read` on the box, not just `cat`/`dd` — sshd, systemd, journald, and the shell itself all read constantly, so those two lines are buried in a flood of unrelated events. To isolate them, pipe Terminal A through `grep -E 'cat|dd'` (or filter by `comm` in the consumer). **Stop the tracer with Ctrl-C in Terminal A when done.** (If you prefer to background it with `sudo ./latency &`, remember to `sleep 1` before generating work so attach completes, and `sudo pkill latency` to stop it.)
 
 You just measured every kernel-side `vfs_read` on your system in real time, with typed argument access and a few hundred nanoseconds of overhead per call. **This is what eBPF is for.**
@@ -223,6 +326,8 @@ You just measured every kernel-side `vfs_read` on your system in real time, with
 ## What to break, in order
 
 ### Break 1 — Forget the `bpf_map_delete_elem`
+
+You saw a preview of this back in Day 2 (Break 4, flagged as a Day 9 teaser); here it's the actual failure mode of today's tracer, so it earns a full walk-through. Day 2 used the quick-and-dirty `wc -l` counter — below we teach the dependable `-j | jq length` form instead, which is the count you should trust.
 
 Comment it out, then `make` and relaunch a fresh tracer (`sudo pkill latency; make && sudo ./latency &`) — the `starts` map only exists while the loaded program is running, so `bpftool map ... name starts` finds nothing if the tracer isn't up. Drive load from another terminal with `find /usr -type f -exec cat {} + >/dev/null`, then periodically read the live entry count. The reliable, version-independent way is the JSON dump piped to `jq length`:
 
@@ -234,7 +339,7 @@ sudo bpftool map dump -j name starts | jq length
 21
 ```
 
-(Plain `bpftool map dump name starts` prints the entries themselves — on newer bpftool, v7.x here, as a JSON array; on older builds as `key: … value: …` lines with a trailing `Found N elements` footer. The format varies, which is exactly why the `-j | jq length` form above is the dependable counter. Don't use `bpftool map show name starts` for this — it reports only the static `max_entries 10240` ceiling and key/value sizes, never the live count. And don't pipe `map dump` through `wc -l`: it counts formatting/footer lines, not elements.)
+(Plain `bpftool map dump name starts` prints the entries themselves — on the v7.x bpftool here as `key: … value: …` lines with a trailing `Found N elements` footer; only the `-j` flag emits a JSON array. The format varies across builds, which is exactly why the `-j | jq length` form above is the dependable counter. Don't use `bpftool map show name starts` for this — it reports only the static `max_entries 10240` ceiling and key/value sizes, never the live count. And don't pipe `map dump` through `wc -l`: it counts formatting/footer lines, not elements.)
 
 Watch *N* climb. Slowly at first, then steady. As it plateaus toward `max_entries=10240`, `bpf_map_update_elem` silently fails on every new TID. Your tracer's coverage degrades to "only TIDs that were already in flight when the map filled."
 
@@ -242,7 +347,7 @@ This is the slow-poison failure mode. **Always delete on exit.**
 
 ### Break 2 — Use TGID instead of TID
 
-Change both lookups/updates to use `id >> 32` as key. The collision only shows up when several *threads of one process* (one shared TGID, many TIDs) read concurrently — separate processes each have a distinct TGID, so they never clash. Drive that with a single multi-threaded reader:
+In both programs, key the map on the TGID — `bpf_get_current_pid_tgid() >> 32` — instead of the TID. (Note the entry program computes `tid` directly and has no `id` variable, so you're changing the masked expression in each, not reusing an `id`.) The collision only shows up when several *threads of one process* (one shared TGID, many TIDs) read concurrently — separate processes each have a distinct TGID, so they never clash. Drive that with a single multi-threaded reader:
 
 ```bash
 python3 - <<'EOF'
@@ -257,7 +362,7 @@ time.sleep(10)
 EOF
 ```
 
-All 8 threads share one TGID and all call `vfs_read`, so a TGID-keyed map collides on every concurrent read: `fentry` from thread B overwrites thread A's start timestamp, so A's `fexit` computes a bogus delta. Watch your output. You'll see latency values that are obviously wrong — huge u64-underflowed durations (the subtraction wraps, giving ~10^18 ns) — and the event count drops, because some threads' `fexit` finds no matching `fentry` entry. (Contrast with TID keying: one entry per thread, so deltas stay correct.)
+All 8 threads share one TGID and all call `vfs_read`, so a TGID-keyed map collides on every concurrent read: when thread B's `fentry` overwrites thread A's start timestamp with B's own (*later*) timestamp, A's `fexit` then reads B's timestamp and computes a bogus delta. Watch your output. Two symptoms dominate. First, **understated durations**: `bpf_ktime_get_ns` is monotonic, so the timestamp sitting in the slot is essentially always *earlier* than the `now` a later `fexit` reads — the subtraction stays positive but tiny (`now - ts_B` instead of the true `now - ts_A`), so latencies come out implausibly low. Second, the **event count drops**: whichever thread's `fexit` runs first deletes the shared slot, so the other thread's `fexit` finds no entry (`bpf_map_lookup_elem` returns NULL) and silently bails. (A giant `~10^18` "underflowed" duration is *not* the expected symptom with a monotonic clock — that would require the stored timestamp to be greater than `now`, which only happens in a narrow race where another CPU's `fentry` rewrites the slot value between this `fexit`'s clock read and its dereference; it's a rare artifact, not the headline.) Contrast with TID keying: one entry per thread, so deltas stay correct and no events are lost.
 
 Lesson stays: **TID for synchronous per-thread tracking.**
 
@@ -278,7 +383,7 @@ Change `SEC("fexit/vfs_read")` to `SEC("kretprobe/vfs_read")`. Rebuild. Things b
 2. The argument list is wrong. kretprobe's ctx is `struct pt_regs *`, not the typed args + return. You can only get the return value via `PT_REGS_RC(ctx)`.
 3. You can't access `f`, `buf`, `n`, or `pos` — they were the *entry* arguments and are gone by now.
 
-This is the operational reason fexit is strictly better. With fexit you have entry args + return value; with kretprobe you have only return value.
+This is the operational reason fexit is strictly better. With fexit you have entry args + return value; with kretprobe you have only return value (`PT_REGS_RC` reads it out of the trampoline's saved registers) — and, as the mechanism section showed, you also inherit the instance pool, the `nmissed` burst drops, and the unwinder confusion.
 
 The full equivalent kretprobe version:
 
@@ -322,20 +427,23 @@ The leak lesson still stands, though — it just applies to functions the denyli
 
 - **`kernel/bpf/trampoline.c`** — open it. Search `arch_prepare_bpf_trampoline`. The trampoline is *generated assembly* that saves arguments, calls fentry programs, calls the original function, captures the return value into the ctx array, and calls fexit programs. The ASM is per-arch (x86_64, arm64, etc.) but the structure is consistent.
 - **`tools/lib/bpf/bpf_tracing.h`** — search `BPF_PROG`. The macro is ~30 lines of variadic-template-style C macros. Read it once. You'll see how the `u64 *ctx` array gets unpacked into typed parameters via `((__u64 *)ctx)[N]` casts. After this, the macro stops feeling magic.
-- **`kernel/trace/bpf_trace.c`** — search `bpf_get_func_arg` and `bpf_get_func_ret`. These are helper-based access patterns for the same data, used when `BPF_PROG`'s positional args don't fit (e.g., variadic kernel functions).
+- **`kernel/trace/bpf_trace.c`** — search `bpf_get_func_arg` and `bpf_get_func_ret` (`bpf_get_func_ret_proto` is at `bpf_trace.c:1223`). These are helper-based access patterns for the same data, used when `BPF_PROG`'s positional args don't fit (e.g., variadic kernel functions).
+- **`arch/x86/kernel/rethook.c`** — the hand-written `arch_rethook_trampoline` (`:26`) whose address a kretprobe swaps onto the stack. Read it once *after* today and the return-address trick stops being abstract.
 - **`Documentation/bpf/libbpf/program_types.rst`** — the official doc listing tracing program types (`fentry`, `fexit`, `fsession`). One read, optional.
 
 ---
 
 ## Bullet Points
 
+- **`vfs_read`** is the kernel's central read chokepoint (`fs/read_write.c:554`); its `ssize_t` return is bytes-read on success or a negative errno on failure — that's the "→ N bytes" you print.
 - **`fexit`** attaches at function return; receives original arguments **and** the return value as typed parameters.
-- Use **fexit > kretprobe** wherever fexit is available (any function with BTF). kretprobe is legacy.
-- `bpf_ktime_get_ns()` returns monotonic boot-time nanoseconds; cheap, ~10ns to call.
+- A **kretprobe** hooks the return by *swapping the saved return address* on the stack for a trampoline at entry, using a finite **instance pool** (`maxactive`); bursts beyond the pool are dropped and counted in **`nmissed`**, and the swap confuses stack unwinders.
+- Use **fexit > kretprobe** wherever fexit is available (any function with BTF): same trampoline as fentry, no return-address rewrite, no pool, no missed-on-burst. kretprobe is legacy.
+- `bpf_ktime_get_ns()` returns `CLOCK_MONOTONIC` nanoseconds (excludes suspend, *not* wall-clock); cheap, ~10ns to call. Perfect for a latency delta, useless for calendar time.
 - **Key per-thread tracers by TID, not TGID.** Multi-threaded processes will collide on TGID-keyed maps.
 - The latency pattern: `fentry` stores entry timestamp keyed by TID; `fexit` retrieves it, computes duration, **deletes** the entry, emits the event.
 - **Don't forget `bpf_map_delete_elem`.** Tracers that don't clean up degrade silently as their map fills.
-- Some kernel functions don't return (e.g., `do_exit`); fexit-based tracking can't handle them. Use a different mechanism (tracepoints, periodic sweeps).
+- Some kernel functions don't return (e.g., `do_exit`); fexit-based tracking can't handle them. The Verifier even rejects fexit on `__noreturn` functions up front. Use a different mechanism (tracepoints, periodic sweeps).
 - `BPF_PROG` macro unpacks typed arguments from the trampoline's `u64 *ctx` array — same macro for fentry and fexit; fexit just has one extra arg (the return value) at the end.
 
 ---
@@ -347,7 +455,7 @@ You attach an fentry+fexit pair to a function that, on some paths, calls itself 
 <details>
 <summary>Click to reveal answer</summary>
 
-**Answer:** No. On the recursive call, the second `fentry` overwrites the first's timestamp (same TID). When the inner call's `fexit` runs, it reads the *its own* timestamp and deletes the entry. The outer `fexit` then can't find any entry — `bpf_map_lookup_elem` returns NULL, the duration computation is skipped, and the event is silently dropped. To handle this, you need a recursion-aware key like `(tid, depth)` where depth is tracked in a percpu map, or you switch to `bpf_get_func_ip(ctx)` plus stack-allocated counters. Most kernel functions don't recurse meaningfully, so this rarely matters in practice — but when it does, you've found a real subtlety.
+**Answer:** No. On the recursive call, the second `fentry` overwrites the first's timestamp (same TID). When the inner call's `fexit` runs, it reads *its own* timestamp and deletes the entry. The outer `fexit` then can't find any entry — `bpf_map_lookup_elem` returns NULL, the duration computation is skipped, and the event is silently dropped. To handle this, you need a recursion-aware key like `(tid, depth)` where depth is tracked in a percpu map, or you switch to `bpf_get_func_ip(ctx)` plus stack-allocated counters. Most kernel functions don't recurse meaningfully, so this rarely matters in practice — but when it does, you've found a real subtlety.
 
 </details>
 

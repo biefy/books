@@ -1,0 +1,32 @@
+digraph im_nodes {
+    rankdir=TB;
+    labelloc=t;
+    label="IM (intermediate) nodes: branch-only, no value — the walk passes through but never returns one";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.6; ranksep=0.8;
+
+    root [shape=box, style="filled,rounded", fillcolor="#f3f4f6", fontname="Helvetica",
+          label="root\n(10.x — bits 0..13 shared)"];
+
+    // The IM branch node: dashed, hollow
+    im [shape=box, style="rounded,dashed", color="#9333ea", fillcolor="white",
+        label="IM branch node @ bit 14\nflags |= LPM_TREE_NODE_FLAG_IM\n\"no value\""];
+
+    leafA [shape=box, style="filled,rounded", fillcolor="#dbeafe", fontname="Helvetica",
+           label="10.1.0.0/16\n(solid leaf — has value)"];
+    leafB [shape=box, style="filled,rounded", fillcolor="#dbeafe", fontname="Helvetica",
+           label="10.2.0.0/16\n(solid leaf — has value)"];
+
+    root -> im [label="walk", fontname="Helvetica", fontsize=9];
+    im -> leafA [label="bit 14 = 0", fontname="Helvetica", fontsize=9];
+    im -> leafB [label="bit 14 = 1", fontname="Helvetica", fontsize=9];
+
+    walknote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9, fontname="Helvetica",
+              label="Lookup walks THROUGH the IM node\lbut only remembers the last node\lwith the IM flag CLEAR:\l\l  if (!(node->flags & ..._IM))\l      found = node;\l\lSo the IM node is never returned —\lit only forks the two /16 leaves.\l"];
+    im -> walknote [style=dashed, color="#9333ea"];
+
+    tally [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9, fontname="Helvetica",
+           label="Memory tally\l----------------\l1 stored prefix\l  = 1 solid leaf\l  + maybe a few IM branch nodes\l  = a few hundred bytes\l"];
+    leafB -> tally [style=invis];
+}

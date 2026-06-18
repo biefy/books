@@ -1,0 +1,25 @@
+digraph func_proto_split {
+    rankdir=LR;
+    labelloc=t;
+    label="A function lives in BTF as TWO entries linked by type_id";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.6; ranksep=0.9;
+
+    func [shape=record, style="filled", fillcolor="#dbeafe", fontsize=10,
+          label="{ FUNC  #98739  (kind 12) | name = 'bpf_cpumask_create' | linkage = static | type_id ───▶ }"];
+
+    proto [shape=record, style="filled", fillcolor="#dcfce7", fontsize=10,
+           label="{ FUNC_PROTO  #N  (kind 13) | (no name — just a shape) | ret = struct bpf_cpumask * | args = (void) }"];
+
+    func -> proto [label="type_id", color="#dc2626", style=bold,
+                   fontname="Helvetica", fontsize=10];
+
+    rawnote [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+             label="raw  bpftool btf dump  prints the\lLEFT box only — no arguments.\l"];
+    cnote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+           label="format c  follows the arrow and prints the\lmerged C declaration:\l  struct bpf_cpumask *bpf_cpumask_create(void) __ksym;\l"];
+
+    func -> rawnote [style=invis];
+    proto -> cnote [style=invis];
+}

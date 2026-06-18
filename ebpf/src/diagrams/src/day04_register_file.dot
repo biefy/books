@@ -1,0 +1,46 @@
+digraph register_file {
+    rankdir=TB;
+    labelloc=t;
+    label="The 11-slot BPF register file and the OR_NULL that lands in R0";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.3; ranksep=0.4;
+
+    subgraph cluster_regs {
+        label="register file (R0-R10, each 64-bit)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+
+        r0  [shape=box, style="filled", fillcolor="#e9d5ff",
+             label="R0   return value  ->  holds the OR_NULL after the call"];
+        r1  [shape=box, style="filled", fillcolor="#dbeafe",
+             label="R1   arg / clobbered by call"];
+        r2  [shape=box, style="filled", fillcolor="#dbeafe",
+             label="R2   arg / clobbered by call"];
+        r3  [shape=box, style="filled", fillcolor="#dbeafe",
+             label="R3   arg / clobbered by call"];
+        r4  [shape=box, style="filled", fillcolor="#dbeafe",
+             label="R4   arg / clobbered by call"];
+        r5  [shape=box, style="filled", fillcolor="#dbeafe",
+             label="R5   arg / clobbered by call"];
+        r6  [shape=box, style="filled", fillcolor="#dcfce7",
+             label="R6   callee-saved (survives a call)"];
+        r7  [shape=box, style="filled", fillcolor="#dcfce7",
+             label="R7   callee-saved"];
+        r8  [shape=box, style="filled", fillcolor="#dcfce7",
+             label="R8   callee-saved"];
+        r9  [shape=box, style="filled", fillcolor="#dcfce7",
+             label="R9   callee-saved"];
+        r10 [shape=box, style="filled", fillcolor="#fef3c7",
+             label="R10  frame pointer, read-only"];
+
+        r0 -> r1 -> r2 -> r3 -> r4 -> r5 -> r6 -> r7 -> r8 -> r9 -> r10 [style=invis];
+    }
+
+    stack [shape=box, style="filled,rounded", fillcolor="#fde68a", fontsize=10,
+           label="512-byte BPF stack\n(MAX_BPF_STACK = 512)\n\nr10-4  <-  key slot  *(u32 *)(r10-4) = r1"];
+    r10 -> stack [label="points to", color="#d97706", style=bold, fontname="Helvetica", fontsize=9];
+
+    logline [shape=note, style="filled", fillcolor="#dbeafe", fontsize=9,
+             label="6: (85) call bpf_map_lookup_elem#1\l         |\l         v  result lands in R0\l7: R0 = map_value_or_null(id=2,ks=4,vs=8)\l"];
+    logline -> r0 [label="maps onto", color="#2563eb", style=bold, fontname="Helvetica", fontsize=9];
+}

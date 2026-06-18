@@ -1,0 +1,33 @@
+digraph vtable_dispatch {
+    rankdir=LR;
+    labelloc=t;
+    label="One call site, many targets: icsk_ca_ops->ssthresh(sk) dispatches through the table pointer";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    sock [shape=record, style="filled", fillcolor="#dbeafe",
+          label="struct sock / inet_connection_sock|icsk_ca_ops  ● (one pointer)"];
+
+    callsite [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=10,
+              label="THE CALL SITE (never changes)\nicsk->icsk_ca_ops->ssthresh(sk)\nnet/ipv4/tcp_input.c:2570"];
+
+    // The vtable the pointer currently targets
+    vtable [shape=record, style="filled", fillcolor="#fef3c7",
+            label="struct tcp_congestion_ops (a vtable)|ssthresh   ● |cong_avoid ● |undo_cwnd  ● |init       ● |name = \"...\""];
+
+    cubic [shape=box, style="filled", fillcolor="#dcfce7", fontsize=10,
+           label="kernel C function\ncubictcp_recalc_ssthresh()\n(table = CUBIC)"];
+
+    bpf [shape=box, style="filled", fillcolor="#dcfce7", fontsize=10,
+         label="BPF prog FD\ndctcp_ssthresh (struct_ops)\n(table = bpf_dctcp)"];
+
+    sock -> vtable [label="icsk_ca_ops points at", color="#dc2626", style=bold];
+    callsite -> vtable [label="load ssthresh slot", style=dashed, color="#2563eb"];
+
+    vtable -> cubic [label="if pointing at CUBIC's table", color="#7c3aed", style=bold];
+    vtable -> bpf [label="OR at bpf_dctcp's table", color="#7c3aed", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="The dereference-then-call through a per-object\ltable pointer IS the trick. Repoint icsk_ca_ops\lat a different table -> different implementation runs.\lThat seam is exactly where struct_ops plugs BPF in.\l"];
+    bpf -> note [style=invis];
+}

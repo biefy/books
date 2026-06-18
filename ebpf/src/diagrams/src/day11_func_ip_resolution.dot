@@ -1,0 +1,43 @@
+digraph func_ip_resolution {
+    rankdir=LR;
+    labelloc=t;
+    label="bpf_get_func_ip: the IP is the only discriminator";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=9];
+
+    // N targets feeding in
+    subgraph cluster_targets {
+        label="N attached vfs_* functions";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        t1 [shape=box, style="filled,rounded", fillcolor="#dbeafe", label="vfs_read"];
+        t2 [shape=box, style="filled,rounded", fillcolor="#dbeafe", label="vfs_open"];
+        t3 [shape=box, style="filled,rounded", fillcolor="#dbeafe", label="vfs_write"];
+        t4 [shape=box, style="filled,rounded", fillcolor="#dbeafe", label="..."];
+    }
+
+    // resolution path
+    resolve [shape=box, style="filled", fillcolor="#dcfce7",
+             label="fprobe handler\nfentry_ip ->\nftrace_get_entry_ip()\n-> current->bpf_ctx\n(run ctx)"];
+
+    t1 -> resolve [label="fentry_ip"];
+    t2 -> resolve [label="fentry_ip"];
+    t3 -> resolve [label="fentry_ip"];
+    t4 -> resolve [label="fentry_ip"];
+
+    // the program
+    subgraph cluster_prog {
+        label="One BPF program (ctx / pt_regs identical in shape for all N)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#7c3aed";
+        getip [shape=box, style="filled", fillcolor="#e9d5ff",
+               label="bpf_get_func_ip()\nreads entry IP back\nout of current->bpf_ctx"];
+        map [shape=record, style="filled", fillcolor="#fef3c7",
+             label="{ hash map | ip =\> count }"];
+        getip -> map [label="IP = key"];
+    }
+
+    resolve -> getip [color="#dc2626", style=bold, label="stashed IP"];
+
+    note [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+          label="The IP is the ONLY thing that\ldistinguishes invocations.\lThe ctx (pt_regs) is identical\lin shape across all N targets.\l"];
+    map -> note [style=invis];
+}

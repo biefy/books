@@ -1,0 +1,25 @@
+digraph kernfs_id {
+    rankdir=TB;
+    labelloc=t;
+    label="kernfs 64-bit id: equals st_ino on 64-bit ino; packs (generation << 32) | inode on 32-bit ino";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    field [shape=record, style="filled", fillcolor="#dbeafe",
+           label="{ cgrp-\>kn-\>id  (u64) | { <hi> high 32 bits | <lo> low 32 bits } }"];
+
+    b64 [shape=note, style="filled", fillcolor="#dcfce7", fontsize=10,
+         label="64-bit ino_t  (x86-64, arm64 — the lab box)\lid IS the inode: kernfs_id_ino(id)=id, gen=1\lst_ino == cgrp-\>kn-\>id EXACTLY\l→ stat -c %i would actually work here\l"];
+
+    b32 [shape=note, style="filled", fillcolor="#fee2e2", fontsize=10,
+         label="32-bit ino_t  (32-bit kernels)\lid packs generation (hi) | inode (lo)\lst_ino = low 32 bits ONLY\l→ drops generation, can mismatch\l"];
+
+    nth [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=10,
+         label="name_to_handle_at()  (what read_cgroup_id uses)\lfile_handle encodes all 64 bits\l→ full cgrp-\>kn-\>id on BOTH regimes\l→ the portable choice\l"];
+
+    b64 -> field [color="#16a34a", style=bold, label="whole id"];
+    b32 -> field:lo [color="#dc2626", style=bold, label="low half only"];
+    nth -> field [color="#7c3aed", style=bold, label="all 64 bits"];
+
+    { rank=same; b64; b32; nth; }
+}

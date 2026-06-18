@@ -1,0 +1,28 @@
+digraph insn_format {
+    rankdir=TB;
+    labelloc=t;
+    label="One verifier log line, exploded into its fields";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.35; ranksep=0.5;
+
+    line [shape=box, style="filled,rounded", fillcolor="#fef3c7", fontsize=12,
+          label="7: (79) r1 = *(u64 *)(r0 +0)"];
+
+    fields [shape=record, style="filled", fillcolor="#dbeafe", fontsize=10,
+            label="{ insn index\n7 | opcode byte\n0x79 | dst\nr1 | src\nr0 | off\n+0 }"];
+
+    opcode [shape=record, style="filled", fillcolor="#e9d5ff", fontsize=10,
+            label="{ 0x79 = | LDX\nclass 0x01 | MEM\nmode 0x60 | DW\nsize 0x18 }"];
+
+    deref [shape=note, style="filled", fillcolor="#fee2e2", fontsize=10,
+           label="LDX = load = deref\lForbidden on PTR_TO_MAP_VALUE_OR_NULL\luntil a NULL check proves non-NULL.\l"];
+
+    width [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+           label="*(u64 *) size suffix = DW (8 bytes)\lecho of the C type: value is __u64.\l*(u32 *) would be W (4 bytes): the __u32 key.\l"];
+
+    line -> fields [label="split into", color="#2563eb", style=bold, fontname="Helvetica", fontsize=9];
+    fields -> opcode [label="decode 0x79", color="#7c3aed", style=bold, fontname="Helvetica", fontsize=9];
+    opcode -> deref [label="LDX means", color="#dc2626", style=bold, fontname="Helvetica", fontsize=9];
+    opcode -> width [style=invis];
+}

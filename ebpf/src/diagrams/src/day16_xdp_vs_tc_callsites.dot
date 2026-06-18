@@ -1,0 +1,50 @@
+digraph xdp_vs_tc_callsites {
+    rankdir=TB;
+    labelloc=t;
+    label="Where XDP and the two tc hooks fire — v7.1 call sites";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.45; ranksep=0.55;
+
+    // RX path
+    subgraph cluster_rx {
+        label="RX path (receive)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+
+        nic [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+             label="NIC -> driver NAPI poll"];
+        xdp [shape=box, style="filled", fillcolor="#fee2e2",
+             label="XDP hook\n(in driver, PRE-skb)\nno skb yet"];
+        skb [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+             label="skb allocated\n(len, protocol, mark populated)"];
+        tcin [shape=box, style="filled", fillcolor="#dcfce7",
+              label="sch_handle_ingress()\ndev.c:4460, called dev.c:6053\n-> tc_run / tc_ingress prog"];
+        l3 [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+            label="ip_rcv() and L3 handlers"];
+
+        nic -> xdp -> skb -> tcin -> l3;
+    }
+
+    // TX path
+    subgraph cluster_tx {
+        label="TX path (transmit)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+
+        xmit [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+              label="__dev_queue_xmit()"];
+        tceg [shape=box, style="filled", fillcolor="#dcfce7",
+              label="sch_handle_egress()\ndev.c:4524, called dev.c:4807\n-> tc_run / tc_egress prog"];
+        qdisc [shape=record, style="filled", fillcolor="#fde68a",
+               label="real queueing qdisc | pkt | pkt"];
+        drv [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+             label="driver TX -> NIC"];
+
+        xmit -> tceg -> qdisc -> drv;
+    }
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="XDP runs before the skb exists; tc-ingress after.\lEgress fires just before the real qdisc —\la locally-routed packet never reaches it.\l"];
+
+    l3 -> note [style=invis];
+    note -> xmit [style=invis];
+}

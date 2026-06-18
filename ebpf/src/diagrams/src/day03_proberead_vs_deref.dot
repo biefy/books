@@ -1,0 +1,50 @@
+digraph proberead_vs_deref {
+    rankdir=TB;
+    labelloc=t;
+    label="Two ways to touch kernel memory after the CO-RE offset is patched";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    subgraph cluster_core {
+        label="BPF_CORE_READ  (safe, one hop per call)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+
+        c_reloc [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+                 label="relocated offset\n(CO-RE patches the immediate\nto the target kernel's offset)"];
+        c_helper [shape=box, style="filled", fillcolor="#e9d5ff",
+                  label="bpf_probe_read_kernel(dst, sz, src)\nGPL-only helper call"];
+        c_nofault [shape=box, style="filled", fillcolor="#fef3c7",
+                   label="copy_from_kernel_nofault()\ntry the load, catch the fault"];
+        c_ok [shape=box, style="filled", fillcolor="#dcfce7",
+              label="good ptr: dst = field value"];
+        c_bad [shape=box, style="filled", fillcolor="#fee2e2",
+               label="bad ptr: memset(dst,0,size)\nreturn -EFAULT  (clean 0)"];
+
+        c_reloc -> c_helper -> c_nofault;
+        c_nofault -> c_ok [label="hit"];
+        c_nofault -> c_bad [label="fault"];
+    }
+
+    subgraph cluster_deref {
+        label="direct deref  (fast, no fault net)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+
+        d_reloc [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+                 label="relocated offset\n(same CO-RE patch)"];
+        d_load [shape=box, style="filled", fillcolor="#fef3c7",
+                label="plain JIT load (ldx)\nno helper, no copy_from_kernel_nofault"];
+        d_ok [shape=box, style="filled", fillcolor="#dcfce7",
+              label="trusted PTR_TO_BTF_ID:\ndst = field value (faster)"];
+        d_bad [shape=box, style="filled", fillcolor="#fee2e2",
+               label="bad ptr: no fault net\nprogram terminated, event lost"];
+
+        d_reloc -> d_load;
+        d_load -> d_ok [label="valid"];
+        d_load -> d_bad [label="NULL/stale"];
+    }
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="Both keep the CO-RE relocation.\lOnly BPF_CORE_READ keeps the safety net.\lUse direct deref for kernel-handed trusted pointers;\lBPF_CORE_READ for chains where a hop could fail.\l"];
+    c_bad -> note [style=invis];
+    d_bad -> note [style=invis];
+}

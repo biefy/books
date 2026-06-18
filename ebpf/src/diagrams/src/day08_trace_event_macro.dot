@@ -1,0 +1,38 @@
+digraph trace_event_macro {
+    rankdir=LR;
+    labelloc=t;
+    label="One TRACE_EVENT(sched_switch), three parts -> three attach faces";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.5; ranksep=1.1;
+
+    // Lane 1: TP_PROTO
+    proto [shape=record, style="filled", fillcolor="#dbeafe",
+           label="TP_PROTO  (Lane 1)|bool preempt|struct task_struct *prev|struct task_struct *next|unsigned int prev_state"];
+    proto_out [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+               label="tp_btf params / raw args[]\n(typed live pointers,\nzero copy)"];
+
+    // Lane 2: TP_STRUCT__entry
+    entry [shape=record, style="filled", fillcolor="#dbeafe",
+           label="TP_STRUCT__entry  (Lane 2)|char prev_comm[16]|pid_t prev_pid|int prev_prio|long prev_state|char next_comm[16]|..."];
+    entry_out [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+               label="format file (byte offsets)\n+ tracepoint/ copied struct\nprev_comm@8, prev_pid@24, ..."];
+
+    // Lane 3: TP_fast_assign
+    assign [shape=record, style="filled", fillcolor="#dbeafe",
+            label="TP_fast_assign  (Lane 3)|memcpy(__entry-\>prev_comm, prev-\>comm, 16)|__entry-\>prev_pid = prev-\>pid|...one assign per field..."];
+    assign_out [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+                label="THE COPY that fills\nthe flat struct\nruns ONLY for regular-tracepoint\n(/ftrace/perf) listeners"];
+
+    proto  -> proto_out  [label="raw path delivers", color="#16a34a", style=bold, fontsize=9];
+    entry  -> entry_out  [label="declares layout", color="#d97706", style=bold, fontsize=9];
+    assign -> assign_out [label="fills the copy", color="#dc2626", style=bold, fontsize=9];
+
+    // keep lanes stacked
+    proto -> entry [style=invis];
+    entry -> assign [style=invis];
+
+    note [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+          label="Two faces, one macro.\loffsets come from TP_STRUCT__entry,\lbytes come from TP_fast_assign.\ltp_btf rides TP_PROTO -> reaches every\ltask_struct field (e.g. prev->mm).\l"];
+    assign_out -> note [style=invis];
+}

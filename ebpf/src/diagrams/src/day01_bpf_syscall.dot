@@ -1,0 +1,52 @@
+digraph bpf_syscall {
+    rankdir=LR;
+    labelloc=t;
+    label="bpf(): one syscall, multiplexed by a command enum";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.5; ranksep=0.9;
+
+    funnel [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="bpf(cmd, attr, size)\nthe single entry point"];
+
+    // Arm 1: MAP_CREATE
+    mapcreate [shape=box, style="filled", fillcolor="#dbeafe",
+               label="BPF_MAP_CREATE\nmap_create()"];
+    mapfd [shape=box, style="filled,rounded", fillcolor="#bfdbfe",
+           label="map fd"];
+
+    // Arm 2: PROG_LOAD with verifier inside
+    progload [shape=box, style="filled", fillcolor="#dbeafe",
+              label="BPF_PROG_LOAD\nbpf_prog_load()"];
+    verifier [shape=box, style="filled", fillcolor="#fef3c7",
+              label="[ Verifier ]"];
+    progfd [shape=box, style="filled,rounded", fillcolor="#fde68a",
+            label="prog fd"];
+
+    // Arm 3: LINK_CREATE / attach
+    linkcreate [shape=box, style="filled", fillcolor="#dcfce7",
+                label="BPF_LINK_CREATE\n/ attach"];
+    linkfd [shape=box, style="filled,rounded", fillcolor="#bbf7d0",
+            label="link fd"];
+
+    funnel -> mapcreate [label="cmd 1"];
+    funnel -> progload [label="cmd 2"];
+    funnel -> linkcreate [label="cmd 3"];
+
+    mapcreate -> mapfd;
+    progload -> verifier -> progfd;
+    linkcreate -> linkfd;
+
+    // Break callouts
+    break2 [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+            label="Break 2: wrong map type.\lRejected here, during\lBPF_MAP_CREATE -- the very\lfirst command. The verifier\lnever runs.\l"];
+    mapcreate -> break2 [color="#dc2626", style=bold, fontname="Helvetica", fontsize=9, label="fails"];
+
+    break1 [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+            label="Break 1: missing null check.\lRejected inside the Verifier,\lwhich lives in the PROG_LOAD path.\l"];
+    verifier -> break1 [color="#dc2626", style=bold, fontname="Helvetica", fontsize=9, label="fails"];
+
+    order [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+           label="libbpf issues these in sequence:\lcreate maps, then load program,\lthen attach. Maps, progs, links\lare all referenced by fd.\l"];
+    funnel -> order [style=invis];
+}

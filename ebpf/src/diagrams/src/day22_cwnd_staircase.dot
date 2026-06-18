@@ -1,0 +1,36 @@
+digraph cwnd_staircase {
+    rankdir=LR;
+    labelloc=t;
+    label="cwnd vs time: slow-start ramp, ssthresh boundary, congestion avoidance, and an undo";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // Phases as a left-to-right staircase of cells
+    ss [shape=box, style="filled", fillcolor="#fef3c7", fontsize=10,
+        label="SLOW-START\ncwnd grows ~exponentially\n(below ssthresh)\nevery ACK: cong_avoid()\n-> tcp_slow_start()"];
+
+    thresh [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=10,
+            label="ssthresh line\nslow-start ENDS when\ncwnd would cross it"];
+
+    ca [shape=box, style="filled", fillcolor="#fef3c7", fontsize=10,
+        label="CONGESTION AVOIDANCE\ncwnd grows ~linearly\n(above ssthresh)\nevery ACK: cong_avoid()\n-> tcp_cong_avoid_ai()"];
+
+    loss [shape=box, style="filled", fillcolor="#fee2e2", fontsize=10,
+          label="LOSS / ECN event\nnetwork signals trouble\nssthresh() fires:\nnew thresh = cwnd >> 1\ncwnd drops down"];
+
+    ca2 [shape=box, style="filled", fillcolor="#fef3c7", fontsize=10,
+         label="resume CONGESTION\nAVOIDANCE at lower cwnd\ncong_avoid() per ACK"];
+
+    undo [shape=box, style="filled", fillcolor="#dcfce7", fontsize=10,
+          label="SPURIOUS loss detected\n(packet was reordered,\nnot dropped)\nundo_cwnd() fires:\nrestores the cwnd it cut"];
+
+    ss -> thresh [color="#d97706", style=bold, label="ramp up"];
+    thresh -> ca [color="#d97706", style=bold];
+    ca -> loss [color="#dc2626", style=bold, label="probe until..."];
+    loss -> ca2 [color="#d97706", style=bold, label="back off"];
+    ca2 -> undo [color="#16a34a", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#dbeafe", fontsize=9,
+          label="Required CC callbacks shown firing:\lssthresh() = how far to back off on congestion (required)\lcong_avoid() = advance cwnd per ACK (required: this OR cong_control)\lundo_cwnd() = reverse a cut we now regret (required)\lcwnd is what `ss -ti` prints as cwnd:10\l"];
+    undo -> note [style=invis];
+}

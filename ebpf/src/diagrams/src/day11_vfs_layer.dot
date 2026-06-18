@@ -1,0 +1,57 @@
+digraph vfs_layer {
+    rankdir=TB;
+    labelloc=t;
+    label="kprobe.multi/vfs_* wraps the one shared filesystem chokepoint";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // Top: syscalls
+    subgraph cluster_sys {
+        label="syscalls";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        rank=same;
+        s_read [shape=box, style="filled,rounded", fillcolor="#dbeafe", label="read()"];
+        s_write [shape=box, style="filled,rounded", fillcolor="#dbeafe", label="write()"];
+        s_open [shape=box, style="filled,rounded", fillcolor="#dbeafe", label="open()"];
+        s_close [shape=box, style="filled,rounded", fillcolor="#dbeafe", label="close()"];
+    }
+
+    // Middle: VFS (highlighted)
+    subgraph cluster_vfs {
+        label="VFS layer  <-- filesystem-agnostic chokepoint";
+        fontname="Helvetica"; fontsize=12; style="rounded,filled";
+        fillcolor="#fef3c7"; color="#d97706";
+        rank=same;
+        v_read [shape=box, style="filled", fillcolor="#fde68a", label="vfs_read"];
+        v_write [shape=box, style="filled", fillcolor="#fde68a", label="vfs_write"];
+        v_open [shape=box, style="filled", fillcolor="#fde68a", label="vfs_open"];
+        v_close [shape=box, style="filled", fillcolor="#fde68a", label="vfs_close"];
+    }
+
+    // Bottom: concrete filesystems
+    subgraph cluster_fs {
+        label="concrete filesystems";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+        rank=same;
+        ext4 [shape=box, style="filled", fillcolor="#dcfce7", label="ext4"];
+        xfs [shape=box, style="filled", fillcolor="#dcfce7", label="xfs"];
+        btrfs [shape=box, style="filled", fillcolor="#dcfce7", label="btrfs"];
+        tmpfs [shape=box, style="filled", fillcolor="#dcfce7", label="tmpfs"];
+    }
+
+    s_read -> v_read;
+    s_write -> v_write;
+    s_open -> v_open;
+    s_close -> v_close;
+
+    v_read -> ext4;
+    v_write -> xfs;
+    v_open -> btrfs;
+    v_close -> tmpfs;
+    v_read -> xfs [style=dotted];
+    v_open -> tmpfs [style=dotted];
+
+    bracket [shape=note, style="filled", fillcolor="#e9d5ff", fontname="Helvetica", fontsize=10,
+             label="kprobe.multi/vfs_*\lwraps the MIDDLE layer only —\lcaptures all filesystem activity\lregardless of which FS backs each file.\l"];
+    bracket -> v_read [style=dashed, color=gray];
+}

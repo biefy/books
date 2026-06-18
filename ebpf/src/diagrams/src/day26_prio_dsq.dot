@@ -1,0 +1,28 @@
+digraph prio_dsq {
+    rankdir=LR;
+    labelloc=t;
+    label="Per-cgroup DSQs: enqueue routes by priority; dispatch drains PRIO_DSQ first";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    enq [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=10,
+         label="simple_enqueue(p)\lwalk ancestors for priority_cgroup_id\lmatch? PRIO_DSQ : SHARED_DSQ\l"];
+
+    prio [shape=record, style="filled", fillcolor="#fef3c7",
+          label="{ PRIO_DSQ (1) | priority cgroup tasks | dispatched FIRST }"];
+    shared [shape=record, style="filled", fillcolor="#dbeafe",
+            label="{ SHARED_DSQ (0) | everyone else, vtime-ordered | dispatched only if PRIO empty }"];
+
+    disp [shape=note, style="filled", fillcolor="#dcfce7", fontsize=10,
+          label="simple_dispatch(cpu)\lmove_to_local(PRIO_DSQ) -- return if hit\lelse move_to_local(SHARED_DSQ)\l"];
+
+    cpu [shape=box, style="filled", fillcolor="#fee2e2", label="local DSQ -> CPU"];
+
+    enq -> prio [label="priority"];
+    enq -> shared [label="default"];
+    prio -> disp [color="#d97706", style=bold, label="1st"];
+    shared -> disp [color="#2563eb", label="2nd"];
+    disp -> cpu;
+
+    { rank=same; prio; shared; }
+}

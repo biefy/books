@@ -1,0 +1,42 @@
+digraph rcu_users_timeline {
+    rankdir=LR;
+    labelloc=t;
+    label="rcu_users keeps a stashed task readable across invocations (and past do_exit)";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.35; ranksep=0.7;
+
+    // kptr lane
+    subgraph cluster_kptr {
+        label="WITH kptr (rcu_users ref held)";
+        fontname="Helvetica"; fontsize=12; style="rounded"; color="#2563eb";
+
+        k0 [shape=box, style="filled", fillcolor="#dbeafe",
+            label="t0 fentry\nbpf_task_acquire\nrcu_users 1 -> 2"];
+        k1 [shape=box, style="filled", fillcolor="#dcfce7",
+            label="t1 thread\ndo_exit()\nstruct STAYS alive\n(rcu_users > 0)"];
+        k2 [shape=box, style="filled", fillcolor="#fef3c7",
+            label="t2 fexit\nread t->pid\nSAFE"];
+        k3 [shape=box, style="filled", fillcolor="#dbeafe",
+            label="t3 release\nrcu_users 2 -> 1\nlater: final free\nafter RCU grace"];
+        k0 -> k1 -> k2 -> k3 [color="#2563eb", style=bold];
+    }
+
+    // no-kptr lane
+    subgraph cluster_nokptr {
+        label="WITHOUT kptr (no ref held)";
+        fontname="Helvetica"; fontsize=12; style="rounded"; color="#dc2626";
+
+        n0 [shape=box, style="filled", fillcolor="#dbeafe",
+            label="t0 fentry\nsaw the task\n(no ref taken)"];
+        n1 [shape=box, style="filled", fillcolor="#fee2e2",
+            label="t1 thread\ndo_exit()\nstruct FREED\n(rcu_users hit 0)"];
+        n2 [shape=box, style="filled", fillcolor="#fee2e2",
+            label="t2 read t->pid\nUSE-AFTER-FREE"];
+        n0 -> n1 -> n2 [color="#dc2626", style=bold];
+    }
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="rcu_users is the count that keeps the allocation valid for safe\lreading even after the thread exits. Holding it is what makes\lthe fentry-save / fexit-read pair sound.\l"];
+    k3 -> note [style=invis];
+}

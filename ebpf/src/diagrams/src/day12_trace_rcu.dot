@@ -1,0 +1,49 @@
+digraph trace_rcu {
+    rankdir=LR;
+    labelloc=t;
+    label="Two read-side lanes: classic RCU (no sleep) vs tasks-trace RCU (may sleep)";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.4; ranksep=0.7;
+
+    // Top lane: classic RCU, normal program
+    subgraph cluster_classic {
+        label="normal BPF program  (classic RCU read-side -- reader may NOT sleep)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+
+        c_lock [shape=box, style="filled", fillcolor="#dcfce7",
+                label="rcu_read_lock()"];
+        c_prog [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+                label="run program\n(atomic: no fault, no sleep)"];
+        c_unlock [shape=box, style="filled", fillcolor="#dcfce7",
+                  label="rcu_read_unlock()"];
+        c_lock -> c_prog -> c_unlock;
+    }
+
+    // Bottom lane: tasks-trace RCU, sleepable program
+    subgraph cluster_trace {
+        label="sleepable BPF program  (tasks-trace RCU read-side -- reader MAY sleep)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+
+        t_lock [shape=box, style="filled", fillcolor="#dcfce7",
+                label="rcu_read_lock_trace()\nmigrate_disable()"];
+        t_prog [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+                label="run program\nmight_fault()"];
+        t_sleep [shape=box, style="filled", fillcolor="#fee2e2",
+                 label="thread SLEEPS here\n(major fault: page in from disk)\nstill CPU-pinned, lock still held"];
+        t_unlock [shape=box, style="filled", fillcolor="#dcfce7",
+                  label="rcu_read_unlock_trace()"];
+        t_lock -> t_prog -> t_sleep -> t_unlock;
+    }
+
+    // Writer / detach side
+    writer [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="detach / free program\nwait out a grace period\nsynchronize_rcu_tasks_trace()\nbefore freeing"];
+
+    c_unlock -> writer [label="grace period", fontname="Helvetica", fontsize=9, color="#7c3aed", style=bold];
+    t_unlock -> writer [label="grace period", fontname="Helvetica", fontsize=9, color="#7c3aed", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+          label="Classic RCU readers must NOT sleep -- a sleeping\lreader would pin the grace period forever. Tasks-trace\lRCU read-side sections MAY block, so a suspended\lsleepable program can't be freed mid-execution.\l(It's RCU Tasks Trace, not SRCU.)\l"];
+    writer -> note [style=invis];
+}

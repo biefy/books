@@ -1,0 +1,63 @@
+digraph kretprobe_return_swap {
+    rankdir=TB;
+    labelloc=t;
+    label="kretprobe: swap the saved return address at entry, restore it at return";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.5; ranksep=0.7;
+    compound=true;
+
+    // ---- Entry: the stack frame and the swap ----
+    subgraph cluster_entry {
+        label="At function ENTRY (kprobe handler runs)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+
+        stack_before [shape=record, style="filled", fillcolor="#fef3c7",
+            label="kernel stack (before)|ret addr slot = REAL caller addr|locals ...|args ..."];
+
+        stack_after [shape=record, style="filled", fillcolor="#fef3c7",
+            label="kernel stack (after swap)|ret addr slot = TRAMPOLINE addr|locals ...|args ..."];
+
+        stack_before -> stack_after [label="overwrite slot", color="#dc2626",
+            style=bold, fontname="Helvetica", fontsize=9];
+    }
+
+    // ---- The instance pool ----
+    subgraph cluster_pool {
+        label="fixed pool of N instance objects (maxactive)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#7c3aed";
+
+        pool [shape=record, style="filled", fillcolor="#e9d5ff",
+            label="<i0>inst[0]: saved REAL caller|<i1>inst[1]: saved REAL caller|<i2>inst[2]: ... |<in>inst[N-1]: free?"];
+    }
+
+    stack_before -> pool:i0 [label="copy REAL caller into a free slot",
+        color="#7c3aed", style=bold, fontname="Helvetica", fontsize=9,
+        lhead=cluster_pool];
+
+    // ---- Return path ----
+    subgraph cluster_return {
+        label="At function RETURN";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+
+        pop [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+            label="ret pops TRAMPOLINE addr\n(not the real caller)"];
+        tramp [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="arch_rethook_trampoline\nruns return handler -> reads RC"];
+        back [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+            label="jump back to REAL saved\ncaller addr (from instance)"];
+
+        pop -> tramp -> back;
+    }
+
+    stack_after -> pop [label="function does ret", color="#d97706",
+        style=bold, fontname="Helvetica", fontsize=9, ltail=cluster_entry];
+    pool:in -> back [label="restore saved addr", color="#7c3aed",
+        style=dashed, fontname="Helvetica", fontsize=9];
+
+    // ---- Exhaustion warning ----
+    missed [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+        label="Burst: all N instances in use.\lA new call finds the pool empty,\lso its return is NOT probed:\lnmissed++ and move on.\l"];
+    pool -> missed [label="pool exhausted", color="#dc2626",
+        style=bold, fontname="Helvetica", fontsize=9];
+}

@@ -1,0 +1,58 @@
+digraph lpm_key_layout {
+    rankdir=TB;
+    labelloc=t;
+    label="LPM trie key layout: a u32 prefixlen header, then the address bytes in network order";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.4; ranksep=0.7;
+
+    ipv4 [shape=plaintext, label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR>
+          <TD BGCOLOR="#dbeafe">byte 0</TD><TD BGCOLOR="#dbeafe">byte 1</TD>
+          <TD BGCOLOR="#dbeafe">byte 2</TD><TD BGCOLOR="#dbeafe">byte 3</TD>
+          <TD BGCOLOR="#fef3c7">byte 4</TD><TD BGCOLOR="#fef3c7">byte 5</TD>
+          <TD BGCOLOR="#fef3c7">byte 6</TD><TD BGCOLOR="#fef3c7">byte 7</TD>
+        </TR>
+        <TR>
+          <TD BGCOLOR="#dbeafe" COLSPAN="4">prefixlen (u32, little-endian on x86)</TD>
+          <TD BGCOLOR="#fef3c7" COLSPAN="4">addr (network / big-endian)</TD>
+        </TR>
+        <TR>
+          <TD COLSPAN="4">offsetof(data) = 4</TD>
+          <TD COLSPAN="4">data_size = 4 &#8658; max_prefixlen = 32</TD>
+        </TR>
+      </TABLE>>];
+
+    label4 [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontname="Helvetica", fontsize=10,
+            label="IPv4 key: struct { __u32 prefixlen; __u32 addr; }  — key_size = 8"];
+
+    ipv6 [shape=plaintext, label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR>
+          <TD BGCOLOR="#dbeafe">0</TD><TD BGCOLOR="#dbeafe">1</TD>
+          <TD BGCOLOR="#dbeafe">2</TD><TD BGCOLOR="#dbeafe">3</TD>
+          <TD BGCOLOR="#fef3c7">4</TD><TD BGCOLOR="#fef3c7">..</TD>
+          <TD BGCOLOR="#fef3c7">..</TD><TD BGCOLOR="#fef3c7">19</TD>
+        </TR>
+        <TR>
+          <TD BGCOLOR="#dbeafe" COLSPAN="4">prefixlen (u32)</TD>
+          <TD BGCOLOR="#fef3c7" COLSPAN="4">addr: in6_addr — bytes 4..19 (16 bytes)</TD>
+        </TR>
+        <TR>
+          <TD COLSPAN="4">offsetof(data) = 4</TD>
+          <TD COLSPAN="4">data_size = 16 &#8658; max_prefixlen = 128</TD>
+        </TR>
+      </TABLE>>];
+
+    label6 [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontname="Helvetica", fontsize=10,
+            label="IPv6 key: grow data[] to 16 bytes — key_size = 20, kernel derives the rest"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9, fontname="Helvetica",
+          label="trie->data_size  = key_size - offsetof(...data)\ltrie->max_prefixlen = data_size * 8\l\lYou don't configure the width — you feed a bigger\lkey_size and the kernel does the arithmetic.\l"];
+
+    label4 -> ipv4 [style=invis];
+    ipv4 -> label6 [style=invis];
+    label6 -> ipv6 [style=invis];
+    ipv6 -> note [style=invis];
+}

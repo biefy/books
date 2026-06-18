@@ -1,0 +1,32 @@
+digraph task_states {
+    rankdir=LR;
+    labelloc=t;
+    label="A task's three situations — and which edges fire sched_ext callbacks";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.7; ranksep=1.4;
+
+    running [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+             label="RUNNING\n(on a CPU now)\nTASK_RUNNING"];
+    runnable [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+              label="RUNNABLE\n(ready, waiting for a CPU)\nTASK_RUNNING"];
+    blocked [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+             label="BLOCKED / sleeping\n(waiting on IO, lock, timer)\nTASK_[UN]INTERRUPTIBLE"];
+
+    // blocked -> runnable : wakeup, fires enqueue
+    blocked -> runnable [color="#16a34a", style=bold, fontcolor="#16a34a",
+                         label="wakeup\nfires enqueue()"];
+    // runnable -> running : dispatch
+    runnable -> running [color="#2563eb", style=bold, fontcolor="#2563eb",
+                         label="dispatch\nfires dispatch()"];
+    // running -> runnable : slice expiry / preempt
+    running -> runnable [color="#d97706", fontcolor="#d97706",
+                         label="slice expiry /\npreempt\n(fires enqueue() again)"];
+    // running -> blocked : block on IO
+    running -> blocked [color="#dc2626", fontcolor="#dc2626",
+                        label="block on IO /\nlock / sleep"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="\"running\" and \"runnable\" are the SAME kernel state (TASK_RUNNING).\lThe scheduler ignores a BLOCKED task entirely until its wakeup.\lenqueue() = a task entered the runnable pool; dispatch() = a CPU needs work.\l"];
+    blocked -> note [style=invis];
+}

@@ -1,0 +1,39 @@
+digraph packet_layout {
+    rankdir=TB;
+    labelloc=t;
+    label="A packet is a flat byte buffer: ethhdr | iphdr | L4 — and the pointer hops that walk it";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The byte ruler, one record with cells = byte ranges
+    ruler [shape=record, style="filled", fillcolor="#fef3c7",
+        label="{<eth> ETHERNET\nbytes 0..13\n(14 bytes)|<ip> IPv4 HEADER\nbytes 14..33\n(20 bytes min)|<l4> L4 (TCP/UDP/ICMP)\nbytes 34..}"];
+
+    // Field annotations
+    hproto [shape=box, style="filled", fillcolor="#dbeafe",
+        label="h_proto (EtherType)\n__be16 @ offset 12..13\n0x0800 = IPv4"];
+    proto [shape=box, style="filled", fillcolor="#dbeafe",
+        label="ip->protocol\n__u8 @ frame offset 23\n(= 14 + 9)\nICMP=1 TCP=6 UDP=17"];
+
+    hproto -> ruler:eth [color="#2563eb", style=bold];
+    proto  -> ruler:ip  [color="#2563eb", style=bold];
+
+    // Pointer hops above the ruler
+    data0 [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+        label="eth = data\n(byte 0)"];
+    hop1 [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+        label="(void *)(eth + 1)\nadvance sizeof(ethhdr)=14\n-> start of IP header"];
+    hop2 [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+        label="(void *)(ip + 1)\nadvance sizeof(iphdr)=20\n-> start of L4"];
+
+    data0 -> hop1 [label="skip Ethernet (+14)", color="#7c3aed", style=bold, fontname="Helvetica", fontsize=9];
+    hop1  -> hop2 [label="skip IP (+20)", color="#7c3aed", style=bold, fontname="Helvetica", fontsize=9];
+
+    data0 -> ruler:eth [style=invis];
+    hop1  -> ruler:ip  [style=invis];
+    hop2  -> ruler:l4  [style=invis];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+        label="Struct arithmetic mirrors the layout:\leth+1 = \"skip one Ethernet header\"\lip+1  = \"skip one IP header\"\l"];
+    note -> ruler:l4 [style=invis];
+}

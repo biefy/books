@@ -1,0 +1,50 @@
+digraph glob_pipeline {
+    rankdir=LR;
+    labelloc=t;
+    label="From glob to addresses: a glob is resolved to addresses in USERSPACE";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=9];
+
+    // Stage 1: userspace / libbpf — does BOTH glob expansion AND name->addr
+    subgraph cluster_user {
+        label="Stage 1: userspace (libbpf) — glob AND name to address";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        glob [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+              label="glob 'vfs_*'"];
+        aff [shape=box, style="filled", fillcolor="#dbeafe",
+             label="tracefs\navailable_filter_functions_addrs\n(addr + name pairs)"];
+        fallback [shape=box, style="filled", fillcolor="#dbeafe",
+             label="older kernels:\navailable_filter_functions\n+ /proc/kallsyms"];
+        gm [shape=box, style="filled", fillcolor="#dbeafe",
+            label="glob_match() + resolve\nlibbpf_available_kprobes_parse"];
+        addrs [shape=record, style="filled", fillcolor="#fef3c7",
+               label="{ res.addrs[] | 0xffff... | 0xffff... | ... }"];
+        glob -> gm;
+        aff -> gm [label="primary"];
+        fallback -> gm [label="fallback", style=dashed];
+        gm -> addrs;
+    }
+
+    // syscall boundary
+    bnd [shape=box, style="filled,dashed", fillcolor="#fee2e2", fontname="Helvetica",
+         label="syscall boundary"];
+    addrs -> bnd [label="addrs[] passed down", style=dashed];
+
+    // Stage 2: kernel — just copies and registers
+    subgraph cluster_kernel {
+        label="Stage 2: kernel — uaddrs branch, no name resolution";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+        copy [shape=box, style="filled", fillcolor="#dcfce7",
+              label="copy_from_user(addrs, uaddrs)\narray already resolved"];
+        reg [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+             label="register_fprobe_ips()"];
+        copy -> reg;
+    }
+
+    bnd -> copy [label="copy_from_user", style=dashed];
+
+    // Note: the in-kernel name path is the OTHER branch
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontname="Helvetica", fontsize=9,
+          label="Explicit syms[] / exact name only (usyms branch):\lcopy_user_syms -> sort_r -> ftrace_lookup_symbols\l(one O(N) pass over kallsyms). NOT taken for a glob.\l"];
+    reg -> note [style=invis];
+}

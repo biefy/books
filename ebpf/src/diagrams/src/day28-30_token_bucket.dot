@@ -1,0 +1,49 @@
+digraph token_bucket {
+    rankdir=TB;
+    labelloc=t;
+    label="Token bucket: refill at a fixed rate up to capacity; each packet takes one token";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.5; ranksep=0.9;
+
+    // Refill source dripping in
+    refill [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+            label="refill: 50 tokens/sec\n(drips in continuously)"];
+
+    // The bucket itself
+    bucket [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+            label="BUCKET\ncapacity = 100 (ceiling)\ntokens never overflow past capacity"];
+
+    refill -> bucket [label="  drip up to ceiling", fontname="Helvetica",
+                      fontsize=9, fontcolor="#16a34a", color="#16a34a"];
+
+    // Two arriving packets
+    pkt1 [shape=box, style="filled", fillcolor="#dbeafe",
+          label="packet A arrives\ntoken available"];
+    pkt2 [shape=box, style="filled", fillcolor="#dbeafe",
+          label="packet B arrives\nbucket empty"];
+
+    pass [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+          label="PASS\n(consume 1 token)"];
+    drop [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+          label="DROP\n(no token left)"];
+
+    pkt1 -> bucket [label="  take a token", fontname="Helvetica", fontsize=9,
+                    fontcolor="#2563eb", color="#2563eb"];
+    bucket -> pass [label="  tokens >= 1", fontname="Helvetica", fontsize=9,
+                    fontcolor="#16a34a", color="#16a34a"];
+    pkt2 -> bucket [label="  take a token", fontname="Helvetica", fontsize=9,
+                    fontcolor="#2563eb", color="#2563eb", style=dashed];
+    bucket -> drop [label="  tokens == 0", fontname="Helvetica", fontsize=9,
+                    fontcolor="#dc2626", color="#dc2626"];
+
+    // Inset: per-source-IP struct in percpu hash
+    inset [shape=record, style="filled", fillcolor="#e9d5ff", fontsize=9,
+           label="{ per-source-IP state (BPF_MAP_TYPE_PERCPU_HASH) | { key = src IP | struct bucket \{ | __u64 tokens; | __u64 last_refill_ns; | \} } }"];
+
+    bucket -> inset [style=invis];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="percpu trap: one independent bucket per CPU,\lso effective rate ~= N_cpus x configured_rate.\lThe price of lock-free correctness (no atomics/spinlock).\l"];
+    inset -> note [style=invis];
+}

@@ -1,0 +1,36 @@
+digraph dynptr_descriptor {
+    rankdir=LR;
+    labelloc=t;
+    label="bpf_dynptr: a (data, offset, size) capability the Verifier tracks";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The descriptor struct
+    desc [shape=record, style="filled", fillcolor="#dbeafe", fontsize=10,
+          label="{ struct bpf_dynptr_kern | <d> data*  (base of region) | offset  (cursor) | <s> size | type | ro\n(low 24 bits = length) }"];
+
+    // The reserved ringbuf slot it points into
+    slot [shape=record, style="filled", fillcolor="#fef3c7", fontsize=10,
+          label="{ reserved ringbuf slot | header bytes | payload bytes... | tail }"];
+
+    desc:d -> slot [color="#dc2626", style=bold, label="data* points in"];
+
+    // size ceiling callout
+    ceil [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="size lives in low 24 bits (DYNPTR_SIZE_MASK = 0xFFFFFF)\lDYNPTR_MAX_SIZE = (1<<24)-1  ->  max 16 MiB - 1 byte\lbpf_dynptr_check_size(): size > MAX  ->  -E2BIG (before any memory touched)\l"];
+    desc:s -> ceil [style=invis];
+
+    // a write that the helper bounds-checks
+    write [shape=box, style="filled", fillcolor="#e9d5ff",
+           label="bpf_dynptr_write(&ptr, off, src, len, 0)\nhelper checks off + len <= size\nat call time (runtime guard)"];
+    ok [shape=box, style="filled", fillcolor="#dcfce7",
+        label="in bounds:\nmemmove into region"];
+    bad [shape=box, style="filled", fillcolor="#fee2e2",
+         label="off + len > size:\nrejected, -EINVAL\n(no scribble)"];
+
+    write -> ok  [label="pass", color="#2563eb", style=bold];
+    write -> bad [label="fail", color="#dc2626", style=bold];
+
+    slot -> write [style=invis];
+    ceil -> write [style=invis];
+}

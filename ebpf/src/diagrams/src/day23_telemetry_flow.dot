@@ -1,0 +1,50 @@
+digraph telemetry_flow {
+    rankdir=TB;
+    labelloc=t;
+    label="The per-ACK telemetry path: one incoming ACK travels from the kernel ACK handler through the BPF callback and ringbuf to the userspace poll loop";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.4; ranksep=0.7;
+
+    subgraph cluster_kernel {
+        label="kernel"; fontname="Helvetica"; fontsize=12; style="filled"; fillcolor="#f3f4f6";
+
+        ack [shape=box, style="filled", fillcolor="#fef3c7",
+             label="incoming ACK\n(tcp_v4_rcv -> tcp_ack)"];
+        dispatch [shape=box, style="filled", fillcolor="#dbeafe",
+                  label="tcp_in_ack_event\nicsk->icsk_ca_ops->in_ack_event"];
+        cb [shape=record, style="filled", fillcolor="#dbeafe",
+            label="bpf_dctcp_update_alpha (BPF_PROG)|read tp-\>snd_cwnd, packets_out, srtt_us|original alpha update still runs"];
+        reserve [shape=box, style="filled", fillcolor="#dcfce7",
+                 label="bpf_ringbuf_reserve(&rb, sizeof(*e), 0)"];
+        fill [shape=record, style="filled", fillcolor="#fef3c7",
+              label="fill struct tcp_event|ts_ns | srtt_us\>\>3 | cwnd | in_flight | sk"];
+        submit [shape=box, style="filled", fillcolor="#dcfce7",
+                label="bpf_ringbuf_submit(e, 0)"];
+
+        ack -> dispatch [color="#d97706", style=bold];
+        dispatch -> cb [color="#2563eb", style=bold, label="one indirect call,\nselected CC only", fontname="Helvetica", fontsize=9];
+        cb -> reserve [color="#16a34a", style=bold];
+        reserve -> fill [color="#16a34a", style=bold];
+        fill -> submit [color="#16a34a", style=bold];
+    }
+
+    rb [shape=box, style="filled", fillcolor="#e9d5ff",
+        label="BPF_MAP_TYPE_RINGBUF (rb)\nlock-free, shared kernel<->user"];
+    submit -> rb [color="#7c3aed", style=bold];
+
+    subgraph cluster_user {
+        label="userspace (logged_dctcp)"; fontname="Helvetica"; fontsize=12; style="filled"; fillcolor="#f3f4f6";
+
+        poll [shape=box, style="filled", fillcolor="#dbeafe",
+              label="ring_buffer__poll(rb, 100ms)"];
+        handle [shape=box, style="filled", fillcolor="#dbeafe",
+                label="handle_event(e)"];
+        print [shape=box, style="filled", fillcolor="#fef3c7",
+               label="printf(\"cwnd=%u in_flight=%u srtt=%uus\")"];
+
+        poll -> handle [color="#2563eb", style=bold];
+        handle -> print [color="#2563eb", style=bold];
+    }
+    rb -> poll [color="#7c3aed", style=bold, label="callback per record", fontname="Helvetica", fontsize=9];
+}

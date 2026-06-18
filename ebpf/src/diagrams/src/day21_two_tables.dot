@@ -1,0 +1,32 @@
+digraph two_tables {
+    rankdir=TB;
+    labelloc=t;
+    label="Two separate registrations: in-program release vs stashable kptr destructor";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.4; ranksep=0.6;
+
+    // LEFT: in-program kfuncs
+    left [shape=record, style="filled", fillcolor="#dbeafe", fontsize=10,
+          label="{ in-program kfuncs (Day 20)\nKF_ACQUIRE / KF_RELEASE | bpf_task_acquire  [KF_ACQUIRE] | bpf_task_release  [KF_RELEASE] | bpf_sk_release  [KF_RELEASE] }"];
+
+    // RIGHT: kptr destructor table
+    right [shape=record, style="filled", fillcolor="#dcfce7", fontsize=10,
+           label="{ kptr destructor table\nregister_btf_id_dtor_kfuncs() | task_struct  -\>  bpf_task_release_dtor | cgroup  -\>  bpf_cgroup_release_dtor | sk_buff  -\>  bpf_kfree_skb_dtor }"];
+
+    // sock note
+    socknote [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+              label="sock appears on the LEFT only:\lreleasable in-program (bpf_sk_release),\lbut NO registered dtor, so NOT stashable.\lbtf_parse_fields rejects a sock __kptr field.\l"];
+
+    leftcap  [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=10,
+              label="drops a ref WHILE a BPF program runs\n(on the stack, before exit)"];
+    rightcap [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=10,
+              label="drops a ref with NO BPF program on the stack\n(from bpf_obj_free_fields on delete)"];
+
+    left  -> leftcap  [style=invis];
+    right -> rightcap [style=invis];
+    left  -> socknote [color="#dc2626", style=bold, label="sock", fontname="Helvetica", fontsize=9];
+
+    { rank=same; left; right; }
+    { rank=same; leftcap; rightcap; }
+}

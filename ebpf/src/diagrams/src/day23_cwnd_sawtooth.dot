@@ -1,0 +1,53 @@
+digraph cwnd_sawtooth {
+    rankdir=LR;
+    labelloc=t;
+    label="The cwnd sawtooth: slow start (x2/RTT) -> congestion avoidance (+1/RTT) -> loss cut -> climb again";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.35; ranksep=0.95;
+
+    // ---- cwnd curve points (blue descriptors), time = RTTs left to right ----
+    c0 [shape=record, style="filled", fillcolor="#dbeafe", label="RTT 0|cwnd = 10|start (initial window)"];
+    c1 [shape=record, style="filled", fillcolor="#dbeafe", label="RTT 1|cwnd = 20"];
+    c2 [shape=record, style="filled", fillcolor="#dcfce7", label="RTT 2|cwnd = 40|= ssthresh (gear shift)"];
+    c3 [shape=record, style="filled", fillcolor="#dbeafe", label="RTT 3|cwnd = 41"];
+    c4 [shape=record, style="filled", fillcolor="#dbeafe", label="RTT 4|cwnd = 42|PEAK (ECN mark / loss)"];
+    c5 [shape=record, style="filled", fillcolor="#fee2e2", label="RTT 5|cwnd = 21|cut: new ssthresh = 21"];
+    c6 [shape=record, style="filled", fillcolor="#dbeafe", label="RTT 6|cwnd = 22|climb resumes"];
+
+    c0 -> c1 [label="x2 / RTT  (slow start: +1 per ACK)", color="#2563eb", style=bold, fontname="Helvetica", fontsize=9];
+    c1 -> c2 [label="x2 / RTT", color="#2563eb", style=bold, fontname="Helvetica", fontsize=9];
+    c2 -> c3 [label="cwnd >= ssthresh:  +1 / RTT  (congestion avoidance)", color="#16a34a", style=bold, fontname="Helvetica", fontsize=9];
+    c3 -> c4 [label="+1 / RTT", color="#16a34a", style=bold, fontname="Helvetica", fontsize=9];
+    c4 -> c5 [label="ECN mark / loss  ->  cut cwnd & ssthresh", color="#dc2626", style="bold,dashed", fontname="Helvetica", fontsize=9];
+    c5 -> c6 [label="+1 / RTT  (the sawtooth's next tooth)", color="#16a34a", style=bold, fontname="Helvetica", fontsize=9];
+
+    // ---- in_flight (amber data) hugging just under each cwnd ----
+    f0 [shape=box, style="filled", fillcolor="#fef3c7", label="in_flight = 9"];
+    f1 [shape=box, style="filled", fillcolor="#fef3c7", label="in_flight = 19"];
+    f2 [shape=box, style="filled", fillcolor="#fef3c7", label="in_flight = 39"];
+    f3 [shape=box, style="filled", fillcolor="#fef3c7", label="in_flight = 40"];
+    f4 [shape=box, style="filled", fillcolor="#fef3c7", label="in_flight = 41"];
+    f5 [shape=box, style="filled", fillcolor="#fef3c7", label="in_flight = 20"];
+    f6 [shape=box, style="filled", fillcolor="#fef3c7", label="in_flight = 21"];
+
+    { rank=same; c0; f0; }
+    { rank=same; c1; f1; }
+    { rank=same; c2; f2; }
+    { rank=same; c3; f3; }
+    { rank=same; c4; f4; }
+    { rank=same; c5; f5; }
+    { rank=same; c6; f6; }
+
+    f0 -> f1 -> f2 -> f3 -> f4 -> f5 -> f6 [color="#d97706", style=dotted, label="in_flight hugs just under cwnd", fontname="Helvetica", fontsize=9];
+
+    // ---- ssthresh reference note ----
+    ssth [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="ssthresh = the gear shift\lcwnd <  ssthresh : slow start (double per RTT)\lcwnd >= ssthresh : cong. avoidance (+1 per RTT)\lloss/ECN drops BOTH cwnd and ssthresh\l"];
+    c2 -> ssth [style=invis];
+
+    // ---- telemetry link: one ACK -> in_ack_event -> ringbuf ----
+    tele [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+          label="Each ACK ticks the clock:\lin_ack_event -> bpf_dctcp_update_alpha\lbpf_ringbuf_reserve -> {ts, cwnd, in_flight, srtt} -> submit\lThis is the per-ACK event the reader logs.\lLoopback caveat: no loss => no teeth, only the climb.\l"];
+    c1 -> tele [label="one ACK arrives", color="#7c3aed", style=bold, fontname="Helvetica", fontsize=9];
+}

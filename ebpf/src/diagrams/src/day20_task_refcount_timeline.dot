@@ -1,0 +1,47 @@
+digraph task_refcount_timeline {
+    rankdir=LR;
+    labelloc=t;
+    label="task_struct->rcu_users over one BPF program: runtime counter vs verifier ref id #1";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.45; ranksep=0.75;
+
+    // --- the runtime counter states, left to right ---
+    s0 [shape=record, style="filled", fillcolor="#dbeafe", fontsize=11,
+        label="{ rcu_users = N | held by scheduler\n(task is live) }"];
+
+    s1 [shape=record, style="filled", fillcolor="#dbeafe", fontsize=11,
+        label="{ rcu_users = N+1 | BPF now holds +1 }"];
+
+    s2 [shape=record, style="filled", fillcolor="#dbeafe", fontsize=11,
+        label="{ rcu_users = N | BPF dropped its ref }"];
+
+    // counter transitions
+    s0 -> s1 [label="bpf_task_acquire()\nrefcount_inc_not_zero", color="#d97706",
+              style=bold, fontname="Helvetica", fontsize=9];
+    s1 -> s2 [label="bpf_task_release()\nput_task_struct_rcu_user", color="#2563eb",
+              style=bold, fontname="Helvetica", fontsize=9];
+
+    // --- dashed side-branch: the not-zero failure path ---
+    fail [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="if rcu_users had been 0:\lcount is mid-teardown,\linc_not_zero returns false\l=> bpf_task_acquire returns NULL\l(KF_RET_NULL: you must check)\l"];
+    s0 -> fail [label="0 case", style=dashed, color="#dc2626",
+                fontname="Helvetica", fontsize=9];
+
+    // --- the BPF program body running while +1 is held ---
+    body [shape=box, style="filled,rounded", fillcolor="#fef3c7", fontsize=10,
+          label="BPF program body runs\nacq->pid, bpf_printk, ...\n(task pinned alive across RCU read side)"];
+    s1 -> body [style=dashed, color="#a16207", arrowhead=none];
+
+    // --- verifier ref-id #1 lifetime bar, spanning acquire..release ---
+    ropen [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=10,
+           label="verifier: id #1 OPENED\nat KF_ACQUIRE return"];
+    rclose [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=10,
+            label="verifier: id #1 CLOSED\nat KF_RELEASE"];
+    ropen -> rclose [label="static mirror of the +1\nmust be closed on EVERY exit path",
+                     color="#7c3aed", style=bold, fontname="Helvetica", fontsize=9];
+
+    // tie the ref-id bar to the matching counter states
+    s1 -> ropen  [style=dashed, color="#7c3aed", arrowhead=none];
+    s2 -> rclose [style=dashed, color="#7c3aed", arrowhead=none];
+}

@@ -1,0 +1,28 @@
+digraph cgroup_hierarchy {
+    rankdir=TB;
+    labelloc=t;
+    label="cgroup v2 unified tree: ancestors[] indexed by level, match at level 1";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    root [shape=record, style="filled", fillcolor="#dbeafe",
+          label="/sys/fs/cgroup  (root)|level = 0|kn-\>id = 1"];
+
+    prio [shape=record, style="filled", fillcolor="#e9d5ff",
+          label="/priority|level = 1|kn-\>id = 12046204  ← priority_cgroup_id"];
+
+    work [shape=record, style="filled", fillcolor="#dbeafe",
+          label="/priority/work|level = 2|kn-\>id = 12046290"];
+
+    task [shape=note, style="filled", fillcolor="#fef3c7", fontsize=10,
+          label="task p\l(scx_bpf_task_cgroup(p)\l returns this cgroup)\l"];
+
+    root -> prio [label="child"];
+    prio -> work [label="child"];
+    work -> task [style=dashed, color="#92400e", label="belongs to"];
+
+    anc [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+         label="owned = /priority/work  (level 2)\lbpf_for(lvl, 0, owned-\>level + 1):\l  lvl 0: ancestors[0] = root        no match\l  lvl 1: ancestors[1] = /priority   MATCH ✓\l  lvl 2: ancestors[2] = /priority/work\lbpf_cgroup_ancestor(owned, lvl) = O(1) index\l"];
+
+    task -> anc [style=invis];
+}

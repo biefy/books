@@ -1,6 +1,6 @@
 # Day 1 — First fentry program with ringbuf
 
-> **Today's mission:** spy on every file deletion on your system, in real time, with a program that runs *inside the kernel* and can't crash it. Total time: ~90 minutes.
+> **Today's mission:** spy on every file deletion on your system, in real time, with a program that runs *inside the kernel* and can't crash it. Along the way, meet the whole machine that makes this possible — the BPF virtual CPU, the one syscall that loads everything, the just-in-time compiler, and the little code-patching trick that lets you tap a running kernel without a hiccup. Total time: ~120 minutes.
 
 ## So you want to spy on a kernel function
 
@@ -18,15 +18,52 @@ filename_unlinkat:
     ...
 ```
 
+### Whose 5 bytes are those, anyway?
+
+That slot is not BPF's, and BPF didn't put it there. It exists because the kernel is built with **function-entry instrumentation** (`-pg` / `-mfentry`): the compiler emits a `call __fentry__` at the top of every traceable function (the entry stub is `SYM_FUNC_START(__fentry__)` at `arch/x86/kernel/ftrace_64.S:148`). At boot, **ftrace** — the kernel's built-in function tracer, around since 2008 — overwrites each of those call sites with a 5-byte NOP. The NOP it writes is literally `x86_nops[5]` (`ftrace_nop_replace()` returns it at `arch/x86/kernel/ftrace.c:66`; the table is at `arch/x86/kernel/alternative.c:91`).
+
+So the patch site is *ftrace's*. fentry/BPF doesn't own it — it **borrows** it by registering an ftrace **"direct call"** that repoints the site at *your* trampoline. You don't need to learn ftrace today; just hold the one-line model: the compiler reserves the slot, ftrace owns it, fentry hangs your program off it.
+
 When you attach an fentry program, the kernel atomically patches that reserved site into the architecture's ftrace/BPF entry path. That path reaches a generated **trampoline**. The trampoline saves arguments, calls *your* BPF program with them, restores everything, and then lets `filename_unlinkat` run as if nothing happened. The exact instruction is architecture- and config-dependent; the important model is patch site → trampoline → original function body.
 
 ![fentry trampoline flow](diagrams/day01_trampoline_flow.png)
+
+### What the trampoline is actually *for*: an ABI bridge
+
+"Saves arguments, calls your program with them" sounds like magic until you ask: *why does it need to save anything?* The answer is that the function being traced and your BPF program are called two **incompatible** ways.
+
+`filename_unlinkat` is an ordinary C function. On x86-64, the System V ABI says its first argument arrives in register `rdi`, its second in `rsi`, and so on:
+
+```c
+int filename_unlinkat(int dfd, struct filename *name)   /* fs/namei.c:5536 */
+/*                        ↑ rdi          ↑ rsi                              */
+```
+
+A BPF program, by contrast, is **not** called with arguments spread across native registers. By convention every BPF program receives exactly one pointer — a pointer to a `u64[]` **context array** — in its first BPF register, `R1` — the BPF VM's registers get their full introduction in "Meet the cast" below; for now just hold "R1 = the one pointer your program is handed." `R1 → ctx`, and that's it. The program reads `ctx[0]`, `ctx[1]`, … to get its inputs.
+
+Those two calling conventions don't line up. Native code puts `dfd` in `rdi`; BPF code expects it as `ctx[0]`. **Bridging that gap is the trampoline's entire job:**
+
+1. On entry it **spills** the native argument registers into a `u64 ctx[]` array on the stack: `ctx[0] = rdi (dfd)`, `ctx[1] = rsi (name)`.
+2. It calls your BPF program with `R1` pointing at that array.
+3. On return it **restores** the registers and falls through into the real body of `filename_unlinkat`.
+
+That `ctx[]` array *is* the "argument array" the `BPF_PROG` macro unpacks. When you write
+
+```c
+int BPF_PROG(on_unlink, int dfd, struct filename *name)
+```
+
+the macro (at `tools/lib/bpf/bpf_tracing.h:672`) expands to read `ctx[0]` as `dfd` and `ctx[1]` as `name`, casting each to the type you declared. This is the concrete payoff of BTF (below): **BTF tells fentry the argument types, so the trampoline knows how many slots to spill and `BPF_PROG` knows how to cast them.**
+
+![trampoline ABI bridge](diagrams/day01_trampoline_abi.png)
+
+The trampoline isn't per-program, either: there's **one trampoline per attach target**, reference-counted and shared across every program attached there. That's why the kernel keys them in a hash table — the "What to read" pointer about `bpf_trampoline` below. Frame it this way: the trampoline's *first* job is the argument marshalling; the hash-table bookkeeping is just how the kernel avoids building a second one for the same target.
 
 > ### There are no Dumb Questions
 >
 > **Q: Patching kernel code while it's running. Isn't that lunacy?**
 >
-> A: It would be, except the kernel has been doing this since 2008 — it's how `ftrace` works. The 5-NOP slot is reserved by the compiler at build time *specifically* so the kernel can patch it later. The patch goes through `text_poke_bp`, which is safe against concurrent instruction fetches on every CPU. You can install and remove fentry hooks while the kernel runs your browser, a database, and a video call without a hiccup.
+> A: It would be, except the kernel has been doing this since 2008 — it's how `ftrace` works. The 5-NOP slot is reserved by the compiler at build time *specifically* so the kernel can patch it later. The patch goes through the kernel's int3-based text-poke machinery, which is safe against concurrent instruction fetches on every CPU (the file:line specifics are in the "What to read" trampoline bullet at the end). You can install and remove fentry hooks while the kernel runs your browser, a database, and a video call without a hiccup.
 >
 > **Q: Why not use kprobe? I keep seeing kprobe in old tutorials.**
 >
@@ -56,13 +93,64 @@ Before you write code, here's the full cast of characters.
 
 A BPF program is C code compiled to a stripped-down virtual instruction set (BPF) and loaded into the kernel through the `bpf()` syscall. Before the kernel runs it, a static analyzer called the **Verifier** proves the program is safe — it terminates, never reads uninitialized memory, never deref's a pointer it hasn't proven valid, and stays within a bounded instruction count. If the program passes, the kernel JITs it to native instructions and runs it whenever the chosen **attach point** fires. The program cannot crash the kernel and cannot read arbitrary memory — every load is verified at load time. Programs talk to userspace through **maps** (typed shared data structures).
 
+That paragraph hides three machines worth meeting properly: the virtual CPU your program runs on, the syscall that gets it into the kernel, and the compiler that makes it fast. Let's take them one at a time — you'll be reading their fingerprints in error messages within the hour.
+
+### The BPF virtual machine: 11 registers and an 8-byte instruction
+
+"A stripped-down virtual instruction set" deserves more than a hand-wave, because the very first error you'll hit today (Break 1) prints register names at you. So: BPF is a **64-bit RISC-like virtual ISA**. It has exactly **11 registers, `R0` through `R10`**, each 64 bits wide (`BPF_REG_0 = 0` … `BPF_REG_10`, `__MAX_BPF_REG` at `include/uapi/linux/bpf.h:74`). Every instruction is a fixed **8-byte encoding** — `struct bpf_insn` at `include/uapi/linux/bpf.h:80` — packing an opcode, a destination register, a source register, an offset, and an immediate.
+
+The registers aren't interchangeable. They have a **calling convention**, and you must know it to read verifier output:
+
+| Register | Role |
+|---|---|
+| `R0` | **Return value** — your program's return, *and* the return value of any helper you call |
+| `R1`–`R5` | **Argument / scratch** registers passed into helpers (and `R1` = the ctx pointer on entry) |
+| `R6`–`R9` | **Callee-saved** — preserved across helper calls |
+| `R10` | **Read-only frame pointer** to a fixed **512-byte** stack (`MAX_BPF_STACK = 512`, `include/linux/filter.h:98`) |
+
+![BPF registers R0-R10](diagrams/day01_bpf_registers.png)
+
+Two things fall straight out of this table. First, `R0 = helper return value` is *exactly* why, in Break 1, the result of `bpf_ringbuf_reserve` lands in `R0`. Second, when the verifier prints `R0=mem_or_null`, it's telling you: `R0` holds the pointer the helper returned, and the verifier has tagged it "might be NULL." Dereferencing it (writing `*(u32 *)(r0+0)`) without first checking for NULL is the instruction it rejects.
+
+How does the verifier *know* `R0` might be NULL? Because it walks your program one instruction at a time and tracks a **type and value-range for every register** as it goes. That bookkeeping lives in `struct bpf_reg_state` and is updated by routines like `check_reg_arg` in `kernel/bpf/verifier.c` — the same engine that prints the `R0=mem_or_null` text you'll see in Break 1. (You'll meet the Verifier as a character on Day 4; today you just need to recognize the register names when it complains.)
+
+One more distinction that saves confusion later: there are **two different instruction streams** in play. The **BPF bytecode** is what the verifier reads and what `struct bpf_insn` encodes. The **native machine code** is what actually runs on the CPU — and a separate stage, the JIT, produces it. Don't conflate them.
+
+### The `bpf()` syscall: one door, many commands
+
+Everything — creating a map, loading a program, attaching it — enters the kernel through a **single syscall**: `bpf()`. There is exactly one entry point, `SYSCALL_DEFINE3(bpf, int, cmd, union bpf_attr __user *, uattr, unsigned int, size)` at `kernel/bpf/syscall.c:6385`, and it's **multiplexed by a command enum** (the first argument, `cmd`):
+
+- **`BPF_MAP_CREATE`** — create a map and return a file descriptor. Dispatches to `map_create()` (`kernel/bpf/syscall.c:1362`).
+- **`BPF_PROG_LOAD`** — submit a program's instructions + BTF, **run the Verifier**, and return a file descriptor. Dispatches to `bpf_prog_load()` (`kernel/bpf/syscall.c:2864`).
+- **`BPF_LINK_CREATE`** / the various attach commands — wire a loaded program to an attach point.
+
+libbpf issues these for you, **in sequence**: create the maps, then load the program, then attach. (The command names live in `include/uapi/linux/bpf.h`.)
+
+![bpf() syscall commands](diagrams/day01_bpf_syscall.png)
+
+That **map creation and program loading are separate commands** is the whole reason Break 2 behaves the way it does. When you give the map the wrong type, the kernel rejects it during `BPF_MAP_CREATE` — *before* `BPF_PROG_LOAD` is ever issued, so the Verifier (which lives inside the load path) never even runs. "Fails at the loader, before the verifier" is not hand-waving; it's literally a different `cmd`.
+
+And notice the recurring noun: **file descriptor.** Maps, programs, and links are *all* referenced by fd returned from `bpf()`. That's the substrate under everything you'll touch in userspace — `skel->maps.rb` and `bpf_map__fd(skel->maps.rb)` in `hello.c` are just typed wrappers around a map fd. A **map**, in general, is a kernel-resident typed key/value object created by `BPF_MAP_CREATE` and shared between kernel and userspace by that fd. Ringbuf (below) is one map *type*; `BPF_MAP_TYPE_ARRAY` (the one Break 2 mis-uses) is another.
+
+### JIT: BPF bytecode becomes native machine code
+
+Once the Verifier accepts your bytecode, the kernel doesn't *interpret* it event by event — that would be slow. Instead the **BPF JIT** ("just-in-time" compiler) rewrites each BPF instruction into the equivalent **native CPU instructions** (x86-64 here). The translator is `bpf_int_jit_compile()` at `arch/x86/net/bpf_jit_comp.c:3718`; it walks the program in `do_jit()` (around `:1652`), emitting native code into a buffer described by `struct jit_context` (`:310`).
+
+Three things to internalize:
+
+- The JIT runs **once, at load time**, inside the `BPF_PROG_LOAD` path — *not* on every event. When the attach point fires, it jumps straight into already-compiled native code.
+- On most production kernels the JIT is **on by default**, controlled by the `bpf_jit_enable` sysctl; setting it to `2` additionally dumps the JIT image for debugging (`if (bpf_jit_enable > 1)` at `arch/x86/net/bpf_jit_comp.c:3843`). An interpreter fallback exists, but it's the slow path.
+- This is why fentry + JIT is cheap enough to leave attached on a busy machine — the "no hiccup" claim from the first Dumb Question. At the attach point, there's no trap and no interpreter loop: just native code calling native code.
+
 ![BPF program lifecycle](diagrams/day01_lifecycle.png)
+
+*(In that lifecycle picture, the **JIT** stage sits between "Verifier accepts" and "runs at attach point": it turns the verified **BPF bytecode** into **native x86 instructions**, which is what actually executes when `filename_unlinkat` is called.)*
 
 ### The Verifier (a recurring character)
 
 > **The Verifier:** *Hi. I'm the gatekeeper. Nothing runs in the kernel until I prove it's safe. I read your program one instruction at a time. I track every register's type. I track every memory region's bounds. I track every reference you take. If you do something I can't prove safe — touch a pointer that might be NULL, run a loop I can't bound, leak a refcount — I reject your program. My error messages aren't always pretty, but every one tells you the exact instruction where I lost faith. Read carefully. We'll be working together a lot.*
 
-You'll meet the Verifier on Day 4. For now, write code that pleases it without trying.
+You'll meet the Verifier on Day 4. For now, write code that pleases it without trying. (And now you know what "track every register's type" means literally — `R0` through `R10`, one type each, updated instruction by instruction.)
 
 ### `SEC()` — the section-name convention
 
@@ -74,7 +162,7 @@ SEC("xdp")                    // type=xdp, attach point provided by userspace
 SEC("tp/sched/sched_switch")  // type=tracepoint, on the sched_switch tracepoint
 ```
 
-The full table lives in `tools/lib/bpf/libbpf.c` — search `static const struct bpf_sec_def section_defs[]`. Bookmark it. Whenever a `SEC()` "doesn't work", that's the file you check.
+The full table lives in `tools/lib/bpf/libbpf.c` — search `static const struct bpf_sec_def section_defs[]` (`:9987`). Bookmark it. Whenever a `SEC()` "doesn't work", that's the file you check.
 
 ### BTF (BPF Type Format)
 
@@ -82,7 +170,7 @@ BTF is a compact debug-info-like format the kernel exposes about itself. The run
 
 1. **Verifier type-checking** of typed pointers (`PTR_TO_BTF_ID`).
 2. **CO-RE** field-offset relocation at load time.
-3. **Typed argument unpacking** for fentry/fexit/tp_btf programs.
+3. **Typed argument unpacking** for fentry/fexit/tp_btf programs — the ABI bridge from earlier, made concrete: it's what lets `BPF_PROG(on_unlink, int dfd, struct filename *name)` resolve to the right slots and casts.
 4. **Kfunc signature matching** (Day 20).
 
 Source: `kernel/bpf/btf.c`.
@@ -105,15 +193,15 @@ The whole reason BPF programs aren't fragile across kernel versions. You compile
 
 ### libbpf
 
-The userspace library at `tools/lib/bpf/`. Opens your `.bpf.o`, applies CO-RE relocations using the running kernel's BTF, calls the `bpf()` syscall to load programs and create maps, attaches them, returns handles. It is the canonical loader. Do not write your own.
+The userspace library at `tools/lib/bpf/`. Opens your `.bpf.o`, applies CO-RE relocations using the running kernel's BTF (`bpf_object__relocate_core` at `tools/lib/bpf/libbpf.c:6082`), calls the `bpf()` syscall to load programs and create maps — issuing `BPF_MAP_CREATE` then `BPF_PROG_LOAD` then the attach commands, in that order — attaches them, and returns handles. It is the canonical loader. Do not write your own.
 
 ### Skeleton (`*.skel.h`)
 
-An auto-generated header produced by `bpftool gen skeleton hello.bpf.o > hello.skel.h`. It gives userspace typed accessors for every map and program in your BPF object: `skel->maps.rb`, `skel->progs.on_unlink`. The generated file is ~200 lines of straightforward code — open it once, it stops feeling magic.
+An auto-generated header produced by `bpftool gen skeleton hello.bpf.o > hello.skel.h`. It gives userspace typed accessors for every map and program in your BPF object: `skel->maps.rb`, `skel->progs.on_unlink`. Under the hood each of those is a wrapper around the fd that `bpf()` returned. The generated file is ~200 lines of straightforward code — open it once, it stops feeling magic.
 
 ### ringbuf — the event channel you'll use today
 
-A kernel→userspace event channel. **Multi-producer (any CPU), single-consumer (one userspace reader), preserves cross-CPU ordering.** Producers don't run fully lock-free: inside `__bpf_ringbuf_reserve` they serialize briefly via an internal per-ringbuf spinlock (`raw_res_spin_lock_irqsave`) while advancing the producer position, then each caller writes into its own disjoint slice.
+A kernel→userspace event channel, and one **map type** among many. **Multi-producer (any CPU), single-consumer (one userspace reader), preserves cross-CPU ordering.** Producers don't run fully lock-free: inside `__bpf_ringbuf_reserve` they serialize briefly via an internal per-ringbuf spinlock (`raw_res_spin_lock_irqsave` on `rb->spinlock`, `kernel/bpf/ringbuf.c:478`) while advancing the producer position, then each caller writes into its own disjoint slice.
 
 ![ringbuf MPSC](diagrams/day01_ringbuf.png)
 
@@ -188,13 +276,17 @@ Walkthrough of every line that's new:
 - `#include "vmlinux.h"` — pulls in every kernel type, including `struct filename` used in the prototype.
 - `char LICENSE[] SEC("license") = "GPL";` — a load-time gate, not legal advice. The kernel rejects a non-GPL program *only* if it calls a GPL-only helper. Many of the most useful helpers are GPL-only (`bpf_probe_read_kernel`, `bpf_get_current_task`, `bpf_get_stackid`, …), but the four simple helpers this lab uses are *not* — so this line has no teeth yet today (see Break 3).
 - `struct event` — the type we'll send through ringbuf. Both kernel and userspace include this same definition; ringbuf transports raw bytes.
-- The `SEC(".maps")` block — modern map declaration syntax. The `__uint(...)` macros from `bpf_helpers.h` produce BTF the loader uses to know it's a 256-KiB ringbuf.
+- The `SEC(".maps")` block — modern map declaration syntax. The `__uint(...)` macros from `bpf_helpers.h` produce BTF the loader uses to know it's a 256-KiB ringbuf. (This is the BTF that drives the `BPF_MAP_CREATE` command libbpf issues for `rb`.)
 - `SEC("fentry/filename_unlinkat")` — attach point. `filename_unlinkat` is in `fs/namei.c`, called on every `unlink()` and `unlinkat()` syscall.
-- `BPF_PROG(on_unlink, int dfd, struct filename *name)` — macro from `bpf_tracing.h` that unpacks the trampoline's argument array into typed parameters.
-- `bpf_ringbuf_reserve` returns either a valid pointer or NULL (when the ringbuf is full). The Verifier requires the null check.
-- `bpf_get_current_pid_tgid()` — packed `(tgid << 32) | pid`; Linux's userspace "PID" is the kernel's TGID. `>> 32` extracts the user-visible PID.
+- `BPF_PROG(on_unlink, int dfd, struct filename *name)` — macro from `bpf_tracing.h` that unpacks the trampoline's argument array into the typed parameters `dfd` and `name` (the ABI bridge from earlier, made concrete).
+- `bpf_ringbuf_reserve` returns either a valid pointer or NULL (when the ringbuf is full). The return value lands in `R0`, the Verifier tags it `mem_or_null`, and it requires the null check before you write through it.
+- `bpf_get_current_pid_tgid()` — reads the currently-running task (more on "the task" just below). The result is packed `(tgid << 32) | pid`; Linux's userspace "PID" is the kernel's TGID. `>> 32` extracts the user-visible PID.
 - `bpf_get_current_comm` — copies up to 16 bytes of the task's `comm` field. Always 16, always null-padded.
 - `bpf_ringbuf_submit` makes the reserved entry visible to the consumer.
+
+#### A one-paragraph refresher: "the task" and where 16 comes from
+
+Two of those helpers read "the current task," and the magic number `16` shows up with no explanation — so, briefly: every schedulable thread in the kernel is represented by a `struct task_struct`. What BPF calls **`current`** is simply the `task_struct` of the thread running on this CPU right now, and `bpf_get_current_pid_tgid` / `bpf_get_current_comm` both read fields out of it. The `comm` field is a fixed-size, NUL-padded **short thread name** — the `rm` you'll see in the lab output — declared as `char comm[TASK_COMM_LEN]` in `struct task_struct` (`include/linux/sched.h:1173`). And `TASK_COMM_LEN` is **16** (`include/linux/sched.h:325`). So the `16` in `sizeof(e->comm)` isn't arbitrary; it's the kernel's compile-time size of that field. That's the whole refresher — we'll do a proper `task_struct` tour another day; today you just need "always 16" and "the task's comm" to stop being unexplained constants. (The pid-vs-tgid split above already covered why we shift by 32.)
 
 ### `hello.c` — the userspace side
 
@@ -241,6 +333,8 @@ int main(void)
 }
 ```
 
+`bpf_map__fd(skel->maps.rb)` is exactly the map fd that `BPF_MAP_CREATE` returned during load — the userspace side polls it; the kernel side writes into it.
+
 ### Run it
 
 ```bash
@@ -281,7 +375,7 @@ Remove the `if (!e) return 0;`. Rebuild. The verifier rejects with something lik
 R0 invalid mem access 'mem_or_null'
 ```
 
-That's the Verifier saying: *your register R0 is a pointer that might be NULL; you can't dereference it without proving it isn't.*
+That's the Verifier saying: *your register R0 is a pointer that might be NULL; you can't dereference it without proving it isn't.* You now know exactly why it's `R0` and not some other register — `R0` is where a helper's return value lives by calling convention, so `bpf_ringbuf_reserve`'s maybe-NULL pointer is sitting in `R0` when instruction 2 tries to write through it.
 
 To see this with full detail, set `kernel_log_level = 1` in your loader options:
 
@@ -300,7 +394,7 @@ Change `BPF_MAP_TYPE_RINGBUF` to `BPF_MAP_TYPE_ARRAY`. Now the loader fails *bef
 libbpf: map 'rb': failed to create: Invalid argument
 ```
 
-This shows the difference between **loader-time** errors (map config wrong) and **verifier-time** errors (program logic unsafe). Different layers, different failure modes. Get used to noticing which one bit you.
+This is the `BPF_MAP_CREATE`-vs-`BPF_PROG_LOAD` split from the syscall section, made visible. An ARRAY map needs a key size and value size that a bare `SEC(".maps")` ringbuf-style declaration doesn't supply, so the kernel rejects it during `BPF_MAP_CREATE` — the very first command libbpf issues. `BPF_PROG_LOAD`, where the Verifier lives, never runs. That's the difference between **loader-time** errors (map config wrong) and **verifier-time** errors (program logic unsafe). Different layers, different commands, different failure modes. Get used to noticing which one bit you.
 
 ### Break 3 — Remove the LICENSE
 
@@ -321,6 +415,16 @@ cannot call GPL-restricted function from non-GPL compatible program
 The lesson: the license string is a load-time gate with teeth **only** for GPL-only helpers. Put the LICENSE line back (and you can drop the `bpf_get_current_task` call again) before moving on.
 
 ### Break 4 — Reserve more than you write
+
+> ### Sharpen your pencil
+>
+> Before you run anything: what is `sizeof(struct event)`? The struct is a 4-byte `__u32 pid` followed by a 16-byte `char comm[16]`. Add them up — you'll see this number printed as `sz=` in a moment.
+>
+> .  
+> .  
+> .
+>
+> **Answer:** 20. There's no padding to worry about here — a `__u32` needs 4-byte alignment and `char[16]` needs only 1, so the 4 + 16 layout packs with no gaps. Hold "20" in mind; the `20 → 21` shift is the whole point of this break.
 
 The lesson here is that **ringbuf records are sized at reserve time, not at submit time** — but the consumer in `hello.c` never looks at the record length, so right now you can't see it. First make the size visible. Change `handle()` to print the delivered length `sz`:
 
@@ -354,9 +458,9 @@ The record is one byte larger even though you wrote the same bytes — the lengt
 
 Open these files in your `~/code/linux` checkout. Skim, don't memorize.
 
-- **`kernel/bpf/trampoline.c`** — top of the file. Find `arch_prepare_bpf_trampoline` and `bpf_trampoline_get`. The trampoline is per-(target, prog-list), reference-counted, and rebuilt when programs attach or detach. Notice `bpf_trampoline` is not just one stub — it's a hash table keyed by attach target.
-- **`kernel/bpf/ringbuf.c`** — `bpf_ringbuf_reserve` is short. Note the per-record header (`struct bpf_ringbuf_hdr`) and the `BUSY` bit that lets `submit` and `discard` finalize race-free.
-- **`tools/lib/bpf/libbpf.c`** — search `find_sec_def`. Scroll the `section_defs[]` table. You now know every prefix that exists. This file is also where CO-RE relocation gets kicked off (`bpf_object__relocate_core`).
+- **`kernel/bpf/trampoline.c`** — top of the file. Find `arch_prepare_bpf_trampoline` and `bpf_trampoline_get`. The trampoline is per-(target, prog-list), reference-counted, and rebuilt when programs attach or detach (`bpf_trampoline_update`, `kernel/bpf/trampoline.c:607`). Notice `bpf_trampoline` is not just one stub — it's a hash table keyed by attach target. (The arg-spill/restore code itself is emitted by `arch_prepare_bpf_trampoline` at `arch/x86/net/bpf_jit_comp.c:3536`, with the real work in `__arch_prepare_bpf_trampoline` at `:3213` — this is the ABI bridge from the trampoline section, in the flesh.) The patch that repoints the site is installed by the int3-based text-poke machinery, `smp_text_poke_*` (`smp_text_poke_int3_handler` at `arch/x86/kernel/alternative.c:2838`, driving the batched `struct smp_text_poke_loc` array at `:2781`) — safe against concurrent instruction fetch on every CPU.
+- **`kernel/bpf/ringbuf.c`** — `bpf_ringbuf_reserve` is short. Note the per-record header (`struct bpf_ringbuf_hdr`, `:88`) and the `BUSY` bit (`BPF_RINGBUF_BUSY_BIT`, set at `:529`) that lets `submit` and `discard` finalize race-free.
+- **`tools/lib/bpf/libbpf.c`** — search `find_sec_def` (`:10212`). Scroll the `section_defs[]` table (`:9987`). You now know every prefix that exists. This file is also where CO-RE relocation gets kicked off (`bpf_object__relocate_core`, `:6082`).
 
 ### Optional: read the generated skeleton
 
@@ -370,15 +474,20 @@ It prints the same `hello.skel.h` your Makefile generated. Read it once. You'll 
 
 ## Bullet Points
 
+- BPF is a **64-bit virtual ISA**: 11 registers `R0`–`R10`, fixed 8-byte `struct bpf_insn`. `R0` = return/helper-return value, `R1`–`R5` = args, `R6`–`R9` = callee-saved, `R10` = read-only frame pointer to a 512-byte stack. The Verifier tracks a type per register — that's where `R0=mem_or_null` comes from.
+- **`bpf()` is one syscall, multiplexed by a command enum:** `BPF_MAP_CREATE` (→ map fd), `BPF_PROG_LOAD` (runs the Verifier → prog fd), attach commands. Maps, progs, and links are all **fds**. libbpf issues them in sequence — which is why a bad map fails *before* the Verifier (Break 2).
+- After the Verifier accepts bytecode, the **JIT** translates it to native machine code once at load time; the attach point then runs native code at native speed.
 - BPF programs are C compiled to a verified-then-JITed instruction set; they cannot crash the kernel.
-- **fentry** patches the 5-byte NOP slot at the start of a kernel function with a `jmp` to a generated trampoline that calls your program. Typically several times cheaper than a kprobe trap.
+- **fentry** patches the 5-byte NOP slot — reserved by the compiler's `-mfentry` instrumentation and *owned by ftrace*, borrowed by BPF via an ftrace "direct call" — with a jump to a generated trampoline. The **trampoline bridges the ABI**: it spills native arg registers (`rdi`, `rsi`, …) into a `u64 ctx[]` array, calls your program with `R1 → ctx`, and `BPF_PROG` casts the slots back to typed args. Typically several times cheaper than a kprobe trap.
+- The patch is installed by the kernel's int3-based text-poke machinery, `smp_text_poke_*`, safe against concurrent instruction fetch on every CPU.
 - Use **fentry** wherever possible. Use **kprobe** only for functions without BTF.
 - **`SEC()`** is the section-name convention libbpf uses to load and attach. The prefix names the program type and tells libbpf where to attach.
-- **vmlinux.h** is generated from kernel BTF and gives you every kernel type by name.
+- **vmlinux.h** is generated from kernel BTF and gives you every kernel type by name; **BTF** also tells fentry the argument types so the trampoline and `BPF_PROG` agree on the slots.
 - **CO-RE** lets you compile once and run on any kernel; libbpf relocates field offsets at load time.
-- **ringbuf** is multi-producer single-consumer with cross-CPU ordering — your default kernel→userspace channel.
+- **ringbuf** is one map type — multi-producer single-consumer with cross-CPU ordering — your default kernel→userspace channel.
+- **`current`** is the running thread's `struct task_struct`; `comm` is its 16-byte (`TASK_COMM_LEN`) NUL-padded name — that's where "always 16" comes from.
 - Two failure layers exist: **loader-time** (map/object misconfigured) and **verifier-time** (program logic unsafe).
-- Always check the return of `bpf_ringbuf_reserve` and `bpf_map_lookup_elem` — both can return NULL and the Verifier knows it.
+- Always check the return of `bpf_ringbuf_reserve` and `bpf_map_lookup_elem` — both can return NULL (in `R0`) and the Verifier knows it.
 
 ---
 
