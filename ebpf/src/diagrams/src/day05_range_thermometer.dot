@@ -1,0 +1,46 @@
+digraph range_thermometer {
+    rankdir=TB;
+    labelloc=t;
+    label="The range domain: a box [umin,umax] that must shrink to a provable exit";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    subgraph cluster_good {
+        label="i < 64  (constant bound  ->  PROVABLE)";
+        fontname="Helvetica"; fontsize=11;
+        style="filled"; fillcolor="#f0fdf4"; color="#16a34a";
+
+        g0 [shape=record, style="filled", fillcolor="#dbeafe",
+            label="iter 0|umin=0  umax=63"];
+        g1 [shape=record, style="filled", fillcolor="#dbeafe",
+            label="iter 1|umin=1  umax=63"];
+        g2 [shape=record, style="filled", fillcolor="#dbeafe",
+            label="iter 32|umin=32  umax=63"];
+        g3 [shape=record, style="filled", fillcolor="#dcfce7",
+            label="iter 63|umin=63  umax=63|umin == umax  =\>  EXIT reached"];
+        g0 -> g1 -> g2 -> g3 [label="i++  (umax pinned at 63)", color="#16a34a", style=bold];
+    }
+
+    subgraph cluster_bad {
+        label="i < n   (n unknown  ->  UNPROVABLE)";
+        fontname="Helvetica"; fontsize=11;
+        style="filled"; fillcolor="#fef2f2"; color="#dc2626";
+
+        b0 [shape=record, style="filled", fillcolor="#dbeafe",
+            label="iter 0|umin=0  umax=U64_MAX"];
+        b1 [shape=record, style="filled", fillcolor="#dbeafe",
+            label="iter 1|umin=1  umax=U64_MAX"];
+        b2 [shape=record, style="filled", fillcolor="#fee2e2",
+            label="iter k|umin=k  umax=U64_MAX|box never shrinks  =\>  no exit"];
+        b0 -> b1 -> b2 [label="i++  (umax stuck at U64_MAX)", color="#dc2626", style=bold];
+    }
+
+    tnum_before [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+        label="tnum(n) before  n & 0x7f\lbits 63..7 : ? ? ? ... ?  (unknown)\lbits  6..0 : ? ? ? ? ? ? ?  (unknown)\lumax(n) = U64_MAX\l"];
+    tnum_after [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+        label="tnum(n) after   n & 0x7f\lbits 63..7 : 0 0 0 ... 0  (KNOWN zero)\lbits  6..0 : ? ? ? ? ? ? ?  (unknown)\lumax(n) = 127  (a hard fact)\l"];
+    tnum_before -> tnum_after [label="& 0x7f snaps high bits to known-0", color="#7c3aed", style=bold, fontname="Helvetica", fontsize=9];
+
+    g3 -> tnum_before [style=invis];
+    b2 -> tnum_before [style=invis];
+}

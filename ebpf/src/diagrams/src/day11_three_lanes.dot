@@ -1,0 +1,60 @@
+digraph three_lanes {
+    rankdir=TB;
+    labelloc=t;
+    label="Three ways to put a probe on N functions";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=9];
+    compound=true;
+
+    // Lane 1: kprobe loop
+    subgraph cluster_kprobe {
+        label="Lane 1: kprobe loop  (N int3 + N objects + N links)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#dc2626";
+        k_link [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+                label="N separate\nbpf_link objects"];
+        k1 [shape=box, style="filled", fillcolor="#dbeafe", label="fn_1\nint3 byte + kprobe obj"];
+        k2 [shape=box, style="filled", fillcolor="#dbeafe", label="fn_2\nint3 byte + kprobe obj"];
+        kn [shape=box, style="filled", fillcolor="#dbeafe", label="fn_N\nint3 byte + kprobe obj"];
+        k_link -> k1; k_link -> k2; k_link -> kn;
+        knote [shape=note, style="filled", fillcolor="#fef3c7", fontsize=8,
+               label="each hit = int3 TRAP\l(expensive exception)\l"];
+        kn -> knote [style=invis];
+    }
+
+    // Lane 2: fentry
+    subgraph cluster_fentry {
+        label="Lane 2: fentry  (N per-target BPF trampolines)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#7c3aed";
+        f1 [shape=box, style="filled", fillcolor="#e9d5ff", label="trampoline_1\n(one fn)"];
+        f2 [shape=box, style="filled", fillcolor="#e9d5ff", label="trampoline_2\n(one fn)"];
+        fn [shape=box, style="filled", fillcolor="#e9d5ff", label="trampoline_N\n(one fn)"];
+        ff1 [shape=box, style="filled", fillcolor="#dbeafe", label="fn_1 (NOP patch)"];
+        ff2 [shape=box, style="filled", fillcolor="#dbeafe", label="fn_2 (NOP patch)"];
+        ffn [shape=box, style="filled", fillcolor="#dbeafe", label="fn_N (NOP patch)"];
+        ff1 -> f1; ff2 -> f2; ffn -> fn;
+        fnote [shape=note, style="filled", fillcolor="#fef3c7", fontsize=8,
+               label="no trap, but ONE\ltrampoline PER target\l"];
+        fn -> fnote [style=invis];
+    }
+
+    // Lane 3: kprobe.multi / fprobe
+    subgraph cluster_multi {
+        label="Lane 3: kprobe.multi / fprobe  (ONE registration, shared)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+        m_link [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+                label="ONE bpf_link +\nONE struct fprobe"];
+        m_ftrace [shape=box, style="filled", fillcolor="#dcfce7",
+                  label="ftrace shared ops\n(register_fprobe_ips)"];
+        m_arr [shape=record, style="filled", fillcolor="#fef3c7",
+               label="{ sorted addr[] | addr_1 | addr_2 | ... | addr_N }"];
+        m_link -> m_ftrace;
+        m_ftrace -> m_arr [label="one batch"];
+        mf1 [shape=box, style="filled", fillcolor="#dbeafe", label="fn_1"];
+        mf2 [shape=box, style="filled", fillcolor="#dbeafe", label="fn_2"];
+        mfn [shape=box, style="filled", fillcolor="#dbeafe", label="fn_N"];
+        m_arr -> mf1; m_arr -> mf2; m_arr -> mfn;
+        mnote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=8,
+               label="NOT N trampolines —\lone shared ftrace registration,\lno int3 trap\l"];
+        mfn -> mnote [style=invis];
+    }
+}

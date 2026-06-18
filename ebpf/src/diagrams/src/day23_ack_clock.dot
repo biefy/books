@@ -1,0 +1,27 @@
+digraph ack_clock {
+    rankdir=LR;
+    labelloc=t;
+    label="The ACK clock: each returning ACK frees a window slot and is permission to send ~1 more segment (gated by in_flight < cwnd)";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.5; ranksep=1.2;
+
+    sender [shape=record, style="filled", fillcolor="#dbeafe",
+            label="SENDER|snd_cwnd = 10  (the cap)|in_flight = sent, not yet ACKed"];
+    gate [shape=diamond, style="filled", fillcolor="#fef3c7", fontsize=10,
+          label="in_flight\n<\ncwnd ?"];
+    receiver [shape=record, style="filled", fillcolor="#dbeafe",
+              label="RECEIVER|ACKs the bytes it got"];
+
+    sender -> gate [label="want to send", color="#2563eb", style=bold, fontname="Helvetica", fontsize=10];
+    gate -> receiver [label="YES: send segment  ->  in_flight++", color="#d97706", style=bold, fontname="Helvetica", fontsize=10];
+    receiver -> sender [label="ACK returns  ->  in_flight--,  one slot frees", color="#16a34a", style=bold, fontname="Helvetica", fontsize=10];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=10,
+          label="Self-pacing:\lThe slowest link governs how fast ACKs trickle back,\lso the connection naturally sends at that link's speed.\lEach ACK = one tick of the clock = the window opens a little.\l"];
+    receiver -> note [style=invis];
+
+    hook [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=10,
+          label="Why instrument here:\lEvery returning ACK fires in_ack_event\l(= bpf_dctcp_update_alpha). That callback is\lthe per-tick hook the rest of this chapter logs.\l"];
+    sender -> hook [style=invis];
+}

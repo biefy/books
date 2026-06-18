@@ -1,0 +1,41 @@
+digraph rcu_buckets {
+    rankdir=LR;
+    labelloc=t;
+    label="Lockless RCU readers vs. bucket-locked writers";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.4; ranksep=0.9;
+
+    // Bucket array
+    buckets [shape=record, style="filled", fillcolor="#dbeafe",
+             label="{ bucket[0] | bucket[1] | <b2> bucket[2] | bucket[3] | ... }"];
+
+    // The expanded chain for bucket[2]: an hlist_nulls
+    subgraph cluster_chain {
+        label="bucket[2].head  (RCU hlist_nulls chain)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        e1 [shape=box, style="filled", fillcolor="#fef3c7",
+            label="elem A\n{key, value}"];
+        e2 [shape=box, style="filled", fillcolor="#fef3c7",
+            label="elem B\n{key, value}"];
+        nulls [shape=box, style="filled,rounded", fillcolor="#fde68a",
+               label="NULLS\n(end marker)"];
+        e1 -> e2 -> nulls;
+    }
+
+    buckets:b2 -> e1 [label="head"];
+
+    // Reader
+    reader [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+            label="reader\n(RCU read-side,\nNO lock)"];
+    reader -> e1 [label="walk chain", color="#16a34a", style=bold, fontname="Helvetica", fontsize=9];
+
+    // Writer
+    writer [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+            label="writer\n(bucket spinlock\nHELD)"];
+    writer -> e2 [label="insert / delete", color="#dc2626", style=bold, fontname="Helvetica", fontsize=9];
+
+    note [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+          label="The returned pointer stays valid because\lelements are RCU-freed: memory is not\lreclaimed until in-flight readers finish.\lReader races only the value's CONTENTS\l(hence the atomic), never use-after-free.\l"];
+    nulls -> note [style=invis];
+}

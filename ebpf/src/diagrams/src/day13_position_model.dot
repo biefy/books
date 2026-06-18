@@ -1,0 +1,39 @@
+digraph position_model {
+    rankdir=TB;
+    labelloc=t;
+    label="The ringbuf as two monotonic positions chasing each other";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The fixed byte ring drawn as a strip of cells (it wraps: offset & mask)
+    ring [shape=record, style="filled", fillcolor="#fef3c7", fontsize=10,
+          label="{ free | free | <c> CONSUMED | <u1> unconsumed | <u2> unconsumed | <u3> unconsumed | <p> reserved | free }"];
+
+    // Position pointers below the strip
+    cons [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+          label="consumer_pos\n(bytes drained,\nmonotonic)"];
+    prod [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+          label="producer_pos\n(bytes reserved,\nmonotonic)"];
+
+    cons -> ring:u1 [color="#2563eb", style=bold, label="here"];
+    prod -> ring:p   [color="#2563eb", style=bold, label="here"];
+
+    // unconsumed span note
+    gap [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+         label="unconsumed = producer_pos - consumer_pos\lfree = size - (producer_pos - consumer_pos)\lboth counters only ever increase; ring index = offset & (size-1)\l"];
+
+    // a new reserve that would overlap the unconsumed span -> rejected
+    req [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+         label="reserve(len): new_prod_pos = producer_pos + len"];
+    nullret [shape=box, style="filled", fillcolor="#fee2e2",
+             label="bpf_ringbuf_has_space() == false\nreturn NULL  (silent drop)"];
+
+    req -> nullret [color="#dc2626", style=bold,
+                    label="new_prod_pos would lap consumer_pos"];
+
+    ring -> gap [style=invis];
+    gap -> req [style=invis];
+    cons -> prod [style=invis];
+
+    { rank=same; cons; prod; }
+}

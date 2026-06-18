@@ -1,0 +1,33 @@
+digraph queue_map {
+    rankdir=TB;
+    labelloc=t;
+    label="A keyed map vs a BPF QUEUE map (keyless FIFO)";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.4; ranksep=0.5;
+
+    subgraph cluster_keyed {
+        label="keyed map (hash / array) — you have seen these";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        keyed [shape=record, style="filled", fillcolor="#dbeafe", fontsize=10,
+               label="{ key | value } | { 0 | 4123 } | { 1 | 5567 } | { 2 | 880 }"];
+        keynote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+                 label="look up by key.\lrandom access.\l"];
+        keyed -> keynote [style=invis];
+    }
+
+    subgraph cluster_queue {
+        label="BPF_MAP_TYPE_QUEUE central_q — NO keys";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+        tube [shape=record, style="filled", fillcolor="#fef3c7", fontsize=11,
+              label="{ <f> 4123 (front) | 5567 | <b> 880 (back) }"];
+        push [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+              label="bpf_map_push_elem(&central_q, &pid)\nappend at back"];
+        pop [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+             label="dispatch_to_cpu:\nbpf_map_pop_elem -> 4123\nremove oldest at front"];
+        push -> tube:b [label="push", color="#d97706", style=bold, fontname="Helvetica", fontsize=9];
+        tube:f -> pop [label="pop", color="#dc2626", style=bold, fontname="Helvetica", fontsize=9];
+    }
+
+    keyed -> tube [style=invis];
+}

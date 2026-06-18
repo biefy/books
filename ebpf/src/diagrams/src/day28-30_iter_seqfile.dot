@@ -1,0 +1,44 @@
+digraph iter_seqfile {
+    rankdir=LR;
+    labelloc=t;
+    label="BPF iterator: kernel runs the prog on demand to fill each read()";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.5; ranksep=1.0;
+
+    // Kernel side
+    subgraph cluster_kernel {
+        label="kernel side: iterator walks the task list, one prog call per task";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+
+        tasks [shape=record, style="filled", fillcolor="#dbeafe", fontsize=9,
+               label="{ task list | task A | task B | task C | ... | NULL }"];
+
+        prog [shape=box, style="filled", fillcolor="#e9d5ff",
+              label="SEC(\"iter/task\") prog\nseq_num==0 -> header\ntask!=NULL -> one line\ntask==NULL -> footer"];
+
+        seq [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+             label="ctx->meta->seq\n(struct seq_file buffer)\nBPF_SEQ_PRINTF appends lines"];
+
+        tasks -> prog [label="  once per task\l  + once with NULL", fontname="Helvetica",
+                       fontsize=9, fontcolor="#2563eb", color="#2563eb"];
+        prog -> seq [label="  append a line", fontname="Helvetica", fontsize=9,
+                     fontcolor="#16a34a", color="#16a34a"];
+    }
+
+    // Userspace side
+    subgraph cluster_user {
+        label="userspace side";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+
+        loop [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+              label="read(iter_fd) loop\ndrain buffer until\nread() returns 0 (EOF)"];
+    }
+
+    seq -> loop [label="  kernel runs the prog on demand\l  to fill each read()", fontname="Helvetica",
+                 fontsize=9, fontcolor="#7c3aed", color="#7c3aed"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="Pulled, not pushed: no ringbuf, no wakeups, no drops.\lThe buffering IS the seq_file; the pacing IS read().\lEach read() runs the prog enough times to fill the buffer.\l"];
+    loop -> note [style=invis];
+}

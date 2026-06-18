@@ -1,0 +1,33 @@
+digraph veth_netns {
+    rankdir=LR;
+    labelloc=t;
+    label="veth pair across two namespaces: traffic must cross the wire, where XDP runs";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    subgraph cluster_root {
+        label="root namespace (host)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        veth0 [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+            label="veth0\n10.0.0.1/24"];
+        lo [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="lo (loopback)\nwould short-circuit delivery\nif 10.0.0.2 were a local address"];
+    }
+
+    subgraph cluster_ns1 {
+        label="ns1 (network namespace)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+        veth1 [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+            label="veth1\n10.0.0.2/24"];
+        xdp [shape=box, style="filled", fillcolor="#fef3c7",
+            label="XDP hook\non veth1 RX path\n(bpf_prog_run_xdp)"];
+        veth1 -> xdp [label="RX", color="#dc2626", style=bold, fontname="Helvetica", fontsize=9];
+    }
+
+    veth0 -> veth1 [label="virtual cable\nTX on veth0 -> RX on veth1", dir=both,
+        color="#16a34a", style=bold, fontname="Helvetica", fontsize=9];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+        label="Separate namespaces force traffic over the wire.\lSame namespace -> kernel delivers via lo,\lpacket never reaches veth1 XDP hook.\l"];
+    veth0 -> note [style=invis];
+}

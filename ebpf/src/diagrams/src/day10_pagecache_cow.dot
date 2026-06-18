@@ -1,0 +1,50 @@
+digraph pagecache_cow {
+    rankdir=TB;
+    labelloc=t;
+    label="One inode, shared exec pages: COW-split PID-A on attach; PID-B still maps the clean page";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.5; ranksep=0.8;
+    compound=true;
+
+    // ---- The page cache (shared, keyed by inode+offset) ----
+    subgraph cluster_pc {
+        label="page cache  —  keyed by (inode, file-offset)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+
+        inode [shape=record, style="filled", fillcolor="#dcfce7",
+            label="inode = /usr/bin/bash"];
+
+        shared [shape=record, style="filled", fillcolor="#fef3c7",
+            label="shared exec page\n(bash-inode, .text offset)\noriginal byte: 0x48 ...\nread-only / exec"];
+
+        inode -> shared [label="backs", color="#16a34a", fontname="Helvetica", fontsize=9];
+    }
+
+    // ---- PID-A: COW-split private copy with int3 ----
+    subgraph cluster_a {
+        label="bash  PID-A   (uprobe attached -> COW broken)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#7c3aed";
+
+        priv_a [shape=record, style="filled", fillcolor="#e9d5ff",
+            label="PRIVATE anon page (writable copy)\nbyte patched: 0xCC (int3)\nrest of bytes unchanged"];
+    }
+
+    // ---- PID-B: still mapping the clean shared page ----
+    subgraph cluster_b {
+        label="bash  PID-B   (not yet patched)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+
+        map_b [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+            label="maps the clean SHARED page\nread-only / exec\nno breakpoint"];
+    }
+
+    shared -> priv_a [label="break COW (FOLL_WRITE):\lprivate copy, then write int3", color="#dc2626",
+        style=bold, fontname="Helvetica", fontsize=9];
+    shared -> map_b [label="still maps clean page\luntil it too is patched", color="#2563eb",
+        style=dashed, fontname="Helvetica", fontsize=9];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+        label="The breakpoint is a property of the INODE, not a process.\lPatch the inode's page once -> every running and future bash is reached,\lone private COW copy at a time. The on-disk file is never dirtied.\l"];
+    map_b -> note [style=invis];
+}

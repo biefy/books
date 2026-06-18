@@ -1,0 +1,48 @@
+digraph cgroup_tree {
+    rankdir=TB;
+    labelloc=t;
+    label="A socket carries a pointer to its cgroup; the egress program hangs off the directory";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.5; ranksep=0.7;
+
+    // The cgroup2 tree
+    subgraph cluster_tree {
+        label="cgroup2 unified hierarchy (mount type cgroup2)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+
+        root [shape=folder, style="filled", fillcolor="#dbeafe",
+              label="/sys/fs/cgroup\n(root cgroup)"];
+        block [shape=folder, style="filled", fillcolor="#bfdbfe",
+               label="test_block/\n(child cgroup)"];
+        procs [shape=box, style="filled", fillcolor="#fef3c7",
+               label="cgroup.procs\nPID 4321  (the shell)"];
+
+        root -> block [label="mkdir"];
+        block -> procs [label="echo $$ >"];
+    }
+
+    // The socket
+    sock [shape=box, style="filled,rounded", fillcolor="#fde68a",
+          label="struct sock\n(shell's socket)\n--------------\nsk_cgrp_data"];
+
+    // The BPF program
+    prog [shape=box, style="filled", fillcolor="#dcfce7",
+          label="cgroup_skb/egress\nblock_udp()"];
+
+    // socket points up at the cgroup it was born in
+    sock -> block [label="sock_cgroup_ptr()", color="#dc2626", style=bold,
+                   fontname="Helvetica", fontsize=9];
+
+    // program attached to the directory fd
+    prog -> block [label="attach_cgroup(cg_fd)", color="#7c3aed", style=bold,
+                   fontname="Helvetica", fontsize=9];
+
+    // program fires on this socket's packets
+    prog -> sock [label="fires on its packets", style=dashed,
+                  fontname="Helvetica", fontsize=9];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="No scan of cgroup.procs, no per-packet PID lookup.\lThe association is nailed down once, when the socket\lis created, and rides on sk_cgrp_data forever after.\l"];
+    prog -> note [style=invis];
+}

@@ -1,0 +1,31 @@
+digraph socket_ladder {
+    rankdir=TB;
+    labelloc=t;
+    label="The AF_XDP socket setup ladder (what xsk_socket__create wraps)";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10, shape=box, style="filled,rounded"];
+
+    s1 [fillcolor="#e9d5ff",
+        label="1.  socket(AF_XDP, SOCK_RAW, 0)\n-> a raw xsk fd"];
+    s2 [fillcolor="#dbeafe",
+        label="2.  setsockopt(XDP_UMEM_REG, &xdp_umem_reg)\nregister UMEM (addr, len, chunk_size, headroom)"];
+    s3 [fillcolor="#dbeafe",
+        label="3.  setsockopt ring sizes\nXDP_UMEM_FILL_RING / XDP_UMEM_COMPLETION_RING\nXDP_RX_RING / XDP_TX_RING"];
+    s4 [fillcolor="#fef3c7",
+        label="4.  mmap each ring at fixed XDP_PGOFF_* offset\nRX=0  TX=0x80000000\nFILL=0x100000000  COMP=0x180000000\n=> producer/consumer counters become SHARED memory"];
+    s5 [fillcolor="#dcfce7",
+        label="5.  bind(fd, &sockaddr_xdp)\nties socket to one (ifindex, queue_id)\nsxdp_flags = XDP_ZEROCOPY | XDP_COPY | default"];
+
+    s1 -> s2 -> s3 -> s4 -> s5 [color="#2563eb", style=bold];
+
+    wrap [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+          label="xsk_socket__create() /\lxsk_umem__create() wrap\lALL of this. Knowing the\lsequence is what lets you\ldebug a failed create.\l"];
+
+    wakeup [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+            label="XDP_USE_NEED_WAKEUP: driver sets\lXDP_RING_NEED_WAKEUP in ring flags\lwhen asleep -> poll()/sendto()/recvfrom()\lto kick it. Without it: busy-poll.\l"];
+
+    s3 -> wrap [style=invis];
+    s5 -> wakeup [style=invis];
+    { rank=same; s4; wrap; }
+    { rank=same; s5; wakeup; }
+}

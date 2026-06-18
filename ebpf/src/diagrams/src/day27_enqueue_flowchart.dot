@@ -1,0 +1,46 @@
+digraph enqueue_flowchart {
+    rankdir=TB;
+    labelloc=t;
+    label="central_enqueue: kthreads jump the queue";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.4; ranksep=0.5;
+
+    arrive [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="task p arrives at central_enqueue"];
+
+    test [shape=diamond, style="filled", fillcolor="#fef3c7", fontsize=9,
+          label="per-CPU kthread?\nPF_KTHREAD &&\nnr_cpus_allowed == 1"];
+
+    kthread [shape=box, style="filled", fillcolor="#dcfce7",
+             label="insert at head of its LOCAL DSQ\nSCX_DSQ_LOCAL, SCX_ENQ_PREEMPT\nnr_locals++   then return early"];
+
+    push [shape=box, style="filled", fillcolor="#dbeafe",
+          label="bpf_map_push_elem(&central_q, &pid)"];
+
+    pushfail [shape=diamond, style="filled", fillcolor="#fef3c7", fontsize=9,
+              label="push failed?\n(queue full)"];
+
+    fallback [shape=box, style="filled", fillcolor="#fee2e2",
+              label="insert into FALLBACK_DSQ_ID\nnr_overflows++"];
+
+    runtest [shape=diamond, style="filled", fillcolor="#fef3c7", fontsize=9,
+             label="!scx_bpf_task_running(p)?"];
+
+    kick [shape=box, style="filled", fillcolor="#dbeafe",
+          label="kick central_cpu\nSCX_KICK_PREEMPT\n(run dispatch promptly)"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="kthreads jump the queue so ksoftirqd can keep\lthe timer alive — otherwise a greedy task could\lstarve the very thread that runs the preempt timer.\l"];
+
+    arrive -> test;
+    test -> kthread [label="YES", color="#16a34a", style=bold, fontname="Helvetica", fontsize=9];
+    test -> push [label="NO", color="#2563eb", style=bold, fontname="Helvetica", fontsize=9];
+    push -> pushfail;
+    pushfail -> fallback [label="yes", color="#dc2626", style=bold, fontname="Helvetica", fontsize=9];
+    pushfail -> runtest [label="no", color="#2563eb", style=bold, fontname="Helvetica", fontsize=9];
+    fallback -> runtest;
+    runtest -> kick [label="yes", color="#dc2626", style=bold, fontname="Helvetica", fontsize=9];
+
+    kthread -> note [style=invis];
+}

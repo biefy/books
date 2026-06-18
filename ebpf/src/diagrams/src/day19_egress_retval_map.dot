@@ -1,0 +1,48 @@
+digraph egress_retval_map {
+    rankdir=LR;
+    labelloc="t";
+    fontname="Helvetica";
+    fontsize=16;
+    label="cgroup_skb/egress: BPF return value -> bit split -> NET_XMIT result";
+    node [fontname="Monaco", fontsize=11];
+    edge [fontname="Helvetica", fontsize=10];
+
+    subgraph cluster_ret {
+        label="your program returns (0-3)";
+        fontname="Helvetica";
+        style=filled;
+        color="#dbeafe";
+        r0 [label="0  drop",      shape=box, style=filled, fillcolor="#dbeafe"];
+        r1 [label="1  keep",      shape=box, style=filled, fillcolor="#dbeafe"];
+        r2 [label="2  drop + cn", shape=box, style=filled, fillcolor="#dbeafe"];
+        r3 [label="3  keep + cn", shape=box, style=filled, fillcolor="#dbeafe"];
+    }
+
+    split [label="bpf_prog_run_array_cg()  cgroup.c:81-87\nbit0 = keep(1)/drop(0)\nbit1 = cn flag\ndrop -> retval = -EPERM",
+           shape=note, style=filled, fillcolor="#dcfce7"];
+
+    subgraph cluster_xmit {
+        label="kernel converts to NET_XMIT_* (egress branch, cgroup.c:1604-1610)";
+        fontname="Helvetica";
+        style=filled;
+        color="#fef3c7";
+        x_succ [label="NET_XMIT_SUCCESS = 0\ntransmit",       shape=box, style=filled, fillcolor="#fef3c7"];
+        x_cn   [label="NET_XMIT_CN = 2\ntransmit + cn",       shape=box, style=filled, fillcolor="#fef3c7"];
+        x_drop [label="NET_XMIT_DROP = 1\ndrop + cn",          shape=box, style=filled, fillcolor="#fee2e2"];
+        x_err  [label="-EPERM (negative)\ndrop, no cn",        shape=box, style=filled, fillcolor="#fee2e2"];
+    }
+
+    r0 -> split;
+    r1 -> split;
+    r2 -> split;
+    r3 -> split;
+
+    split -> x_err  [label="ret 0  (drop)"];
+    split -> x_succ [label="ret 1  (keep)"];
+    split -> x_drop [label="ret 2  (drop+cn)"];
+    split -> x_cn   [label="ret 3  (keep+cn)"];
+
+    trap [label="namespace trap: the integer LABELS on NET_XMIT_*\nare a different space from your 0-3 return value.\nreturn 2 lands on NET_XMIT_DROP, not NET_XMIT_CN.",
+          shape=note, style=filled, fillcolor="#e9d5ff", fontname="Helvetica"];
+    x_drop -> trap [style=dashed, arrowhead=none];
+}

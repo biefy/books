@@ -1,0 +1,32 @@
+digraph weak_ksym_flow {
+    rankdir=TB;
+    labelloc=t;
+    label="__ksym vs __weak __ksym: what happens when the symbol is missing";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.5; ranksep=0.55;
+
+    start [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=11,
+           label="load .bpf.o on target kernel"];
+
+    q [shape=diamond, style="filled", fillcolor="#dbeafe", fontsize=10,
+       label="does the kernel's BTF\nhave the symbol?"];
+
+    yes [shape=box, style="filled,rounded", fillcolor="#dcfce7", fontsize=10,
+         label="ksym resolves to the kfunc address\n(true for both __ksym and __weak __ksym)\nprogram loads, call fires"];
+
+    hard [shape=box, style="filled,rounded", fillcolor="#fee2e2", fontsize=10,
+          label="plain __ksym\nLOAD FAILS\n(BPF_PROG_LOAD aborts)"];
+
+    soft [shape=box, style="filled,rounded", fillcolor="#dcfce7", fontsize=10,
+          label="__weak __ksym\nresolves to NULL → program loads\nguarded  if (fn)  skips the call"];
+
+    start -> q;
+    q -> yes [label="YES", color="#16a34a", style=bold, fontname="Helvetica", fontsize=10];
+    q -> hard [label="NO", color="#dc2626", style=bold, fontname="Helvetica", fontsize=10];
+    q -> soft [label="NO", color="#16a34a", style=bold, fontname="Helvetica", fontsize=10];
+
+    note [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+          label="the NO branch splits on which declaration you wrote.\l__weak is the 'compile once, run on kernels with\ldifferent kfunc availability' mechanism.\l"];
+    soft -> note [style=invis];
+}

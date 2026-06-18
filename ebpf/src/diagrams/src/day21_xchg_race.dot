@@ -1,0 +1,48 @@
+digraph xchg_race {
+    rankdir=TB;
+    labelloc=t;
+    label="Why xchg, not a plain store: one indivisible instruction = one owner";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.5; ranksep=0.6;
+
+    // TOP: plain store (racey)
+    subgraph cluster_store {
+        label="plain store v->t = ptr  (RACEY — rejected by verifier)";
+        fontname="Helvetica"; fontsize=12; style="rounded"; color="#dc2626";
+
+        s_cpu0 [shape=box, style="filled", fillcolor="#dbeafe",
+                label="CPU0\nread old = T*\nrelease(T)"];
+        s_cpu1 [shape=box, style="filled", fillcolor="#dbeafe",
+                label="CPU1\nread old = T*\nrelease(T)"];
+        s_slot [shape=box, style="filled", fillcolor="#fef3c7",
+                label="shared 8-byte slot\nv->t = T*"];
+        s_out  [shape=box, style="filled", fillcolor="#fee2e2",
+                label="DOUBLE FREE\nrcu_users drops twice\nfor one ref"];
+        s_cpu0 -> s_slot [color="#dc2626"];
+        s_cpu1 -> s_slot [color="#dc2626"];
+        s_cpu0 -> s_out [style=invis];
+        s_cpu1 -> s_out [style=invis];
+        s_slot -> s_out [color="#dc2626", style=bold];
+    }
+
+    // BOTTOM: xchg (atomic)
+    subgraph cluster_xchg {
+        label="bpf_kptr_xchg  (ATOMIC — exactly one owner)";
+        fontname="Helvetica"; fontsize=12; style="rounded"; color="#2563eb";
+
+        x_cpu0 [shape=box, style="filled", fillcolor="#dbeafe",
+                label="CPU0\nxchg returns T*\n-> release(T)"];
+        x_cpu1 [shape=box, style="filled", fillcolor="#dbeafe",
+                label="CPU1\nxchg returns NULL\n-> release(NULL) = no-op"];
+        x_slot [shape=box, style="filled", fillcolor="#fef3c7",
+                label="shared 8-byte slot\nread+write in ONE\nindivisible instruction"];
+        x_out  [shape=box, style="filled", fillcolor="#dcfce7",
+                label="exactly ONE release\nno double-free, no leak"];
+        x_cpu0 -> x_slot [color="#2563eb"];
+        x_cpu1 -> x_slot [color="#2563eb"];
+        x_slot -> x_out [color="#2563eb", style=bold];
+    }
+
+    s_out -> x_cpu0 [style=invis];
+}

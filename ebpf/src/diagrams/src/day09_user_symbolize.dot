@@ -1,0 +1,46 @@
+digraph user_symbolize {
+    rankdir=TB;
+    labelloc=t;
+    label="User symbolization: subtract the load base, then addr2line";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.5; ranksep=0.6;
+
+    // runtime address inside process
+    runtime [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+             label="runtime address A = 0x7f3c12ab8120\n(inside the traced process, randomized by ASLR)"];
+
+    // /proc/PID/maps line
+    subgraph cluster_maps {
+        label="/proc/PID/maps  (find the r-xp segment covering A)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+
+        maps [shape=record, style="filled", fillcolor="#dbeafe",
+              label="{ <b>7f3c12a90000-7f3c12c00000 r-xp  libc.so.6 | 7f3c12c00000-...        r--p  libc.so.6 }"];
+    }
+
+    runtime -> maps:b [label="A falls in this range", color="#7c3aed", style=bold,
+                       fontname="Helvetica", fontsize=9];
+
+    // base
+    base [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+          label="load base B = 0x7f3c12a90000\n(segment start = left column)"];
+    maps:b -> base [color="#d97706", style=bold];
+
+    // subtraction
+    sub [shape=box, style="filled,rounded", fillcolor="#fde68a",
+         label="file offset = A - B = 0x28120"];
+    base -> sub [color="#d97706", style=bold];
+    runtime -> sub [style=invis];
+
+    // addr2line
+    a2l [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+         label="addr2line -f -e libc.so.6 0x28120\n-> __read  at  read.c:26"];
+    sub -> a2l [label="file offset feeds addr2line", color="#16a34a", style=bold,
+                fontname="Helvetica", fontsize=9];
+
+    // non-PIE note
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="Exception: a non-PIE ET_EXEC is linked at a\lfixed base (~0), so skip the subtraction\land pass A straight to addr2line.\l"];
+    a2l -> note [style=invis];
+}

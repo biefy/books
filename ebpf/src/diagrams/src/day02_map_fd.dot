@@ -1,0 +1,38 @@
+digraph map_fd {
+    rankdir=LR;
+    labelloc=t;
+    label="Two doors into one map — userspace copies through a syscall, the BPF program gets a live pointer";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.5; ranksep=1.1;
+
+    // The single shared kernel object
+    mapobj [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+            label="the map object\n(one bucket array\nin kernel memory)"];
+
+    // Userspace door
+    subgraph cluster_user {
+        label="DOOR 1: userspace (by fd)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+        usbox [shape=box, style="filled", fillcolor="#fef3c7",
+               label="userspace dumper\nholds int fd = 5\n(bpf_map__fd)"];
+        attr [shape=box, style="filled", fillcolor="#fde68a",
+              label="union bpf_attr\nmap_fd = 5\nkey, value/next_key"];
+        usbox -> attr [label="fill"];
+    }
+
+    // BPF door
+    subgraph cluster_bpf {
+        label="DOOR 2: BPF program (by address)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+        bpfbox [shape=box, style="filled", fillcolor="#dcfce7",
+                label="BPF program\nbpf_map_lookup_elem(&counts, &pid)"];
+    }
+
+    attr -> mapobj [label="bpf() syscall\n(copies in/out)", color="#d97706", style=bold, fontname="Helvetica", fontsize=9];
+    bpfbox -> mapobj [label="helper -> bare pointer\ninto live map memory", color="#16a34a", style=bold, fontname="Helvetica", fontsize=9];
+
+    note [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+          label="Same name, opposite contract:\luserspace COPIES a value out;\lthe BPF side gets a LIVE POINTER\lit dereferences in place.\l"];
+    mapobj -> note [style=invis];
+}

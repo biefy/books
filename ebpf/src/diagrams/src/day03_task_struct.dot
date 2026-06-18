@@ -1,0 +1,23 @@
+digraph task_struct {
+    rankdir=LR;
+    labelloc=t;
+    label="current → task_struct → real_parent->tgid is the PPID";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    cpu [shape=note, style="filled", fillcolor="#dcfce7", fontsize=10,
+         label="current\l(per-CPU / register:\lthe task running\lon this CPU now)\l"];
+
+    child [shape=record, style="filled", fillcolor="#dbeafe",
+           label="struct task_struct  (the child)|pid    = 24501  (this thread)|tgid   = 24501  (PID 'ps' shows)|real_parent  (forked-by link) ●|parent       (SIGCHLD recipient)|comm   = \"rm\""];
+
+    parent [shape=record, style="filled", fillcolor="#dbeafe",
+           label="struct task_struct  (the parent)|pid    = 24450|tgid   = 24450  &lt;- this is the PPID|real_parent ...|parent ...|comm   = \"bash\""];
+
+    cpu -> child [label="bpf_get_current_task_btf()", color="#7c3aed", style=bold];
+    child -> parent [label="real_parent  (the task that forked me)", color="#dc2626", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+          label="user-visible PID  = task->tgid\luser-visible PPID = task->real_parent->tgid\lThat is why the lab reads real_parent->tgid,\lnot real_parent->pid.\l"];
+    parent -> note [style=invis];
+}

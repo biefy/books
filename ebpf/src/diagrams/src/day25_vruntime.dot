@@ -1,0 +1,44 @@
+digraph vruntime {
+    rankdir=TB;
+    labelloc=t;
+    label="vruntime fairness — and how vtime=0 destroys it";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    ranksep=0.9; nodesep=0.6;
+
+    subgraph cluster_fair {
+        label="WITH vruntime: scheduler always picks the lower-vruntime task";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+
+        a_fair [shape=box, style="filled", fillcolor="#fef3c7",
+                label="Task A (CPU-bound)\nruns a lot -> vruntime climbs fast\nvruntime = 90"];
+        b_fair [shape=box, style="filled", fillcolor="#dbeafe",
+                label="Task B (interactive)\nsleeps on input -> vruntime stays low\nvruntime = 12"];
+        pick_fair [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+                   label="scheduler picks SMALLEST vruntime"];
+
+        a_fair -> pick_fair [label="too high,\nsinks to back", color="#d97706", fontcolor="#d97706"];
+        b_fair -> pick_fair [label="lowest -> RUN B", color="#16a34a", style=bold, fontcolor="#16a34a"];
+    }
+
+    subgraph cluster_broke {
+        label="WITH vtime forced to 0: ordering key is meaningless";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#dc2626";
+
+        a_broke [shape=box, style="filled", fillcolor="#fef3c7",
+                 label="Task A (CPU-bound)\nvtime = 0"];
+        b_broke [shape=box, style="filled", fillcolor="#dbeafe",
+                 label="Task B (interactive)\nvtime = 0"];
+        pick_broke [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+                    label="queue can't tell A from B\n-> A (compute hog) monopolizes,\nB lags, responsiveness collapses"];
+
+        a_broke -> pick_broke [color="#dc2626", style=bold];
+        b_broke -> pick_broke [color="#dc2626", style=bold];
+    }
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="Each tick of real CPU adds to a task's vruntime/vtime.\lEqual keys = no fairness: this is exactly the vtime=0 breakage.\l"];
+    pick_broke -> note [style=invis];
+
+    pick_fair -> a_broke [style=invis];
+}

@@ -1,0 +1,46 @@
+digraph xskmap_slots {
+    rankdir=LR;
+    labelloc=t;
+    label="BPF_MAP_TYPE_XSKMAP: array indexed by RX queue, each slot points to a live AF_XDP socket";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // Incoming packet
+    pkt [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+         label="incoming frame\nrx_queue_index = 2"];
+
+    // The redirect helper
+    redirect [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+              label="XDP program\nbpf_redirect_map(\n  &xsks_map,\n  ctx->rx_queue_index, 0)"];
+
+    // The XSKMAP as a record array
+    subgraph cluster_map {
+        label="xsks_map  (XSKMAP: key=u32 queue index, value=live xdp_sock ref)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        map [shape=record, style="filled", fillcolor="#dbeafe",
+             label="<s0>slot 0|<s1>slot 1|<s2>slot 2|<s3>slot 3|…|<sn>slot N-1"];
+    }
+
+    // The sockets / threads
+    subgraph cluster_socks {
+        label="one AF_XDP socket + thread per RX queue";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+        node [shape=box, style="filled", fillcolor="#dcfce7"];
+        sk0 [label="socket 0\nthread 0\nRX ring"];
+        sk1 [label="socket 1\nthread 1\nRX ring"];
+        sk2 [label="socket 2\nthread 2\nRX ring"];
+        sk3 [label="socket 3\nthread 3\nRX ring"];
+    }
+
+    pkt -> redirect [color="#d97706", style=bold];
+    redirect -> map:s2 [color="#7c3aed", style=bold, label="lookup queue 2"];
+
+    map:s0 -> sk0 [color="#16a34a"];
+    map:s1 -> sk1 [color="#16a34a"];
+    map:s2 -> sk2 [color="#16a34a", style=bold, label="hit -> steer raw frame"];
+    map:s3 -> sk3 [color="#16a34a"];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="Insert fd  -> ARMS the queue for redirect.\lEmpty slot  -> miss, falls through to XDP_PASS.\lDelete the entry BEFORE destroying the socket\l(else the map holds a dangling reference).\l"];
+    sk3 -> note [style=invis];
+}

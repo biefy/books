@@ -1,0 +1,30 @@
+digraph btf_pipeline {
+    rankdir=LR;
+    labelloc=t;
+    label="Where /sys/kernel/btf/vmlinux comes from: a build pipeline";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.4; ranksep=0.6;
+
+    src [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+         label="kernel C source"];
+    cc [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+        label="gcc / clang\n(+DWARF debug info)"];
+    pahole [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="pahole\n(dedup + emit)"];
+    btfsec [shape=box, style="filled", fillcolor="#dbeafe",
+            label=".BTF section\nlinked into vmlinux"];
+    sysfs [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+           label="/sys/kernel/btf/vmlinux\n(exposed at boot)"];
+
+    readers [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+             label="bpftool / libbpf / verifier\n(read the blob)"];
+
+    src -> cc -> pahole -> btfsec -> sysfs;
+    sysfs -> readers [label="read by", color="#2563eb", style=bold,
+                      fontname="Helvetica", fontsize=9];
+
+    gate [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="gated by CONFIG_DEBUG_INFO_BTF\l(modules: CONFIG_DEBUG_INFO_BTF_MODULES).\lNobody hand-writes the blob.\l"];
+    pahole -> gate [style=invis];
+}

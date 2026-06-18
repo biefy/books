@@ -1,0 +1,28 @@
+digraph id_vs_refobjid {
+    rankdir=TB;
+    labelloc=t;
+    label="Two id fields on a reg: nullness-linkage vs acquired reference";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.4; ranksep=0.55;
+
+    marker [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=11,
+            label="mark_ptr_or_null_regs(reg, is_null)\nwalks every reg sharing id; flips type on both branches\nand, if ref_obj_id is set on the NULL branch, releases it"];
+
+    left [shape=record, style="filled", fillcolor="#dbeafe", fontsize=10,
+          label="{ map_value_or_null | id = 2  (set) | ref_obj_id = 0 | from bpf_map_lookup_elem }"];
+
+    right [shape=record, style="filled", fillcolor="#fef3c7", fontsize=10,
+           label="{ mem_or_null  /  socket_or_null | id = 5  (set) | ref_obj_id = 5  (set) | ringbuf_reserve / socket lookup }"];
+
+    leftnote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+              label="check discharges it.\lreturn-on-NULL is free.\la bare  if (!v) return 0;  is enough.\l"];
+
+    rightnote [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+               label="must submit / release the reference,\lor verifier rejects:\l  Unreleased reference id=5\l"];
+
+    marker -> left  [label="map labs", color="#2563eb", style=bold, fontname="Helvetica", fontsize=9];
+    marker -> right [label="ref-bearing", color="#d97706", style=bold, fontname="Helvetica", fontsize=9];
+    left -> leftnote [style=invis];
+    right -> rightnote [style=invis];
+}

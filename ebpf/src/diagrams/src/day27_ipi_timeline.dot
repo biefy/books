@@ -1,0 +1,35 @@
+digraph ipi_timeline {
+    rankdir=TB;
+    labelloc=t;
+    label="A wakeup through central dispatch: every kick is an async IPI";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.4; ranksep=0.55;
+
+    wake [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+          label="task T wakes\nselect_cpu -> central_cpu"];
+
+    enq [shape=box, style="filled", fillcolor="#dbeafe",
+         label="central_enqueue (on central)\npush pid into central_q\nkick central, SCX_KICK_PREEMPT"];
+
+    disp [shape=box, style="filled", fillcolor="#dbeafe",
+          label="central_dispatch (on central)\npop pid from central_q\nresolve via bpf_task_from_pid()\ninsert into SCX_DSQ_LOCAL_ON | 5"];
+
+    cpu5 [shape=box, style="filled", fillcolor="#dbeafe",
+          label="CPU 5 interrupt handler\nresched_curr -> reschedule\nconsume T from local DSQ, run T"];
+
+    buf [shape=record, style="filled", fillcolor="#fef3c7", fontsize=9,
+         label="{ dispatch buffer | slot | slot | slot | (drains as central fans out) }"];
+
+    async [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+           label="Kicks are ASYNC: scx_bpf_kick_cpu only records\lthe request, then bounces the real IPI to\lkick_cpus_irq_workfn() to avoid nesting rq locks.\lThe kick lands a moment later, not inline.\l"];
+
+    wake -> enq [label="PREEMPT (async IPI)", color="#dc2626", style=bold, fontname="Helvetica", fontsize=9];
+    enq -> disp [label="central gets its slot", color="#2563eb", style=bold, fontname="Helvetica", fontsize=9];
+    disp -> cpu5 [label="IDLE (async IPI)", color="#dc2626", style=bold, fontname="Helvetica", fontsize=9];
+
+    disp -> buf [label="slots check", color="#d97706", style=bold, fontname="Helvetica", fontsize=9];
+    buf -> disp [label="empty? kick self PREEMPT, retry", color="#7c3aed", style="bold,dashed", fontname="Helvetica", fontsize=9];
+
+    enq -> async [style=invis];
+}

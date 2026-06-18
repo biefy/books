@@ -1,0 +1,29 @@
+digraph byte_order {
+    rankdir=TB;
+    labelloc=t;
+    label="Network byte order: 0x0800 on x86 vs on the wire, and why bpf_htons swaps it";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    value [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+        label="ETH_P_IP = 0x0800\n(a 16-bit value)"];
+
+    host [shape=record, style="filled", fillcolor="#dbeafe",
+        label="{HOST MEMORY (x86, little-endian)|{ byte 0 | byte 1 }|{ 0x00 | 0x08 }}"];
+
+    wire [shape=record, style="filled", fillcolor="#fef3c7",
+        label="{WIRE ORDER (big-endian, MSB first)|{ byte 0 | byte 1 }|{ 0x08 | 0x00 }}"];
+
+    value -> host [label="compiler stores low byte first", fontname="Helvetica", fontsize=9];
+
+    host -> wire [label="bpf_htons()  swap bytes", dir=both,
+        color="#7c3aed", style=bold, fontname="Helvetica", fontsize=10];
+
+    mismatch [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+        label="Compare raw 16-bit field vs raw constant:\l00 08  vs  08 00  -> never matches!\lProgram silently thinks no packet is IP.\l"];
+    host -> mismatch [style=invis];
+
+    onebyte [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+        label="ip->protocol is 1 byte -> no swap needed\l(a single byte has no byte order)\l"];
+    wire -> onebyte [style=invis];
+}

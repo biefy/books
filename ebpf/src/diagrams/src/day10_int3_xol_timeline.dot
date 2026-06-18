@@ -1,0 +1,33 @@
+digraph int3_xol_timeline {
+    rankdir=LR;
+    labelloc=t;
+    label="Entry uprobe hit: int3 trap, BPF runs, displaced instruction replayed out-of-line, resume";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10, shape=box, style="filled,rounded"];
+    nodesep=0.4; ranksep=0.6;
+
+    t1 [fillcolor="#fef3c7",
+        label="thread executes\n0xCC byte\n(int3, still patched)"];
+    t2 [fillcolor="#fee2e2",
+        label="CPU traps:\nexc_int3 -> kernel\nbreakpoint exception"];
+    t3 [fillcolor="#dbeafe",
+        label="kernel builds pt_regs\nsnapshot of USER regs\n(rdi..r9, rax)"];
+    t4 [fillcolor="#e9d5ff",
+        label="handle_swbp ->\nhandler_chain:\nyour BPF prog runs"];
+    t5 [fillcolor="#dcfce7",
+        label="copy saved ORIGINAL insn\ninto xol_area scratch slot\narch_uprobe.ixol[]"];
+    t6 [fillcolor="#dcfce7",
+        label="single-step that ONE\ninstruction out-of-line"];
+    t7 [fillcolor="#dbeafe",
+        label="set IP = original_addr + len\nresume userspace"];
+
+    t1 -> t2 -> t3 -> t4 -> t5 -> t6 -> t7;
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+        label="The 0xCC byte is NEVER removed during tracing.\lEach thread single-steps its OWN copy in its OWN xol slot,\lso no thread ever sees a half-patched instruction.\lNext hit re-traps on the same int3.\l"];
+    t6 -> note [style=dashed, color="#dc2626", constraint=false];
+
+    cost [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+        label="Cost per hit:\ltrap into kernel (~50 ns)\l+ BPF prog time\l+ one single-step.\l"];
+    t4 -> cost [style=invis];
+}

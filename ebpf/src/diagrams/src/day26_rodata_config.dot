@@ -1,0 +1,29 @@
+digraph rodata_config {
+    rankdir=LR;
+    labelloc=t;
+    label="const volatile global: settable before load, frozen read-only after";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    open [shape=box, style="filled", fillcolor="#dbeafe",
+          label="skeleton open\l(.rodata map created,\l writable)\l"];
+
+    write [shape=box, style="filled", fillcolor="#fef3c7",
+           label="userspace writes\lskel-\>rodata-\>\lpriority_cgroup_id\l= read_cgroup_id(...)\l"];
+
+    load [shape=box, style="filled", fillcolor="#e9d5ff",
+          label="load / freeze\l(.rodata map becomes\l read-only)\l"];
+
+    fold [shape=box, style="filled", fillcolor="#dcfce7",
+          label="verifier constant-folds\lif (priority_cgroup_id)\l"];
+
+    attach [shape=box, style="filled", fillcolor="#dbeafe",
+            label="attach\l(scheduler runs)\l"];
+
+    open -> write -> load -> fold -> attach [color="#7c3aed", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="id == 0 ⇒ branch is provably dead\l⇒ gated feature ELIMINATED as dead code\l(an unset or wrong id silently compiles it out)\l"];
+
+    fold -> note [style=invis];
+}

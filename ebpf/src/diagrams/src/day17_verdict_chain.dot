@@ -1,0 +1,57 @@
+digraph verdict_chain {
+    rankdir=TB;
+    labelloc=t;
+    label="tcx-ingress chain: TCX_NEXT walks down, any terminal verdict stops";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.6; ranksep=0.55;
+
+    entry [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+           label="packet hits tcx-ingress on eth0"];
+
+    // the vertical program chain (blue = structs/programs)
+    p1 [shape=box, style="filled", fillcolor="#dbeafe",
+        label="program #1  (counter)"];
+    p2 [shape=box, style="filled", fillcolor="#dbeafe",
+        label="program #2  (firewall)"];
+    p3 [shape=box, style="filled", fillcolor="#dbeafe",
+        label="program #3  (log)"];
+
+    // terminal verdicts (shared, on the right)
+    accept [shape=box, style="filled", fillcolor="#dcfce7",
+            label="TCX_PASS / TC_ACT_OK (0)\naccept, stop chain"];
+    drop [shape=box, style="filled", fillcolor="#fee2e2",
+          label="TCX_DROP / TC_ACT_SHOT (2)\ndrop, stop chain"];
+    redir [shape=box, style="filled", fillcolor="#e9d5ff",
+           label="TCX_REDIRECT (7)\nredirect, stop chain"];
+
+    // classic tc fall-through (amber = data/landing)
+    tcrun [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+           label="classic tc_run() filters\n(TCX_NEXT past the last prog\n= TC_ACT_UNSPEC -1: nobody decided)"];
+
+    // main chain: advances only on TCX_NEXT
+    entry -> p1 [arrowhead=normal];
+    p1 -> p2 [label="TCX_NEXT (-1)\ncontinue down", color="#2563eb", fontsize=9, fontname="Helvetica"];
+    p2 -> p3 [label="TCX_NEXT (-1)\ncontinue down", color="#2563eb", fontsize=9, fontname="Helvetica"];
+    p3 -> tcrun [label="TCX_NEXT (-1 = TC_ACT_UNSPEC)\nfall through to legacy tc", color="#2563eb", fontsize=9, fontname="Helvetica"];
+
+    // side-exits: any terminal verdict short-circuits the chain
+    p1 -> accept [constraint=false, color="#16a34a", style=dashed, fontsize=8];
+    p1 -> drop   [constraint=false, color="#dc2626", style=dashed, fontsize=8];
+    p1 -> redir  [constraint=false, color="#7c3aed", style=dashed, fontsize=8];
+    p2 -> accept [constraint=false, color="#16a34a", style=dashed, fontsize=8];
+    p2 -> drop   [constraint=false, color="#dc2626", style=dashed, fontsize=8];
+    p2 -> redir  [constraint=false, color="#7c3aed", style=dashed, fontsize=8];
+    p3 -> accept [constraint=false, color="#16a34a", style=dashed, fontsize=8];
+    p3 -> drop   [constraint=false, color="#dc2626", style=dashed, fontsize=8];
+    p3 -> redir  [constraint=false, color="#7c3aed", style=dashed, fontsize=8];
+
+    // keep verdict boxes stacked on the right
+    { rank=same; p1; accept; }
+    { rank=same; p2; drop; }
+    { rank=same; p3; redir; }
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="Dashed = terminal verdict: !=TCX_NEXT, so tcx_run() breaks here.\lSolid blue = TCX_NEXT, the only code that advances the chain.\l"];
+    tcrun -> note [style=invis];
+}

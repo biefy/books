@@ -1,0 +1,24 @@
+digraph dsq_id_bits {
+    rankdir=TB;
+    labelloc=t;
+    label="A DSQ id is bit-tagged: OR a CPU number into a built-in id";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.4; ranksep=0.55;
+
+    bar [shape=record, style="filled", fillcolor="#dbeafe", fontsize=10,
+         label="{ bit 63\nBUILTIN = 1 | bit 62\nLOCAL_ON = 1 | bits 61..0\nCPU number = 5 }"];
+
+    expr [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=12,
+          label="SCX_DSQ_LOCAL_ON | 5   ->  CPU 5's local DSQ"];
+
+    rows [shape=record, style="filled", fillcolor="#fef3c7", fontsize=10,
+          label="{ id | high bits | means } | { FALLBACK_DSQ_ID = 0 | none (plain number) | user-created DSQ } | { SCX_DSQ_LOCAL | BUILTIN | local DSQ of THIS CPU } | { SCX_DSQ_LOCAL_ON \| cpu | BUILTIN + LOCAL_ON + cpu | local DSQ of a NAMED CPU }"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="This one line makes central dispatch possible:\lscx_bpf_dsq_insert(p, SCX_DSQ_LOCAL_ON | cpu, ...)\linserts straight into a remote CPU's runqueue.\l"];
+
+    bar -> expr [label="decode", color="#2563eb", style=bold, fontname="Helvetica", fontsize=9];
+    expr -> rows [label="vs other ids", color="#7c3aed", style=bold, fontname="Helvetica", fontsize=9];
+    rows -> note [style=invis];
+}

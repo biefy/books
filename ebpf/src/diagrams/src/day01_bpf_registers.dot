@@ -1,0 +1,48 @@
+digraph bpf_registers {
+    rankdir=TB;
+    labelloc=t;
+    label="The BPF virtual CPU: 11 registers R0-R10";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.3; ranksep=0.35;
+
+    // The register column
+    subgraph cluster_regs {
+        label="register file (each 64-bit)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+
+        r0  [shape=box, style="filled", fillcolor="#e9d5ff",
+             label="R0   return value / helper-return value"];
+        r1  [shape=box, style="filled", fillcolor="#dbeafe",
+             label="R1   arg/scratch  (= ctx pointer on entry)"];
+        r2  [shape=box, style="filled", fillcolor="#dbeafe",
+             label="R2   arg/scratch"];
+        r3  [shape=box, style="filled", fillcolor="#dbeafe",
+             label="R3   arg/scratch"];
+        r4  [shape=box, style="filled", fillcolor="#dbeafe",
+             label="R4   arg/scratch"];
+        r5  [shape=box, style="filled", fillcolor="#dbeafe",
+             label="R5   arg/scratch"];
+        r6  [shape=box, style="filled", fillcolor="#dcfce7",
+             label="R6   callee-saved"];
+        r7  [shape=box, style="filled", fillcolor="#dcfce7",
+             label="R7   callee-saved"];
+        r8  [shape=box, style="filled", fillcolor="#dcfce7",
+             label="R8   callee-saved"];
+        r9  [shape=box, style="filled", fillcolor="#dcfce7",
+             label="R9   callee-saved"];
+        r10 [shape=box, style="filled", fillcolor="#fef3c7",
+             label="R10  read-only frame pointer"];
+
+        r0 -> r1 -> r2 -> r3 -> r4 -> r5 -> r6 -> r7 -> r8 -> r9 -> r10 [style=invis];
+    }
+
+    stack [shape=box, style="filled,rounded", fillcolor="#fde68a",
+           label="512-byte stack\n(MAX_BPF_STACK = 512)"];
+    r10 -> stack [label="points to", color="#d97706", style=bold, fontname="Helvetica", fontsize=9];
+
+    // Break 1 callout from R0
+    break1 [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+            label="Break 1 verifier line:\l  R0=mem_or_null(id=2,sz=20)\lR0 holds bpf_ringbuf_reserve's\lreturn pointer, tagged maybe-NULL.\lDeref before the null check -> rejected.\l"];
+    r0 -> break1 [label="why R0?", color="#dc2626", style=bold, fontname="Helvetica", fontsize=9];
+}

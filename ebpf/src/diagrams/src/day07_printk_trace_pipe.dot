@@ -1,0 +1,45 @@
+digraph printk_trace_pipe {
+    rankdir=LR;
+    labelloc=t;
+    label="bpf_printk: every writer shares one global ftrace buffer";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.4; ranksep=0.9;
+
+    // Three BPF programs
+    subgraph cluster_progs {
+        label="BPF programs (any type)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        p1 [shape=box, style="filled,rounded", fillcolor="#dbeafe", label="via_fentry\nbpf_printk(\"f=%p n=%zu\")"];
+        p2 [shape=box, style="filled,rounded", fillcolor="#dbeafe", label="via_kprobe\nbpf_printk(\"f=%p n=%zu\")"];
+        p3 [shape=box, style="filled,rounded", fillcolor="#dbeafe", label="via_tp\nbpf_printk(\"fd=%d\")"];
+    }
+
+    helper [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="<=3 args: bpf_trace_printk (FN 6)\n4-12 args: bpf_trace_vprintk (FN 177)"];
+
+    helpernote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+                label="dispatcher ___bpf_pick_printk:\l<=3 args -> bpf_trace_printk (FN 6, max 3)\l4-12 args -> bpf_trace_vprintk (FN 177)\lup to MAX_BPRINTF_VARARGS = 12\l"];
+
+    buf [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+         label="shared ftrace ring buffer"];
+
+    bufnote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+             label="GLOBAL: every bpf_printk on the\lsystem writes here, interleaved.\lblocking, drain-on-read.\l"];
+
+    pipe [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+          label="/sys/kernel/tracing/trace_pipe"];
+
+    cat [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+         label="cat trace_pipe\n(userspace)"];
+
+    p1 -> helper;
+    p2 -> helper;
+    p3 -> helper;
+    helper -> buf [color="#d97706", style=bold];
+    buf -> pipe [color="#7c3aed", style=bold];
+    pipe -> cat [label="drain on read", color="#16a34a", style=bold, fontname="Helvetica", fontsize=9];
+
+    helper -> helpernote [style=invis];
+    buf -> bufnote [style=invis];
+}
