@@ -1,0 +1,27 @@
+digraph ethhdr_ruler {
+    rankdir=TB;
+    labelloc=t;
+    label="struct ethhdr — the 14 bytes at the front of every frame";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    ruler [shape=record, style="filled", fillcolor="#dbeafe",
+           label="{ <d> h_dest[6]\nbytes 0-5\nDESTINATION MAC | <s> h_source[6]\nbytes 6-11\nSOURCE MAC | <t> h_proto[2]\nbytes 12-13\nEtherType / length } "];
+
+    before [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+            label="skb->data\n(on RX, before skb_pull)\npoints at byte 0"];
+
+    after [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+           label="skb->data\n(after eth_skb_pull_mac,\nskb_pull ETH_HLEN=14)\npoints at byte 14 = L3 payload"];
+
+    payload [shape=box, style="filled", fillcolor="#fef3c7",
+             label="L3 payload (byte 14 onward)\nIP header, IPv6 header, ..."];
+
+    before -> ruler:d [color="#d97706", style=bold, label="byte 0"];
+    after -> payload [color="#16a34a", style=bold, label="byte 14"];
+
+    fork [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+          label="h_proto fork (eth_proto_is_802_3):\l  value >= 0x0600 (1536)  -> EtherType\l     IP 0x0800 / IPv6 0x86DD / VLAN 0x8100\l  value <= 1500 (ETH_DATA_LEN) -> length\l     old 802.3 frame, fall back to ETH_P_802_3/802_2\l"];
+    ruler:t -> fork [color="#7c3aed", style=dashed, constraint=false];
+    ruler -> payload [color="#16a34a", style=dashed, label="L3"];
+}

@@ -1,0 +1,46 @@
+digraph netlink_route {
+    rankdir=TB;
+    labelloc=t;
+    label="ip route is a netlink client: RTM_NEWROUTE -> inet_rtm_newroute -> fib_table_insert grows the LC-trie";
+    fontname="Helvetica"; fontsize=13;
+    node [fontname="Monaco", fontsize=10];
+
+    // userspace
+    subgraph cluster_user {
+        label="userspace";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        cmd [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+             label="ip route add 10.99.0.0/16 dev lo"];
+        sock [shape=record, style="filled", fillcolor="#e9d5ff",
+              label="AF_NETLINK socket (NETLINK_ROUTE)|RTM_NEWROUTE|{ rtmsg | RTA_DST | RTA_GATEWAY | RTA_OIF | RTA_TABLE }"];
+        cmd -> sock [color="#7c3aed"];
+
+        show [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+              label="ip route show\n(RTM_GETROUTE dump)"];
+    }
+
+    // kernel
+    subgraph cluster_kernel {
+        label="kernel  (net/ipv4/fib_frontend.c)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        newroute [shape=box, style="filled", fillcolor="#dbeafe",
+                  label="inet_rtm_newroute\n(parse attributes)"];
+        insert [shape=box, style="filled", fillcolor="#dbeafe",
+                label="fib_table_insert"];
+        dump [shape=box, style="filled", fillcolor="#dbeafe",
+              label="inet_dump_fib\n(backs ip route show)"];
+        trie [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+              label="LC-trie\n(new leaf: 10.99.0.0/16 -> lo)"];
+
+        newroute -> insert [color="#16a34a"];
+        insert -> trie [style=bold, color="#16a34a", label="grows trie"];
+        trie -> dump [style=dashed, color="#94a3b8"];
+    }
+
+    sock -> newroute [style=bold, color="#7c3aed", label="kernel boundary\n(RTM_NEWROUTE)"];
+    dump -> show [style=dashed, color="#7c3aed", label="RTM_GETROUTE\nreply"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="Later: ping 10.99.0.1 -> fib_table_lookup walks the\lsame trie and hits the freshly-inserted leaf.\lThe local table (255) fills itself via the same path:\lfib_magic(RTM_NEWROUTE, RTN_LOCAL, ...).\l"];
+    trie -> note [style=invis];
+}

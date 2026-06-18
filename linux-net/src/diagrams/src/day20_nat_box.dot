@@ -1,0 +1,48 @@
+digraph nat_box {
+    rankdir=LR;
+    labelloc=t;
+    label="NAT box: DNAT@PREROUTING and SNAT@POSTROUTING, paired by one conntrack row";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // LAN side
+    lan [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+         label="LAN host\n192.168.1.10"];
+
+    // WAN side
+    wan [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+         label="WAN peer\n1.2.3.4"];
+
+    // The NAT box internals
+    subgraph cluster_box {
+        label="NAT gateway (WAN_IP)";
+        fontname="Helvetica"; fontsize=12; style="rounded"; color="#2563eb";
+
+        pre [shape=box, style="filled", fillcolor="#dbeafe",
+             label="PREROUTING\nDNAT (NF_IP_PRI_NAT_DST=-100)\nconntrack -200 (first sight)"];
+        route [shape=diamond, style="filled", fillcolor="#fef3c7",
+               label="routing\ndecision"];
+        post [shape=box, style="filled", fillcolor="#dbeafe",
+              label="POSTROUTING\nSNAT/MASQUERADE\n(NF_IP_PRI_NAT_SRC=100)"];
+
+        ct [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+            label="conntrack table row (state NEW on first sight)\lorig:  192.168.1.10 -> 1.2.3.4\lreply: 1.2.3.4 -> WAN_IP  (inverse rewrite)\l"];
+
+        pre -> route [color="#94a3b8"];
+        route -> post [color="#94a3b8"];
+        pre -> ct [style=dashed, color="#16a34a", label="writes row", constraint=false];
+        ct -> post [style=dashed, color="#16a34a", label="drives SNAT", constraint=false];
+    }
+
+    // Outbound path (LAN -> WAN), src rewritten
+    lan -> pre [style=bold, color="#7c3aed",
+                label="OUT: src=192.168.1.10\ndst=1.2.3.4"];
+    post -> wan [style=bold, color="#7c3aed",
+                 label="OUT: src=WAN_IP\n(SNAT applied)"];
+
+    // Inbound reply (WAN -> LAN), dst rewritten back
+    wan -> pre [style=bold, color="#dc2626", constraint=false,
+                label="REPLY: dst=WAN_IP\nsrc=1.2.3.4"];
+    post -> lan [style=bold, color="#dc2626", constraint=false,
+                 label="REPLY: dst=192.168.1.10\n(inverse rewrite)"];
+}

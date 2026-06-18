@@ -1,0 +1,36 @@
+digraph drr {
+    rankdir=LR;
+    labelloc=t;
+    label="Deficit Round Robin: new_flows served first, deficit charged in bytes";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // new_flows list
+    subgraph cluster_new {
+        label="new_flows (just became active)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+        node [shape=box, style="filled", fillcolor="#dcfce7"];
+        intr [label="interactive flow\n1-2 pkts (DNS/SYN)\ndeficit = quantum"];
+    }
+
+    // old_flows list
+    subgraph cluster_old {
+        label="old_flows (exhausted deficit, round-robin)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", fillcolor="#dbeafe"];
+        bulk [label="bulk flow\ndeficit ticks down:\nminus pkt_len each dequeue\non reaching 0: plus quantum,\nstay in old_flows"];
+    }
+
+    deq [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+         label="dequeue point\n(one packet out)"];
+
+    intr -> deq [label="served immediately\n(jumps ahead)", color="#16a34a", style=bold];
+    bulk -> deq [label="round-robin\nwhile deficit > 0", color="#2563eb"];
+
+    // demotion edge
+    intr -> bulk [xlabel="  demote", color="#d97706", style=dashed, constraint=false];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="quantum ~= MTU bytes/round\lcharge each pkt's length, not 1/turn\la flow's deficit <= 0 => list_move_tail to old_flows\l=> equal bandwidth regardless of pkt size\l"];
+    deq -> note [style=invis];
+}

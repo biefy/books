@@ -1,0 +1,52 @@
+digraph udp_hashtables {
+    rankdir=TB;
+    labelloc=t;
+    label="__udp4_lib_lookup: most-specific-first walk through struct udp_table";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The three hash arrays, most-general to most-specific
+    subgraph cluster_tables {
+        label="struct udp_table — three bucket arrays";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=record, style="filled", fillcolor="#dbeafe"];
+        hash  [label="hash  (port only)\nlegacy primary | bkt | bkt | bkt"];
+        hash2 [label="hash2 = hslot2 (port + addr)\nudp_hslot_main + hash4_cnt | bkt | bkt | bkt"];
+        hash4 [label="hash4 (full 4-tuple)\nconnected sockets | bkt | bkt | bkt"];
+        hash -> hash2 -> hash4 [style=invis];
+    }
+
+    entry [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+           label="datagram (saddr, sport, daddr, dport)\nhash2 = ipv4_portaddr_hash(daddr, hnum)"];
+
+    s1 [shape=box, style="filled", fillcolor="#dcfce7",
+        label="1. udp_has_hash4(hslot2)?\nudp4_lib_lookup4 — full 4-tuple"];
+    s2 [shape=box, style="filled", fillcolor="#dcfce7",
+        label="2. udp4_lib_lookup2 on hslot2\naccept if sk_state==TCP_ESTABLISHED"];
+    s3 [shape=box, style="filled", fillcolor="#dcfce7",
+        label="3. wildcard INADDR_ANY hslot2\nunconnected 0.0.0.0:port binds"];
+    s4 [shape=box, style="filled", fillcolor="#dcfce7",
+        label="4. primary port-only hash\nnarrow rehash-race fallback"];
+
+    found [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+           label="return struct sock\n=> udp_queue_rcv_skb"];
+    miss [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+          label="MISS: NoPorts++\nicmp_send(PORT_UNREACH)"];
+
+    entry -> s1 [label="start"];
+    s1 -> s2 [label="no hit", color="#94a3b8"];
+    s2 -> s3 [label="no hit", color="#94a3b8"];
+    s3 -> s4 [label="no hit", color="#94a3b8"];
+
+    s1 -> found [color="#16a34a", style=bold, label="hit"];
+    s2 -> found [color="#16a34a", style=bold, label="hit"];
+    s3 -> found [color="#16a34a", style=bold, label="hit"];
+    s4 -> found [color="#16a34a", style=bold, label="hit"];
+    s4 -> miss [color="#dc2626", style=bold, label="no socket"];
+
+    // connect steps to which array they read
+    s1 -> hash4 [style=dotted, color="#2563eb", constraint=false, label="reads"];
+    s2 -> hash2 [style=dotted, color="#2563eb", constraint=false, label="reads"];
+    s3 -> hash2 [style=dotted, color="#2563eb", constraint=false];
+    s4 -> hash  [style=dotted, color="#2563eb", constraint=false, label="reads"];
+}

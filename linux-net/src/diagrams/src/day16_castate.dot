@@ -1,0 +1,30 @@
+digraph castate {
+    rankdir=LR;
+    labelloc=t;
+    label="The ca_state machine (loss/recovery) - orthogonal to the connection states";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    node [shape=box, style="filled", fillcolor="#dbeafe"];
+
+    open [label="TCP_CA_Open (0)\nnormal: no loss,\nno ECN marks", fillcolor="#dcfce7"];
+
+    disorder [label="TCP_CA_Disorder (1)\na few dup-ACKs / SACKs\nsomething looks off"];
+    cwr      [label="TCP_CA_CWR (2)\ngently reducing cwnd\n(e.g. ECN mark)", fillcolor="#fef3c7"];
+    recovery [label="TCP_CA_Recovery (3)\nfast retransmit\n(loss inferred from\ndup-ACKs)", fillcolor="#fef3c7"];
+    loss     [label="TCP_CA_Loss (4)\nRTO fired:\nfull retransmit", fillcolor="#fee2e2"];
+
+    open -> disorder [label="dup-ACKs\nset_state()"];
+    open -> cwr      [label="ECN mark\nset_state()"];
+    open -> recovery [label="fast retransmit\nset_state()+ssthresh()", color="#dc2626"];
+    open -> loss     [label="RTO fired\nset_state()+ssthresh()", color="#dc2626"];
+
+    disorder -> open [style=dashed, label="back to normal"];
+    cwr      -> open [style=dashed, label="CWR complete"];
+    recovery -> open [style=dashed, label="recovery done"];
+    loss     -> open [style=dashed, label="recovered"];
+
+    note [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+          label="ORTHOGONAL to the Day-15 connection state machine.\lA socket stays ESTABLISHED for hours while ca_state\lcycles through Open / Recovery / Loss. ssthresh() is\lcalled on the way INTO Recovery/Loss - that is when\lcwnd is cut.\l"];
+    loss -> note [style=invis];
+}

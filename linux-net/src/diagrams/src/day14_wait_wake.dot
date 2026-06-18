@@ -1,0 +1,45 @@
+digraph wait_wake {
+    rankdir=TB;
+    labelloc=t;
+    label="The recvmsg wait/wake rendezvous: sk_data_ready crosses the lanes";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // Softirq producer lane
+    subgraph cluster_softirq {
+        label="softirq lane (producer)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#7c3aed";
+        rcv  [shape=box, style="filled", fillcolor="#e9d5ff", label="udp_rcv(skb)"];
+        enq  [shape=box, style="filled", fillcolor="#dbeafe",
+              label="__udp_enqueue_schedule_skb\ncharge truesize, append to\nsk_receive_queue"];
+        ready [shape=box, style="filled", fillcolor="#dcfce7",
+               label="sk->sk_data_ready(sk)\n= sock_def_readable:\nwake_up_interruptible_sync_poll(\n  &wq->wait, EPOLLIN ...)"];
+        rcv -> enq -> ready [color="#7c3aed"];
+    }
+
+    // Syscall consumer lane
+    subgraph cluster_syscall {
+        label="syscall lane (consumer)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        recv [shape=box, style="filled", fillcolor="#dbeafe", label="recvmsg(fd, ...)"];
+        dq   [shape=box, style="filled", fillcolor="#dbeafe",
+              label="__skb_recv_udp:\npeek sk_receive_queue"];
+        empty [shape=diamond, style="filled", fillcolor="#fef3c7", label="queue empty\n& blocking?"];
+        park [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+              label="__skb_wait_for_more_packets:\npark task on sk->sk_wq,\nyield CPU (sleep)"];
+        ret  [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+              label="dequeue 1 datagram,\ncopy to user, return"];
+        recv -> dq -> empty;
+        empty -> park [label="yes"];
+        empty -> ret [label="no"];
+        park -> ret [style=dashed, label="woken"];
+    }
+
+    // The cross-lane wake
+    ready -> park [color="#dc2626", style=bold, constraint=false,
+                   label="EPOLLIN wake\n(only reaches an\nalready-parked task)"];
+
+    note [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+          label="Rendezvous only works if the consumer is\lparked BEFORE the producer wakes it.\lA not-yet-blocked recvmsg misses the wake.\l"];
+    park -> note [style=invis];
+}

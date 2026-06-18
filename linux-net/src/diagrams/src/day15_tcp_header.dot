@@ -1,0 +1,43 @@
+digraph tcp_header {
+    rankdir=TB;
+    labelloc=t;
+    label="struct tcphdr — the 20-byte TCP header on the wire";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The header itself: five 32-bit words stacked top -> bottom.
+    header [shape=record, style="filled", fillcolor="#dbeafe", fontsize=10,
+            label="{ { source port (16) | dest port (16) } | { sequence number  seq (32) } | { acknowledgment number  ack_seq (32) } | { data offset (4) | <flags> flags byte | window (16) } | { checksum (16) | urgent pointer (16) } }"];
+
+    // The flags byte expanded into individual bits (wire order, MSB->LSB).
+    subgraph cluster_flags {
+        label="the flags byte, bit by bit  (th->syn, th->ack, th->fin, th->rst, ...)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", fontsize=10, width=0.55, height=0.45];
+
+        bAE  [fillcolor="#f1f5f9", label="AE"];
+        bCWR [fillcolor="#f1f5f9", label="CWR"];
+        bECE [fillcolor="#f1f5f9", label="ECE"];
+        bURG [fillcolor="#f1f5f9", label="URG"];
+        bACK [fillcolor="#e9d5ff", label="ACK"];
+        bPSH [fillcolor="#f1f5f9", label="PSH"];
+        bRST [fillcolor="#fee2e2", label="RST"];
+        bSYN [fillcolor="#e9d5ff", label="SYN"];
+        bFIN [fillcolor="#e9d5ff", label="FIN"];
+
+        bAE -> bCWR -> bECE -> bURG -> bACK -> bPSH -> bRST -> bSYN -> bFIN
+            [style=invis];
+        { rank=same; bAE; bCWR; bECE; bURG; bACK; bPSH; bRST; bSYN; bFIN; }
+    }
+
+    header:flags -> bACK [color="#7c3aed", style=bold, label="expand"];
+
+    legend [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+            label="Highlighted bits drive the state machine:\lSYN = open / sync sequence numbers\lACK = acknowledges received data\lFIN = graceful half-close\lRST = abort now (red)\lThey are INDEPENDENT bits, not packet types.\l"];
+
+    inset [shape=box, style="filled,rounded", fillcolor="#fef3c7", fontsize=10,
+           label="SYN-ACK = ONE segment\nwith SYN bit AND ACK bit set\n(not two packets)"];
+
+    bFIN -> legend [style=invis];
+    legend -> inset [style=invis];
+}

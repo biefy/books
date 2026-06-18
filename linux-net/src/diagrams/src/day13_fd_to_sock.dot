@@ -1,0 +1,48 @@
+digraph fd_to_sock {
+    rankdir=LR;
+    labelloc=t;
+    label="fd → struct file → struct socket → struct sock : the descent from FD to protocol state";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.5; ranksep=1.0;
+
+    fd [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+        label="fd (int)\ne.g. 5\nindexes fd table"];
+
+    file [shape=record, style="filled", fillcolor="#dbeafe",
+          label="{struct file|f_op = &socket_file_ops|private_data → socket}"];
+
+    sock [shape=record, style="filled", fillcolor="#dbeafe",
+          label="{struct socket|sk → struct sock|ops (proto_ops)}"];
+
+    sk [shape=record, style="filled", fillcolor="#dbeafe",
+        label="{struct sock|sk_prot (proto)|recv/send queues, lock}"];
+
+    fd -> file [label="fd table"];
+    file -> sock [label="private_data"];
+    sock -> sk [label="->sk"];
+    sk -> proto [label="->sk_prot"];
+
+    proto [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+           label="proto vtable\ntcp_prot / udp_prot\n->recvmsg / ->sendmsg"];
+
+    // layer annotations
+    vfs [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+         label="VFS / file layer\l(first two hops)\l"];
+    player [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+            label="protocol layer\l(last two hops)\l"];
+    vfs -> file [style=invis];
+    player -> sk [style=invis];
+
+    // entry points
+    rd [shape=box, style="filled,rounded", fillcolor="#fee2e2", fontsize=9,
+        label="read() / poll()\nenter here"];
+    rd -> file [color="#dc2626", style=bold];
+
+    snd [shape=box, style="filled,rounded", fillcolor="#fee2e2", fontsize=9,
+         label="tcp_sendmsg()\nenters here"];
+    snd -> sk [color="#dc2626", style=bold];
+
+    { rank=same; vfs; rd; }
+    { rank=same; player; snd; }
+}

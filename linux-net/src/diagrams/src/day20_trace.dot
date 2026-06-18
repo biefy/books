@@ -1,0 +1,31 @@
+digraph trace {
+    rankdir=LR;
+    labelloc=t;
+    label="A forwarded SYN: the four NF_HOOK firing sites, with priority-ordered hooks at each stop";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.5;
+
+    pre [shape=box, style="filled", fillcolor="#dbeafe",
+         label="1. PREROUTING\n(ip_rcv)\nconntrack -200: NEW\nDNAT -100: dst -> 10.0.0.5:8080\nfilter 0"];
+    route [shape=diamond, style="filled", fillcolor="#fef3c7",
+           label="2. route\nlookup\n-> eth1"];
+    fwd [shape=box, style="filled", fillcolor="#dbeafe",
+         label="3. FORWARD\n(ip_forward)\nfilter 0: ACCEPT"];
+    post [shape=box, style="filled", fillcolor="#dbeafe",
+          label="4. POSTROUTING\n(ip_output)\nSNAT 100: src -> WAN_IP\n-> leaves on eth1"];
+
+    pre -> route [color="#94a3b8"];
+    route -> fwd [color="#94a3b8"];
+    fwd -> post [color="#94a3b8"];
+
+    ct [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+        label="conntrack row written at step 1\lmirrors the translation onto step 4\lso the SNAT inverts the DNAT\l"];
+
+    pre -> ct [style=dashed, color="#16a34a", label="writes row", constraint=false];
+    ct -> post [style=dashed, color="#16a34a", label="drives SNAT", constraint=false];
+
+    // the mirror arc
+    pre -> post [style=dashed, color="#dc2626", constraint=false,
+                 label="conntrack mirrors\nDNAT <-> SNAT"];
+}

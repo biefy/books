@@ -1,0 +1,37 @@
+digraph checksum_partial {
+    rankdir=TB;
+    labelloc=t;
+    label="CHECKSUM_PARTIAL: the stack writes the pseudo-header sum; the split finishes each segment";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The single TX skb
+    skb [shape=record, style="filled", fillcolor="#dbeafe",
+         label="{one TX skb|ip_summed = CHECKSUM_PARTIAL|TCP check = pseudo-header sum only\n(payload sum NOT computed yet)}"];
+
+    promise [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+             label="the PARTIAL promise:\l\"checksum is half-done; whoever splits\lthis skb finishes each segment's sum\lover its own payload.\"\l"];
+    skb -> promise [style=invis];
+
+    fork [shape=diamond, style="filled", fillcolor="#e9d5ff",
+          label="who finishes\nthe split?"];
+    skb -> fork [style=bold];
+
+    // TSO branch
+    tso [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+         label="NIC (TSO)\nhardware finishes each\nsegment's checksum"];
+
+    // GSO branch
+    gso [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+         label="software (GSO)\n__skb_gso_segment → skb_cow_head\nre-inits ->check per segment"];
+
+    fork -> tso [label="hardware", color="#2563eb", style=bold];
+    fork -> gso [label="software", color="#dc2626", style=bold];
+
+    // N finished segments
+    segs [shape=record, style="filled", fillcolor="#fef3c7",
+          label="{seg 1\ncheck ✓|seg 2\ncheck ✓|seg 3\ncheck ✓| … |seg N\ncheck ✓}"];
+
+    tso -> segs [label="N wire packets, each checksum finished"];
+    gso -> segs;
+}

@@ -1,0 +1,49 @@
+digraph bpf_dispatch {
+    rankdir=TB;
+    labelloc=t;
+    label="Dispatch fork inside reuseport_select_sock: two BPF return conventions";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    ctx [shape=record, style="filled", fillcolor="#fef3c7",
+         label="struct sk_reuseport_md (context)|data , data_end (direct packet reads)|hash (the u32 from Background 1)|sk (any group member)|migrating_sk (set only when migrating)"];
+
+    fork [shape=diamond, style="filled", fillcolor="#e9d5ff",
+          label="prog->type ?"];
+
+    ctx -> fork [label="fed to program", color="#7c3aed"];
+
+    // cBPF branch
+    subgraph cluster_cbpf {
+        label="cBPF — SO_ATTACH_REUSEPORT_CBPF (index model)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+        runfilter [shape=box, style="filled", fillcolor="#dbeafe",
+                   label="run_bpf_filter()"];
+        cret [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+              label="program RETURN VALUE\nIS the index"];
+        cidx [shape=box, style="filled", fillcolor="#dbeafe",
+              label="reuse->socks[index]\n(if index < num_socks)"];
+        runfilter -> cret -> cidx;
+    }
+
+    // eBPF branch
+    subgraph cluster_ebpf {
+        label="eBPF — SO_ATTACH_REUSEPORT_EBPF (helper model)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        runsk [shape=box, style="filled", fillcolor="#dbeafe",
+               label="bpf_run_sk_reuseport()"];
+        helper [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+                label="helper bpf_sk_select_reuseport()\npicks from a\nREUSEPORT_SOCKARRAY / SOCKMAP"];
+        eret [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+              label="program returns\nonly SK_PASS / SK_DROP"];
+        runsk -> helper; runsk -> eret [style=dashed];
+    }
+
+    fork -> runfilter [label="cBPF", color="#d97706"];
+    fork -> runsk [label="BPF_PROG_TYPE_SK_REUSEPORT", color="#2563eb"];
+
+    socks [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+           label="both end at an index into the flat socks[] array\n→ selection is O(1) either way"];
+    cidx -> socks [color="#16a34a", style=bold];
+    helper -> socks [color="#16a34a", style=bold];
+}

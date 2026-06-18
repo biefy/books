@@ -1,0 +1,32 @@
+digraph addr_anatomy {
+    rankdir=TB;
+    labelloc=t;
+    label="IPv6 address anatomy: 128 bits = 64-bit prefix + 64-bit interface ID";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The 128-bit bar, split in half
+    bar [shape=record, style="filled", fillcolor="#dbeafe",
+         label="{ <p> upper 64 bits: NETWORK PREFIX\n(fe80:: for link-local,\nor a /64 learned from an RA) | <h> lower 64 bits: INTERFACE ID\n(\"host portion\") }"];
+
+    // Three ways to fill the host half
+    subgraph cluster_feeders {
+        label="three ways to fill the lower 64 bits (addr_gen_mode)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+        eui64 [shape=box, style="filled", fillcolor="#fef3c7",
+               label="EUI-64\nMAC + insert fffe\n+ flip U/L bit\n(predictable, privacy leak)"];
+        secret [shape=box, style="filled", fillcolor="#fef3c7",
+                label="stable_secret\nhash a per-iface seed\n(stable, not MAC-derived)"];
+        temp [shape=box, style="filled", fillcolor="#fef3c7",
+              label="tempaddr (RFC 4941)\nrotating random host\nportion (privacy)"];
+    }
+
+    eui64 -> bar:h [color="#d97706"];
+    secret -> bar:h [color="#d97706"];
+    temp -> bar:h [color="#d97706"];
+
+    // Notation decode off to the side
+    decode [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+            label=":: = all 128 bits zero (unspecified addr)\lfe80::/64 = link-local (always present at link-up)\lff00::/8 = multicast\l"];
+    bar:p -> decode [style=invis];
+}

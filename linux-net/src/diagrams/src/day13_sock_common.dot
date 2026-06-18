@@ -1,0 +1,34 @@
+digraph sock_common {
+    rankdir=LR;
+    labelloc=t;
+    label="One sock_common, three shapes : uniform 4-tuple lookup in the ehash";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+    nodesep=0.4; ranksep=1.2;
+
+    subgraph cluster_structs {
+        label="three structs, identical first member at offset 0";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+
+        full [shape=record, style="filled", fillcolor="#dbeafe",
+              label="{struct sock (full, ~2.4 KB)|<c>sock_common (4-tuple)|queues, locks, callbacks}"];
+        tw [shape=record, style="filled", fillcolor="#dbeafe",
+            label="{struct inet_timewait_sock (~232 B)|<c>sock_common (4-tuple)|tw timer}"];
+        req [shape=record, style="filled", fillcolor="#dbeafe",
+             label="{struct request_sock / NEW_SYN_RECV|<c>sock_common (4-tuple)|half-open state}"];
+    }
+
+    // highlight the common block
+    full:c [color="#d97706"];
+
+    bucket [shape=record, style="filled", fillcolor="#fef3c7",
+            label="{ehash bucket|compare (saddr,sport,daddr,dport)|one chain, three shapes}"];
+
+    full:c -> bucket [color="#d97706", style=bold, label="same first member"];
+    tw:c   -> bucket [color="#d97706", style=bold];
+    req:c  -> bucket [color="#d97706", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="sock_common is the first member of all three,\lso the lookup never has to know whether an entry\lis a full sock, a TIME_WAIT stub, or a half-open req.\l"];
+    bucket -> note [style=invis];
+}

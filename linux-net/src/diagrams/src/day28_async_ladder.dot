@@ -1,0 +1,50 @@
+digraph async_ladder {
+    rankdir=TB;
+    labelloc=t;
+    label="The three-tier async ladder for one recv SQE";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    sqe [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+         label="recv SQE issued"];
+
+    // Tier 1
+    t1 [shape=box, style="filled", fillcolor="#dbeafe",
+        label="TIER 1 — inline try\nrecv with MSG_DONTWAIT\n(io_send/recv, net.c:667)"];
+    ready [shape=diamond, style="filled", fillcolor="#fef3c7",
+           label="data ready?"];
+    cqe1 [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+          label="post CQE inline\n(no background work —\nthe cheap common case)"];
+
+    // Tier 2
+    t2 [shape=box, style="filled", fillcolor="#dbeafe",
+        label="TIER 2 — arm poll waiter\nio_arm_poll_handler()\n(poll.c:705)"];
+    wq [shape=box, style="filled", fillcolor="#dcfce7",
+        label="hang waiter on\nsk_sleep(sk) wait queue\n(same queue as Day 19\nblocking recv / epoll)"];
+    wake [shape=diamond, style="filled", fillcolor="#fef3c7",
+          label="socket\nreadable?"];
+    cqe2 [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+          label="poll callback re-issues op\nvia task work → post CQE"];
+
+    // Tier 3
+    t3 [shape=box, style="filled", fillcolor="#fee2e2",
+        label="TIER 3 — punt to io-wq\n(IO_APOLL_ABORTED:\nfile has no ->poll())"];
+    worker [shape=box, style="filled", fillcolor="#fee2e2",
+            label="io_wq_enqueue (io_uring.c:432)\nreal worker thread BLOCKS\non your behalf → post CQE\n(the expensive tier)"];
+
+    sqe -> t1;
+    t1 -> ready;
+    ready -> cqe1 [label="yes", color="#16a34a", style=bold];
+    ready -> t2  [label="no (-EAGAIN)", color="#d97706"];
+
+    t2 -> wq;
+    wq -> wake;
+    wake -> cqe2 [label="yes", color="#16a34a", style=bold];
+    t2 -> t3 [label="can't poll", color="#dc2626"];
+
+    t3 -> worker;
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="multishot recv lives PERMANENTLY in Tier 2:\lthe poll waiter stays armed and re-fires a\lCQE (tagged F_MORE) on every arrival.\l"];
+    wq -> note [style=dashed, color="#16a34a", arrowhead=none, constraint=false];
+}

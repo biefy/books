@@ -1,0 +1,47 @@
+digraph codel {
+    rankdir=TB;
+    labelloc=t;
+    label="CoDel: drop only after sojourn stays above target for one interval, then escalate";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // Top: the sojourn-time timeline
+    subgraph cluster_timeline {
+        label="per-packet sojourn time vs target (5 ms)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        rankdir=LR;
+
+        spike [shape=box, style="filled", fillcolor="#dcfce7",
+               label="brief spike\n> target but\n< one interval\n=> NO action"];
+        below [shape=box, style="filled", fillcolor="#dcfce7",
+               label="back under\ntarget\n(reset\nfirst_above_time)"];
+        sustained [shape=box, style="filled", fillcolor="#fee2e2",
+                   label="sustained > target\nfor one full\ninterval (100 ms)\n=> ARM dropping"];
+
+        target [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+                label="target = 5 ms baseline"];
+
+        spike -> below -> sustained [color="#94a3b8", arrowhead=none, style=bold];
+        target -> spike [style=invis];
+    }
+
+    // Bottom: drop schedule
+    subgraph cluster_drops {
+        label="drop schedule: next = now + interval / sqrt(count), count++ each drop";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#dc2626";
+        node [shape=circle, style="filled", fillcolor="#fee2e2", fontsize=9];
+        dr1 [label="drop\ncount=1"];
+        dr2 [label="drop\ncount=2"];
+        dr3 [label="drop\ncount=3"];
+        dr4 [label="drop\ncount=4"];
+        dr1 -> dr2 [label="interval/1", color="#dc2626"];
+        dr2 -> dr3 [label="/sqrt2", color="#dc2626"];
+        dr3 -> dr4 [label="/sqrt3 (closer)", color="#dc2626", style=bold];
+    }
+
+    sustained -> dr1 [label="enter dropping state", color="#dc2626", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="sojourn measured at DEQUEUE, not length\linterval ~ one RTT: paces drops to TCP\lself-tuning: no per-link config\l"];
+    dr4 -> note [style=invis];
+}

@@ -1,0 +1,33 @@
+digraph mac_bits {
+    rankdir=TB;
+    labelloc=t;
+    label="The first MAC octet: two flag bits drive RX classification";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    octet [shape=record, style="filled", fillcolor="#dbeafe",
+           label="{ b7 | b6 | b5 | b4 | b3 | b2 | <ul> b1\nU/L | <ig> b0\nI/G }"];
+
+    ig [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+        label="bit 0 (LSB) = I/G\l  0 = unicast  (one NIC owns it)\l  1 = multicast (a group)\l  all-FF = broadcast\l  test: 0x01 & addr[0]\l"];
+    ul [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+        label="bit 1 = U/L\l  0 = universal (IEEE OUI, burned in)\l  1 = local (admin/OS chosen)\l  test: 0x02 & addr[0]\l"];
+
+    octet:ig -> ig [color="#16a34a", style=bold];
+    octet:ul -> ul [color="#7c3aed", style=bold];
+
+    subgraph cluster_ex {
+        label="three addresses decoded";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=record, style="filled"];
+        e1 [fillcolor="#dbeafe",
+            label="00:22:48:7c:b3:ef | octet0 = 0x00 = 0000 0000 | I/G=0  U/L=0 | global UNICAST (OUI 00:22:48)"];
+        e2 [fillcolor="#fee2e2",
+            label="ff:ff:ff:ff:ff:ff | octet0 = 0xff = 1111 1111 | I/G=1  U/L=1 | BROADCAST (everyone on link)"];
+        e3 [fillcolor="#fef3c7",
+            label="02:00:00:00:00:01 | octet0 = 0x02 = 0000 0010 | I/G=0  U/L=1 | LOCAL UNICAST (eth_random_addr pattern)"];
+        e1 -> e2 -> e3 [style=invis];
+    }
+
+    ig -> e1 [style=invis];
+}

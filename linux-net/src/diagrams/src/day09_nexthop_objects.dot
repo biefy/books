@@ -1,0 +1,46 @@
+digraph nexthop_objects {
+    rankdir=TB;
+    labelloc=t;
+    label="The nexthop object model: routes point at a shared, ID-addressable nexthop object";
+    fontname="Helvetica"; fontsize=13;
+    node [fontname="Monaco", fontsize=10];
+
+    // Two routes
+    subgraph cluster_routes {
+        label="routes (many can share one nexthop)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        r1 [shape=box, style="filled", fillcolor="#dbeafe",
+            label="route: default\nnhid 100"];
+        r2 [shape=box, style="filled", fillcolor="#dbeafe",
+            label="route: 10.0.0.0/8\nnhid 100"];
+    }
+
+    // The shared group object
+    grp [shape=record, style="filled", fillcolor="#e9d5ff",
+         label="{struct nexthop  id 100|GROUP  type resilient|fi-\>nh points here}"];
+
+    r1 -> grp [label="nhid 100", color="#dc2626", style=bold];
+    r2 -> grp [label="nhid 100", color="#dc2626", style=bold];
+
+    // Member objects
+    subgraph cluster_members {
+        label="member nexthop objects";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+        m1 [shape=box, style="filled", fillcolor="#dcfce7",
+            label="struct nexthop id 10\nvia 192.168.1.1 dev eth0"];
+        m2 [shape=box, style="filled", fillcolor="#dcfce7",
+            label="struct nexthop id 20\nvia 192.168.2.1 dev eth0"];
+    }
+
+    grp -> m1 [label="group 10/20"];
+    grp -> m2;
+
+    // The bucket table
+    buckets [shape=record, style="filled", fillcolor="#fef3c7",
+             label="{nh_res_table — 65535 buckets|bucket 0 -\> id 10|bucket 1 -\> id 20|bucket 2 -\> id 10|...|bucket 65534 -\> id 20}"];
+    grp -> buckets [label="owns", style=dashed, color="#d97706"];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="The bucket table is STATE that has no home in an inline route\l(a route entry is just prefix + embedded next-hop). A standalone\lgroup OBJECT has somewhere to keep it — that is why this API exists.\l"];
+    buckets -> note [style=invis];
+}

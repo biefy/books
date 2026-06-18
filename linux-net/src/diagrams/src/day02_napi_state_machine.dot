@@ -1,0 +1,42 @@
+digraph napi_state_machine {
+    rankdir=TB;
+    labelloc=t;
+    label="The NAPI cycle: schedule → poll → complete, and the two budgets";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    irq [shape=box, style="filled", fillcolor="#e9d5ff",
+         label="IRQ fires\n(first packet of a burst)"];
+
+    sched [shape=box, style="filled", fillcolor="#dbeafe",
+           label="napi_schedule()\n• set NAPI_STATE_SCHED\n• MASK this queue's HW IRQ\n• add napi to per-CPU poll_list\n• raise NET_RX_SOFTIRQ"];
+
+    poll [shape=box, style="filled", fillcolor="#fef3c7",
+          label="net_rx_action → ->poll(napi, weight=64)\ndriver drains done descriptors\nfrom the RX ring → skbs"];
+
+    decide [shape=diamond, style="filled", fillcolor="#dcfce7", fontsize=9,
+            label="processed <\nweight (64)?\nring drained?"];
+
+    complete [shape=box, style="filled", fillcolor="#dcfce7",
+              label="napi_complete_done()\n• CLEAR NAPI_STATE_SCHED\n• RE-ENABLE HW IRQ\nback to interrupt-driven"];
+
+    repoll [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+            label="hit weight, ring still full:\nstay on poll_list,\nIRQ stays masked,\npoll again"];
+
+    irq -> sched [style=bold, color="#7c3aed"];
+    sched -> poll [style=bold, color="#d97706"];
+    poll -> decide;
+    decide -> complete [label="yes: burst over", style=bold, color="#16a34a"];
+    decide -> repoll [label="no: still busy", color="#dc2626"];
+    repoll -> poll [color="#dc2626", constraint=false];
+    complete -> irq [label="next burst", style=dashed, color="#94a3b8", constraint=false];
+
+    // The nested budgets
+    budgets [shape=record, style="filled", fillcolor="#dbeafe", fontsize=9,
+             label="{TWO nested budgets|<i>INNER: weight = 64\n(one -\>poll call)|<o>OUTER: netdev_budget = 300\n(whole net_rx_action run,\nshared across all napis)}"];
+    poll -> budgets [style=dotted, color="#2563eb", arrowhead=none, constraint=false];
+
+    squeeze [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+             label="budget <= 0 OR time limit hit\lwith work still pending:\ltime_squeeze++ and leave\lremaining napis for later\l(or punt to ksoftirqd)\l"];
+    budgets:o -> squeeze [style=dashed, color="#dc2626"];
+}

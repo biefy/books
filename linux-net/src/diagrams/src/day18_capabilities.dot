@@ -1,0 +1,46 @@
+digraph capabilities {
+    rankdir=TB;
+    labelloc=t;
+    label="Capability gate: which slice each sockopt needs";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // Left column: CAP_NET_RAW
+    subgraph cluster_raw {
+        label="CAP_NET_RAW  —  look / route differently";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        raw_a [shape=box, style="filled", fillcolor="#dbeafe", label="SO_BINDTODEVICE"];
+        raw_b [shape=box, style="filled", fillcolor="#dbeafe", label="open raw / packet sockets"];
+        raw_c [shape=box, style="filled", fillcolor="#dbeafe", label="bind a non-local address"];
+        raw_a -> raw_b -> raw_c [style=invis];
+    }
+
+    // Right column: CAP_NET_ADMIN
+    subgraph cluster_admin {
+        label="CAP_NET_ADMIN  —  reconfigure the kernel";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+        adm_a [shape=box, style="filled", fillcolor="#fef3c7", label="SO_SNDBUFFORCE"];
+        adm_b [shape=box, style="filled", fillcolor="#fef3c7", label="SO_RCVBUFFORCE"];
+        adm_c [shape=box, style="filled", fillcolor="#fef3c7", label="admin-only knobs"];
+        adm_a -> adm_b -> adm_c [style=invis];
+    }
+
+    // Straddlers in the middle
+    subgraph cluster_both {
+        label="accept EITHER (straddle both worlds)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+        both_a [shape=box, style="filled", fillcolor="#dcfce7", label="IP_TRANSPARENT"];
+        both_b [shape=box, style="filled", fillcolor="#dcfce7", label="SO_MARK"];
+        both_a -> both_b [style=invis];
+    }
+
+    // Link straddlers to both columns
+    both_a -> raw_c   [color="#16a34a", style=dashed, constraint=false, dir=none];
+    both_a -> adm_c   [color="#16a34a", style=dashed, constraint=false, dir=none];
+    both_b -> raw_a   [color="#16a34a", style=dashed, constraint=false, dir=none];
+    both_b -> adm_a   [color="#16a34a", style=dashed, constraint=false, dir=none];
+
+    note [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+          label="look / route-differently = RAW;  reconfigure = ADMIN.\lsockopt_capable() lets a BPF caller skip the gate entirely;\la userspace caller falls through to capable(cap).\lChecked against the socket's owning user-namespace.\l"];
+    both_b -> note [style=invis];
+}

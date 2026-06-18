@@ -1,0 +1,53 @@
+digraph sendfile_zerocopy {
+    rankdir=LR;
+    labelloc=t;
+    label="sendfile() over HTTPS: classic 3-copy path vs kTLS zero-copy (skb frags point at page cache)";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // ---------- CLASSIC ----------
+    subgraph cluster_classic {
+        label="CLASSIC userspace TLS — 3 copies, 2 syscalls, crypto in userspace";
+        fontname="Helvetica"; fontsize=12; style="rounded"; color="#dc2626";
+
+        c_pc [shape=box, style="filled", fillcolor="#fef3c7", label="page cache\n(file pages)"];
+        c_ub1 [shape=box, style="filled", fillcolor="#e9d5ff", label="user buffer\n(plaintext)"];
+        c_ssl [shape=box, style="filled,rounded", fillcolor="#fee2e2", label="SSL_write\n(encrypt in userspace)"];
+        c_ub2 [shape=box, style="filled", fillcolor="#e9d5ff", label="user buffer\n(ciphertext)"];
+        c_skb [shape=box, style="filled", fillcolor="#dbeafe", label="skb\n(linear copy)"];
+        c_wire [shape=box, style="filled,rounded", fillcolor="#fef3c7", label="WIRE"];
+
+        c_pc -> c_ub1 [color="#dc2626", style=bold, label="copy 1\nread()"];
+        c_ub1 -> c_ssl;
+        c_ssl -> c_ub2 [color="#dc2626", style=bold, label="copy 2"];
+        c_ub2 -> c_skb [color="#dc2626", style=bold, label="copy 3\nsend()"];
+        c_skb -> c_wire [color="#d97706"];
+    }
+
+    // ---------- KTLS ----------
+    subgraph cluster_ktls {
+        label="kTLS sendfile() — 1 crypto copy, 1 syscall, plaintext never leaves kernel";
+        fontname="Helvetica"; fontsize=12; style="rounded"; color="#16a34a";
+
+        k_pc [shape=box, style="filled", fillcolor="#fef3c7", label="page cache\n(file pages)"];
+        k_skb [shape=record, style="filled", fillcolor="#dbeafe",
+               label="{record skb|skb_shinfo-\>frags[]\n(page,offset,len)}"];
+        k_aead [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+                label="kTLS AES-GCM\nencrypt into record skb"];
+        k_wire [shape=box, style="filled,rounded", fillcolor="#fef3c7", label="WIRE\n(ciphertext)"];
+        k_nic [shape=box, style="filled", fillcolor="#e9d5ff",
+               label="NIC HW-TLS\n(optional offload)"];
+
+        k_pc -> k_skb [color="#16a34a", style=bold, label="frags REFERENCE pages\n(no copy, refcount++)"];
+        k_skb -> k_aead [color="#dc2626", style=bold, label="copy 1\n(the only copy)"];
+        k_aead -> k_wire [color="#d97706"];
+        k_skb -> k_nic [style=dashed, color="#7c3aed", label="HW path:\nplaintext skb + per-flow key"];
+        k_nic -> k_wire [style=dashed, color="#7c3aed", label="encrypt inline\nCPU touches plaintext 0x"];
+    }
+
+    c_wire -> k_pc [style=invis];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="frags[] glyph reused from Day 1.\lTLS_TX_ZEROCOPY_RO enables the no-copy frag path.\lWin is largest for static-file / CDN / video sendfile().\l"];
+    k_wire -> note [style=invis];
+}

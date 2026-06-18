@@ -1,0 +1,44 @@
+digraph txq_fanout {
+    rankdir=TB;
+    labelloc=t;
+    label="netdev_pick_tx: fanning out to N hardware TX queues (mq root)";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // CPUs / sockets feeding in
+    subgraph cluster_cpu {
+        label="CPUs / sockets transmitting in parallel";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", fillcolor="#dbeafe"];
+        c0 [label="CPU 0\nsock A"];
+        c1 [label="CPU 1\nsock B"];
+        c2 [label="CPU 2\nsock C"];
+    }
+
+    pick [shape=box, style="filled", fillcolor="#e9d5ff",
+          label="netdev_pick_tx\n(skb->queue_mapping, else flow hash:\nsame flow → same queue)"];
+
+    c0 -> pick; c1 -> pick; c2 -> pick;
+
+    // mq root + per-queue fq_codel leaves
+    subgraph cluster_mq {
+        label="mq root qdisc — one fq_codel leaf per hardware TX queue";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+
+        node [shape=record, style="filled", fillcolor="#fde68a"];
+        t0 [label="{TX queue 0|fq_codel}"];
+        t1 [label="{TX queue 1|fq_codel}"];
+        t2 [label="{TX queue 2|fq_codel}"];
+        t3 [label="{TX queue N|fq_codel}"];
+        t0 -> t1 -> t2 -> t3 [style=invis];
+    }
+
+    pick -> t0 [color="#7c3aed"];
+    pick -> t1 [color="#7c3aed"];
+    pick -> t2 [color="#7c3aed"];
+    pick -> t3 [color="#7c3aed"];
+
+    nic [shape=box, style="filled", fillcolor="#dcfce7", label="NIC (multi-queue) → wire"];
+    t0 -> nic [color="#16a34a"]; t1 -> nic [color="#16a34a"];
+    t2 -> nic [color="#16a34a"]; t3 -> nic [color="#16a34a"];
+}

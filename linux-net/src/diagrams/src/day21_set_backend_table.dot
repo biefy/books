@@ -1,0 +1,24 @@
+digraph set_backend_table {
+    rankdir=TB;
+    labelloc=t;
+    label="Which kernel module backs an nft set: key + flags pick the backend";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    decide [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="add set ... { type KEY ; flags ... ; }\nset-selection logic picks ONE backend"];
+
+    // The decision table
+    table [shape=record, style="filled", fillcolor="#dbeafe", fontsize=10,
+           label="{ key / flags | backend module | complexity | operation it supports }|\
+{ exact key, no flags\nset of 10.0.0.1, 10.0.0.2 | nft_set_hash.c\n(rhashtable) | O(1) | point lookup:\nis this exact key present? }|\
+{ flags interval\n(CIDR 5.6.7.0/24) | nft_set_rbtree.c\n(rb_root) | O(log N) | range / CIDR:\ndoes addr fall inside a range? }|\
+{ concatenated ranges\n(saddr range, dport range) | nft_set_pipapo.c\n(pipapo) | sublinear | multi-field\nrange match at once }|\
+{ tiny key space\n(a port byte) | nft_set_bitmap.c\n(bitmap) | O(1) | membership over\na small dense domain }}"];
+
+    decide -> table [style=invis];
+
+    why [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+         label="Why a hash can't do CIDR:\la hash confirms one exact key is present;\lit can't answer \"inside which range?\"\lAn ordered tree binary-searches endpoints\l-> that walk is the O(log N).\l"];
+    table -> why [style=invis];
+}

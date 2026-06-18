@@ -1,0 +1,43 @@
+digraph fdb_rhashtable {
+    rankdir=TB;
+    labelloc=t;
+    label="FDB rhashtable: lockless RCU readers, single-writer-lock writers";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    subgraph cluster_tbl {
+        label="br->fdb_hash_tbl  (rhashtable, hashed on {MAC, vlan_id})";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=record, style="filled", fillcolor="#dbeafe"];
+        b0 [label="<h>bucket 0"];
+        b1 [label="<h>bucket 1"];
+        b2 [label="<h>bucket 2"];
+        b3 [label="<h>bucket 3"];
+        b0 -> b1 -> b2 -> b3 [style=invis];
+    }
+
+    oldentry [shape=record, style="filled", fillcolor="#fef3c7",
+              label="{net_bridge_fdb_entry (OLD)|key \{MAC, vlan_id\}|dst = port A|updated (own cacheline)}"];
+    newentry [shape=record, style="filled", fillcolor="#dcfce7",
+              label="{net_bridge_fdb_entry (NEW)|key \{MAC, vlan_id\}|dst = port B|updated (own cacheline)}"];
+
+    b1:h -> oldentry [label="rhnode list"];
+    b1:h -> newentry [color="#16a34a", style=bold, label="rcu_assign_pointer\n(newly published)"];
+
+    r1 [shape=box, style="filled,rounded", fillcolor="#bfdbfe",
+        label="reader 1\nrcu_read_lock()\nrhashtable_lookup()\nNO LOCK"];
+    r2 [shape=box, style="filled,rounded", fillcolor="#bfdbfe",
+        label="reader 2\nrcu_read_lock()\nrhashtable_lookup()\nNO LOCK"];
+
+    r1 -> b1:h [color="#2563eb"];
+    r2 -> oldentry [color="#2563eb", style=dashed,
+                    label="pre-existing reader\nstill sees OLD until\ngrace period ends"];
+
+    w [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+       label="writer: br_fdb_update()\nholds br->hash_lock\n(serializes vs other writers)"];
+    w -> newentry [color="#7c3aed", style=bold, label="publish"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="key = {MAC, vlan_id}: same MAC in two VLANs = two entries.\l`updated` is ____cacheline_aligned_in_smp so the per-frame\ltimestamp write does not thrash the line lookups read.\lReaders see old OR new entry, never a torn one.\l"];
+    note -> w [style=invis];
+}

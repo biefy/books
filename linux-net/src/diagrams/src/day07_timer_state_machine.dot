@@ -1,0 +1,29 @@
+digraph timer_state_machine {
+    rankdir=LR;
+    labelloc=t;
+    label="Timer-driven neighbour state machine (neigh_timer_handler)";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10, shape=box, style="filled,rounded"];
+
+    incomplete [fillcolor="#fef3c7", label="INCOMPLETE\n(no MAC yet,\nARP request sent)"];
+    reachable  [fillcolor="#dcfce7", label="REACHABLE\n(fresh MAC)"];
+    stale      [fillcolor="#dbeafe", label="STALE\n(has MAC, aged)"];
+    delay      [fillcolor="#dbeafe", label="DELAY\n(awaiting L4\nconfirmation)"];
+    probe      [fillcolor="#e9d5ff", label="PROBE\n(actively\nre-soliciting)"];
+    failed     [fillcolor="#fee2e2", label="FAILED\n(gave up)"];
+
+    reachable -> stale [label="timer fires,\nnow > confirmed + reachable_time"];
+    stale -> delay [label="a packet hits\nthe aged entry"];
+    delay -> reachable [label="confirmation\narrived", color="#16a34a"];
+    delay -> probe [label="now > confirmed +\ndelay_probe_time"];
+
+    incomplete -> reachable [label="reply received", color="#16a34a"];
+    incomplete -> failed [label="probes >= 6\n(3 mcast + 3 ucast)", color="#dc2626"];
+    probe -> reachable [label="reply received", color="#16a34a"];
+    probe -> failed [label="probes >= 3\n(ucast only)", color="#dc2626"];
+
+    rearm [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+           label="While probing, neigh_timer_handler re-arms\litself at now + retrans_time (1*HZ) until the\lprobe budget from neigh_max_probes() runs out.\l"];
+    incomplete -> rearm [style=dashed, color="#94a3b8", arrowhead=none];
+    probe -> rearm [style=dashed, color="#94a3b8", arrowhead=none];
+}

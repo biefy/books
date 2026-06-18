@@ -1,0 +1,37 @@
+digraph tuple_pair {
+    rankdir=LR;
+    labelloc=t;
+    label="One nf_conn, two tuples, one global hash";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The reply packet that arrives
+    pkt [shape=box, style="filled", fillcolor="#fef3c7",
+         label="incoming reply packet\n8.8.8.8:80 -> 10.0.0.5:1234\nbuild tuple, look up once"];
+
+    // The global hash table both tuples register into
+    hash [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+          label="global nf_conntrack_hash\n(one table; BOTH tuples\nhashed into it)"];
+
+    // The connection record with its two tuples
+    subgraph cluster_conn {
+        label="struct nf_conn";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        node [shape=record, style="filled", fillcolor="#dbeafe"];
+        orig [label="tuplehash[ORIGINAL]|src 10.0.0.5:1234|dst 8.8.8.8:80|dir = 0"];
+        repl [label="tuplehash[REPLY]|src 8.8.8.8:80|dst 10.0.0.5:1234|dir = 1"];
+        orig -> repl [style=invis];
+    }
+
+    pkt -> hash [style=bold, color="#16a34a", label="1. lookup"];
+    hash -> orig [color="#7c3aed", label="registers", dir=back];
+    hash -> repl [style=bold, color="#16a34a", label="2. matches REPLY (dir=1)"];
+
+    tag [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+         label="3. matched the REPLY tuple (dir=1),\lso this packet is the reply direction:\ltag skb with this nf_conn +\lctinfo >= IP_CT_IS_REPLY\l"];
+    repl -> tag [color="#16a34a"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="REPLY = inverse of ORIGINAL\l(nf_ct_invert_tuple): swap src/dst,\lswap L4 ids. nf_ct_tuplehash_to_ctrack\luses the dir byte to recover nf_conn.\l"];
+    orig -> note [style=invis];
+}

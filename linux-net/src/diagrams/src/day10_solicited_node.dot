@@ -1,0 +1,48 @@
+digraph solicited_node {
+    rankdir=TB;
+    labelloc=t;
+    label="ARP broadcast vs IPv6 NDP solicited-node multicast: same goal, far fewer interrupts";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // LEFT panel: ARP broadcast
+    subgraph cluster_arp {
+        label="ARP (Day 7): L2 broadcast";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#dc2626";
+        arpsrc [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+                label="sender\nARP request\nto ff:ff:ff:ff:ff:ff"];
+        a1 [shape=box, style="filled", fillcolor="#fee2e2", label="host A NIC+CPU\nwakes up, then discards"];
+        a2 [shape=box, style="filled", fillcolor="#fee2e2", label="host B NIC+CPU\nwakes up, then discards"];
+        a3 [shape=box, style="filled", fillcolor="#dcfce7", label="host C (target)\nwakes up, replies"];
+        arpsrc -> a1 [color="#dc2626"];
+        arpsrc -> a2 [color="#dc2626"];
+        arpsrc -> a3 [color="#dc2626"];
+    }
+
+    // RIGHT panel: NDP solicited-node multicast
+    subgraph cluster_ndp {
+        label="IPv6 NDP: solicited-node multicast";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+
+        build [shape=record, style="filled", fillcolor="#fef3c7",
+               label="{ target unicast addr | low 24 bits }|{ prefix ff02::1:ff00:0/104 | + low 24 bits }|{ <out> = ff02::1:ffXX:XXXX }"];
+
+        ndpsrc [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+                label="sender\nNeighbor Solicitation\nto ff02::1:ffXX:XXXX"];
+
+        n1 [shape=box, style="filled", fillcolor="#dbeafe", label="host A NIC\nnot in group:\nHW filter DROPS,\nCPU never wakes"];
+        n2 [shape=box, style="filled", fillcolor="#dbeafe", label="host B NIC\nnot in group:\nHW filter DROPS,\nCPU never wakes"];
+        n3 [shape=box, style="filled", fillcolor="#dcfce7", label="host C (target)\njoined this group\nfor its own addr:\nonly its NIC wakes, replies"];
+
+        build:out -> ndpsrc [style=bold, color="#16a34a", label="dest addr"];
+        ndpsrc -> n1 [color="#94a3b8", style=dashed];
+        ndpsrc -> n2 [color="#94a3b8", style=dashed];
+        ndpsrc -> n3 [color="#16a34a", style=bold];
+    }
+
+    caption [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+             label="Same goal (resolve next-hop L2 addr / DAD probe),\lfar fewer interrupts: only the target is subscribed.\lL2 switches can snoop the groups too.\l"];
+
+    arpsrc -> ndpsrc [style=invis];
+    a3 -> caption [style=invis];
+}

@@ -1,0 +1,42 @@
+digraph rpfilter {
+    rankdir=TB;
+    labelloc=t;
+    label="Reverse-path filtering: route the SOURCE backwards, ask 'would the reply leave via the arrival interface?'";
+    fontname="Helvetica"; fontsize=13;
+    node [fontname="Monaco", fontsize=10];
+
+    pkt [shape=record, style="filled", fillcolor="#dbeafe",
+         label="{packet arrives on eth0|src = S  dst = D}"];
+
+    fib [shape=box, style="filled", fillcolor="#fef3c7",
+         label="reverse FIB lookup of S\n(src/dst SWAPPED: daddr=S, saddr=D)\nfull fib_lookup — consults custom rules too\n(net/ipv4/fib_frontend.c:359-360)"];
+    pkt -> fib [label="reverse lookup of S", style=dashed, color="#dc2626"];
+
+    // outcomes
+    same [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+          label="reply route resolves\nback to eth0\n(symmetric path)"];
+    other [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+           label="reply route resolves\nto eth1 (asymmetric)"];
+    none [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+          label="resolves nowhere\n(unknown source)"];
+
+    fib -> same;
+    fib -> other;
+    fib -> none;
+
+    accept [shape=box, style="filled", fillcolor="#dcfce7",
+            label="ACCEPT"];
+    dropstrict [shape=box, style="filled", fillcolor="#fee2e2",
+                label="DROP as martian\ne_rpf (line 424)"];
+
+    same -> accept [label="all modes", color="#16a34a", style=bold];
+
+    other -> dropstrict [label="strict (rp_filter=1)\nsame iface required", color="#dc2626", style=bold];
+    other -> accept [label="loose (rp_filter=2)\nreachable somehow -> ok", color="#16a34a", style=bold];
+
+    none -> dropstrict [label="strict & loose", color="#dc2626"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="Why source-routing breaks: the reverse lookup SWAPS src/dst,\lso a 'from'-keyed rule (selects on source) no longer picks your\ltable in reverse; strict mode then needs oif == arrival iif,\lwhich fails on asymmetric paths. Loose mode (2) only asks 'reachable somehow?'.\l"];
+    dropstrict -> note [style=invis];
+}

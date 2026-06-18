@@ -1,0 +1,41 @@
+digraph tcp_states {
+    rankdir=TB;
+    labelloc=t;
+    label="TCP state machine — the eleven canonical states";
+    fontname="Helvetica"; fontsize=14;
+    node [shape=box, style="filled,rounded", fontname="Monaco", fontsize=10,
+          fillcolor="#dbeafe"];
+    edge [fontname="Helvetica", fontsize=9];
+
+    CLOSED       [fillcolor="#fee2e2"];
+    LISTEN       [fillcolor="#dcfce7"];
+    SYN_SENT;
+    SYN_RECV;
+    ESTABLISHED  [fillcolor="#fef3c7"];
+    FIN_WAIT_1;
+    FIN_WAIT_2;
+    CLOSING      [fillcolor="#e9d5ff"];
+    TIME_WAIT    [fillcolor="#e9d5ff"];
+    CLOSE_WAIT;
+    LAST_ACK;
+
+    // Open
+    CLOSED      -> LISTEN       [label="listen()"];
+    CLOSED      -> SYN_SENT     [label="connect()\n(send SYN)"];
+    LISTEN      -> SYN_RECV     [label="SYN\n(send SYN-ACK)"];
+    SYN_RECV    -> ESTABLISHED  [label="ACK"];
+    SYN_SENT    -> ESTABLISHED  [label="SYN-ACK\n(send ACK)"];
+
+    // Close — active closer
+    ESTABLISHED -> FIN_WAIT_1   [label="close()\n(send FIN)"];
+    FIN_WAIT_1  -> FIN_WAIT_2   [label="ACK"];
+    FIN_WAIT_1  -> CLOSING      [label="FIN\n(send ACK)"];
+    FIN_WAIT_2  -> TIME_WAIT    [label="FIN\n(send ACK)"];
+    CLOSING     -> TIME_WAIT    [label="ACK"];
+    TIME_WAIT   -> CLOSED       [label="2*MSL timer"];
+
+    // Close — passive closer
+    ESTABLISHED -> CLOSE_WAIT   [label="FIN\n(send ACK)"];
+    CLOSE_WAIT  -> LAST_ACK     [label="close()\n(send FIN)"];
+    LAST_ACK    -> CLOSED       [label="ACK"];
+}

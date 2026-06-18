@@ -1,0 +1,45 @@
+digraph migration {
+    rankdir=TB;
+    labelloc=t;
+    label="Worker dies: what happens to in-flight connections (tcp_migrate_req)";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    closeA [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="Listener A closes"];
+
+    inflight [shape=record, style="filled", fillcolor="#fef3c7",
+              label="A's in-flight work|half-open request socks (mid-handshake)|established children in A's accept queue"];
+
+    closeA -> inflight [label="orphaned"];
+
+    // Default path
+    subgraph cluster_default {
+        label="Default: tcp_migrate_req = 0";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#dc2626";
+        rst [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+             label="ABORT — send RST\nclient sees connection reset\n(NOT silently re-homed)"];
+    }
+
+    // Migration path
+    subgraph cluster_migrate {
+        label="Migration: tcp_migrate_req = 1";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+        migfn [shape=box, style="filled", fillcolor="#dbeafe",
+               label="reuseport_migrate_sock()\nreuses the hash+array machinery"];
+        prog [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+              label="optional BPF_SK_REUSEPORT_SELECT_OR_MIGRATE\nruns with migrating_sk set\n(returns survivor, or SK_DROP to cancel)"];
+        listB [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+               label="re-homed to live listener B\n(random survivor, or per program)"];
+        migfn -> prog [style=dashed, label="policy"];
+        migfn -> listB [color="#16a34a", style=bold];
+        prog -> listB [style=dashed, color="#16a34a"];
+    }
+
+    inflight -> rst [label="=0", color="#dc2626", style=bold];
+    inflight -> migfn [label="=1", color="#16a34a", style=bold];
+
+    newsyn [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+            label="New SYNs arriving AFTER the close:\lhashed to a surviving worker in BOTH cases (fine).\lnum_socks dropped, array shifted, reciprocal_scale lands on a live socket.\l"];
+    closeA -> newsyn [style=invis];
+}

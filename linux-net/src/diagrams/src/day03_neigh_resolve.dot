@@ -1,0 +1,32 @@
+digraph neigh_resolve {
+    rankdir=TB;
+    labelloc=t;
+    label="ip_finish_output2: turning a next-hop IP into a MAC";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    start [shape=box, style="filled", fillcolor="#dbeafe",
+           label="ip_finish_output2\n→ neigh_output()"];
+
+    decide [shape=diamond, style="filled", fillcolor="#e9d5ff",
+            label="neighbour\nresolved?"];
+
+    // YES branch
+    fast [shape=box, style="filled", fillcolor="#dcfce7",
+          label="neigh_hh_output:\nprepend cached Ethernet header\n(uses Day 1 NET_SKB_PAD headroom —\nno realloc)"];
+    driver [shape=box, style="filled", fillcolor="#fde68a",
+            label="driver xmit → wire"];
+
+    // NO branch
+    slow [shape=box, style="filled", fillcolor="#fee2e2",
+          label="neigh_resolve_output:\npark skb on arp_queue\n+ send ARP request"];
+    later [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+           label="later: ARP reply arrives → send\lor resolution times out → drop\l"];
+
+    start -> decide;
+    decide -> fast  [label="YES (fast path)", color="#16a34a", fontcolor="#16a34a"];
+    decide -> slow  [label="NO (slow path)", color="#dc2626", fontcolor="#dc2626"];
+    fast -> driver [style=bold, color="#16a34a"];
+    slow -> later;
+    later -> driver [style=dashed, color="#94a3b8", label="when resolved", constraint=false];
+}

@@ -1,0 +1,65 @@
+digraph lctrie {
+    rankdir=TB;
+    labelloc=t;
+    label="The LC-trie: two compressions turn a 32-level binary trie into ~5-10 hops";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=9];
+
+    // Panel 1: naive binary trie
+    subgraph cluster_naive {
+        label="1. naive binary trie\none bit per level, up to 32 hops";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#dc2626";
+        n0 [shape=circle, style="filled", fillcolor="#dbeafe", width=0.35, fixedsize=true, label="b0"];
+        n1 [shape=circle, style="filled", fillcolor="#dbeafe", width=0.35, fixedsize=true, label="b1"];
+        n2 [shape=circle, style="filled", fillcolor="#dbeafe", width=0.35, fixedsize=true, label="b2"];
+        ndots [shape=plaintext, label="..."];
+        n31 [shape=circle, style="filled", fillcolor="#fef3c7", width=0.45, fixedsize=true, label="b31"];
+        n0 -> n1 [label="0/1", fontsize=8, color="#94a3b8"];
+        n1 -> n2 [color="#94a3b8"];
+        n2 -> ndots [color="#94a3b8"];
+        ndots -> n31 [color="#94a3b8"];
+        warn1 [shape=note, style="filled", fillcolor="#fee2e2", fontsize=8,
+               label="/32 host route sits 32\llevels deep = 32 dereferences\l"];
+        n31 -> warn1 [style=invis];
+    }
+
+    // Panel 2: path compression
+    subgraph cluster_path {
+        label="2. path compression\ncollapse single-child chains";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+        pa [shape=circle, style="filled", fillcolor="#dbeafe", width=0.35, fixedsize=true, label="b0"];
+        skip [shape=box, style="filled", fillcolor="#dcfce7",
+              label="skip-node\npos jumps ahead\n(skip 12 bits)"];
+        pb [shape=circle, style="filled", fillcolor="#fef3c7", width=0.5, fixedsize=true, label="leaf"];
+        pa -> skip [color="#16a34a"];
+        skip -> pb [color="#16a34a"];
+        note2 [shape=note, style="filled", fillcolor="#dcfce7", fontsize=8,
+               label="key_vector.pos records\lhow many bits to skip\l"];
+        skip -> note2 [style=invis];
+    }
+
+    // Panel 3: level compression
+    subgraph cluster_level {
+        label="3. level compression\nmulti-bit fan-out, ~5-10 hops";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+        wide [shape=box, style="filled", fillcolor="#e9d5ff",
+              label="one 4-bit tnode\nbits = 4: up to 16 children\nresolves 4 bits in 1 access"];
+        c0 [shape=circle, style="filled", fillcolor="#fef3c7", width=0.35, fixedsize=true, label="c0"];
+        c1 [shape=circle, style="filled", fillcolor="#fef3c7", width=0.35, fixedsize=true, label="c1"];
+        c2 [shape=circle, style="filled", fillcolor="#fef3c7", width=0.35, fixedsize=true, label="..."];
+        c15 [shape=circle, style="filled", fillcolor="#fef3c7", width=0.4, fixedsize=true, label="c15"];
+        wide -> c0; wide -> c1; wide -> c2 [style=dashed, color="#94a3b8"]; wide -> c15;
+        note3 [shape=note, style="filled", fillcolor="#dcfce7", fontsize=8,
+               label="key_vector.bits = 4\lDECLARE_FLEX_ARRAY of\l16 child pointers\l"];
+        wide -> note3 [style=invis];
+    }
+
+    // node struct legend (record, kept at bottom)
+    legend [shape=record, style="filled", fillcolor="#dbeafe", fontsize=9,
+            label="struct key_vector|pos = which bit tested (path compression)|bits = bits consumed/step (level compression)|bits == 0 means leaf, bits \> 0 means tnode"];
+
+    // arrange panels left-to-right, legend below
+    warn1 -> pa [style=invis];
+    note2 -> wide [style=invis];
+    warn1 -> legend [style=invis];
+}

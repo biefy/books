@@ -1,0 +1,39 @@
+digraph vlan_filtering {
+    rankdir=LR;
+    labelloc=t;
+    label="VLAN-aware bridge: ingress PVID stamp, FDB key, egress tag/untag, membership gate";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    in [shape=box, style="filled", fillcolor="#fef3c7",
+        label="untagged frame\nenters v1p"];
+
+    ingress [shape=box, style="filled", fillcolor="#dbeafe",
+             label="br_allowed_ingress()\nstamp PVID 100\n(port's native VLAN)"];
+
+    fdb [shape=box, style="filled", fillcolor="#e9d5ff",
+         label="FDB lookup\nkey = {MAC, 100}"];
+
+    subgraph cluster_egress {
+        label="egress port policy (br_handle_vlan)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        v2p [shape=box, style="filled", fillcolor="#dcfce7",
+             label="v2p  VID 100 untagged\nstrip tag on egress\nFORWARD (shared VID 100)"];
+        v3p [shape=box, style="filled,rounded", fillcolor="#e5e7eb", fontcolor="#9ca3af",
+             color="#9ca3af",
+             label="v3p  VID 200 only\nNOT a member of VID 100\nframe DROPPED at egress"];
+    }
+
+    out2 [shape=box, style="filled", fillcolor="#fef3c7",
+          label="plain frame\nout v2p"];
+
+    in -> ingress;
+    ingress -> fdb;
+    fdb -> v2p [color="#16a34a", style=bold];
+    fdb -> v3p [color="#dc2626", style=dashed, label="membership\ncheck fails"];
+    v2p -> out2 [color="#16a34a", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="Forwarding is gated by SHARED membership: a frame moves\lbetween two ports only if BOTH are members of its VID.\lMoving v2p to VID 200 breaks connectivity at the egress\lmembership check — NOT a FDB miss.\l"];
+    note -> v3p [style=invis];
+}

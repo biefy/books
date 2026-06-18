@@ -1,0 +1,49 @@
+digraph two_allocators {
+    rankdir=TB;
+    labelloc=t;
+    label="One skb = two allocations from two allocators";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    alloc [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+           label="__alloc_skb(size, gfp, flags, node)"];
+
+    // Left: descriptor allocator
+    subgraph cluster_desc {
+        label="1. the DESCRIPTOR (fixed size)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        headcache [shape=box, style="filled", fillcolor="#dbeafe",
+                   label="skbuff_head_cache\n(slab kmem_cache,\nSLAB_HWCACHE_ALIGN)\npop a free slot — O(1)"];
+        fclone [shape=box, style="filled", fillcolor="#dbeafe",
+                label="skbuff_fclone_cache\n(SKB_ALLOC_FCLONE):\ntwo skbs + refcount,\nclone pre-bundled"];
+        percpu [shape=box, style="filled", fillcolor="#dbeafe",
+                label="per-CPU napi_alloc_cache\n(SKB_ALLOC_NAPI):\nRX fast path, skips slab\nslow path"];
+        desc [shape=box, style="filled,rounded", fillcolor="#bfdbfe",
+              label="struct sk_buff\n(the descriptor)"];
+        headcache -> desc; fclone -> desc [style=dashed]; percpu -> desc [style=dashed];
+    }
+
+    // Right: data buffer allocator
+    subgraph cluster_data {
+        label="2. the LINEAR DATA BUFFER (variable size)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
+        kreserve [shape=box, style="filled", fillcolor="#fef3c7",
+                  label="kmalloc_reserve()"];
+        small [shape=box, style="filled", fillcolor="#fef3c7",
+               label="skb_small_head_cache\n(small heads)"];
+        buckets [shape=box, style="filled", fillcolor="#fef3c7",
+                 label="kmalloc size buckets\n(kmalloc-512, -2k, …)\nfor larger heads"];
+        data [shape=box, style="filled,rounded", fillcolor="#fde68a",
+              label="linear data buffer"];
+        kreserve -> small; kreserve -> buckets; small -> data; buckets -> data;
+    }
+
+    alloc -> headcache [label="alloc 1"];
+    alloc -> kreserve [label="alloc 2"];
+
+    desc -> data [label="skb->head points in", color="#dc2626", style=bold];
+
+    gfp [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+         label="gfp_mask = GFP_ATOMIC in RX softirq\l(must not sleep). node = NUMA hint.\l"];
+    alloc -> gfp [style=invis];
+}

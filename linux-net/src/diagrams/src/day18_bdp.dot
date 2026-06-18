@@ -1,0 +1,33 @@
+digraph bdp {
+    rankdir=LR;
+    labelloc=t;
+    label="Bandwidth-delay product: the pipe must hold one BDP of in-flight data";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The "hose": bandwidth = width, RTT = length
+    subgraph cluster_pipe {
+        label="the pipe (link)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+
+        sender [shape=box, style="filled", fillcolor="#dbeafe",
+                label="SENDER\nsend buffer\n(sk_sndbuf)"];
+        water  [shape=box, style="filled", fillcolor="#fef3c7",
+                label="bytes in flight = BDP\n= bandwidth x RTT\n(already sent, not yet ACKed)"];
+        receiver [shape=box, style="filled", fillcolor="#dbeafe",
+                  label="RECEIVER\nadvertised window\n(<= sk_rcvbuf)"];
+
+        sender -> water [label="bandwidth = how FAT", fontname="Helvetica", fontsize=9, color="#d97706", penwidth=3];
+        water -> receiver [label="RTT = how LONG", fontname="Helvetica", fontsize=9, color="#2563eb", penwidth=2];
+        receiver -> sender [label="ACKs return after 1 RTT", fontname="Helvetica", fontsize=9, style=dashed, constraint=false];
+    }
+
+    example [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+             label="Example: 10 Gbps x 100 ms RTT\l  BDP = 10e9/8 x 0.1 ~= 125 MB\lThe sender may have up to one BDP outstanding\lbefore it must stop and wait for an ACK.\l"];
+
+    warn [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="Gotcha: if the buffer/window < BDP,\lthe sender stalls waiting for ACKs and\lthe link sits idle -- throughput is capped\lno matter how fast the link is.\l"];
+
+    receiver -> example [style=invis];
+    water -> warn [style=invis];
+}

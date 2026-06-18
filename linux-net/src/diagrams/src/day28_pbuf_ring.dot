@@ -1,0 +1,45 @@
+digraph pbuf_ring {
+    rankdir=LR;
+    labelloc=t;
+    label="Provided buffer ring: kernel picks a buffer on data arrival, returns its bid";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The buffer-ring pool
+    subgraph cluster_pool {
+        label="provided buffer ring  (second shared ring, registered via IORING_REGISTER_PBUF_RING)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=record, style="filled", fillcolor="#fef3c7"];
+        b0 [label="{addr|len|bid=0}"];
+        b1 [label="{addr|len|bid=1}"];
+        b2 [label="{addr|len|bid=2}"];
+        b3 [label="{addr|len|bid=3}"];
+        b0 -> b1 -> b2 -> b3 [color="#94a3b8", arrowhead=none];
+        b3 -> b0 [color="#94a3b8", style=dashed, constraint=false, label="wraps"];
+    }
+
+    // The recv
+    recv [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+          label="multishot recv\nwith IOSQE_BUFFER_SELECT\n(buffer choice DEFERRED\nuntil data is ready)"];
+
+    arrive [shape=box, style="filled", fillcolor="#dbeafe",
+            label="data arrives →\nkernel draws next free slot\niov_iter_ubuf(...) net.c:1061"];
+
+    recv -> arrive [color="#7c3aed", style=bold];
+    b1 -> arrive [color="#d97706", style=bold, label="pick bid=1"];
+
+    // The CQE
+    cqe [shape=record, style="filled", fillcolor="#dcfce7",
+         label="{CQE|res = bytes|flags: F_BUFFER set|bid = flags \>\> BUFFER_SHIFT (16)}"];
+    arrive -> cqe [color="#16a34a", style=bold, label="post"];
+
+    // Re-publish
+    process [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+             label="userspace: decode bid,\nprocess the bytes"];
+    cqe -> process [color="#16a34a"];
+    process -> b1 [color="#16a34a", style=dashed, constraint=false,
+                   label="re-publish slot\nback to pool"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="one armed recv + a buffer ring =\lsubmission-free, buffer-assignment-free,\lsteady-state receive.\l"];
+}

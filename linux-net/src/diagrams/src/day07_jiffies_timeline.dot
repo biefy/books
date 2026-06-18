@@ -1,0 +1,36 @@
+digraph jiffies_timeline {
+    rankdir=LR;
+    labelloc=t;
+    label="Time in jiffies: a neighbour's reachability window (all values = seconds * HZ)";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The timeline anchor points, drawn left-to-right
+    subgraph cluster_line {
+        label="jiffies (1 jiffy = 1/HZ second; e.g. 1ms at HZ=1000)";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", fillcolor="#dbeafe"];
+
+        t0   [label="t0 = confirmed\n(jiffies snapshot at\nlast reachability\nconfirmation)"];
+        p1   [shape=box, style="filled", fillcolor="#fef3c7", label="+1*HZ\n(retrans_time)"];
+        p2   [shape=box, style="filled", fillcolor="#fef3c7", label="+2*HZ"];
+        p3   [shape=box, style="filled", fillcolor="#fef3c7", label="+3*HZ"];
+        dots [shape=plaintext, style="", fillcolor="white", label="...  probe spacing\nevery 1*HZ ..."];
+        bound [shape=box, style="filled", fillcolor="#fee2e2",
+               label="+30*HZ\n(reachable_time)\nREACHABLE -> STALE\nboundary"];
+
+        t0 -> p1 -> p2 -> p3 -> dots -> bound [color="#94a3b8", arrowhead=vee];
+    }
+
+    state_r [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+             label="REACHABLE\nwhile now < confirmed + reachable_time"];
+    state_s [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+             label="STALE\nonce now >= confirmed + reachable_time"];
+
+    t0 -> state_r [style=invis];
+    bound -> state_s [style=invis];
+
+    cmp [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+         label="staleness test in neigh_timer_handler:\ltime_after(now, confirmed + reachable_time)\lnow = jiffies (a single cheap memory load)\l"];
+    bound -> cmp [style=invis];
+}

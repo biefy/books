@@ -1,0 +1,47 @@
+digraph waitqueue_mechanism {
+    rankdir=LR;
+    labelloc=t;
+    label="One socket wait queue, two kinds of waiter — the .func indirection";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // The wake path (left to right top row)
+    skb [shape=box, style="filled", fillcolor="#fef3c7",
+         label="skb enqueued on\nsk->sk_receive_queue"];
+    ready [shape=box, style="filled", fillcolor="#e9d5ff",
+           label="sk->sk_data_ready(sk)\n= sock_def_readable()"];
+    wakeup [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="wake_up_interruptible_sync_poll(\n  &wq->wait, EPOLLIN | ...)\nwalks the list, calls each .func"];
+
+    skb -> ready [style=bold, color="#7c3aed", label="protocol layer"];
+    ready -> wakeup [style=bold, color="#7c3aed"];
+
+    // The wait queue head + its entries
+    subgraph cluster_wq {
+        label="socket wait queue  (sk_sleep(sk))";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
+        head [shape=box, style="filled", fillcolor="#dbeafe",
+              label="wait_queue_head_t\n(list of waiters)"];
+        e1 [shape=record, style="filled", fillcolor="#dbeafe",
+            label="{wait_queue_entry|private = task|.func = woken_wake_function}"];
+        e2 [shape=record, style="filled", fillcolor="#dcfce7",
+            label="{wait_queue_entry|base = epitem|.func = ep_poll_callback}"];
+        head -> e1 [arrowhead=none, color="#94a3b8"];
+        head -> e2 [arrowhead=none, color="#94a3b8"];
+    }
+
+    wakeup -> head [style=bold, color="#7c3aed", label="for each entry:\ncall .func(key=EPOLLIN)"];
+
+    // Outcomes of each .func
+    o1 [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+        label="blocking recv():\nwake parked task →\nrecv() returns data"];
+    o2 [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+        label="epoll:\nappend epitem to rdllist,\nwake epoll_wait sleepers"];
+
+    e1 -> o1 [label="ordinary sleeper"];
+    e2 -> o2 [style=bold, color="#16a34a", label="epoll's custom .func"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="Same queue, same wake walk.\lThe ONLY difference epoll makes:\lwhich .func is registered.\l"];
+    o2 -> note [style=invis];
+}

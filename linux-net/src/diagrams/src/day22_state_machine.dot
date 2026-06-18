@@ -1,0 +1,36 @@
+digraph state_machine {
+    rankdir=TB;
+    labelloc=t;
+    label="Conntrack state machine: NEW -> ESTABLISHED / RELATED, and the unconfirmed -> confirmed two-phase commit";
+    fontname="Helvetica"; fontsize=13;
+    node [fontname="Monaco", fontsize=10];
+
+    start [shape=box, style="filled", fillcolor="#fef3c7",
+           label="first packet arrives\ntuple miss in hash"];
+
+    unconfirmed [shape=box, style="filled", fillcolor="#e9d5ff",
+                 label="UNCONFIRMED entry\ninfo = NEW\nnot in hash, no list;\nheld only by skb->_nfct"];
+
+    drop [shape=box, style="filled", fillcolor="#fee2e2",
+          label="rule DROP / invalid\nskb freed -> refcount 0\nentry vanishes"];
+
+    confirmed [shape=box, style="filled", fillcolor="#dbeafe",
+               label="NF_ACCEPT -> __nf_conntrack_confirm\ninserted into global hash\nIPS_CONFIRMED set, +1 hash ref\ninfo still = NEW"];
+
+    established [shape=box, style="filled", fillcolor="#dcfce7",
+                label="ESTABLISHED\nreply tuple matched\nIPS_SEEN_REPLY set\ninfo >= IP_CT_IS_REPLY"];
+
+    related [shape=box, style="filled", fillcolor="#dcfce7",
+             label="RELATED\nexpectation matched\n->master set\ninfo = IP_CT_RELATED"];
+
+    start -> unconfirmed [color="#d97706"];
+    unconfirmed -> drop [color="#dc2626", style=bold, label="DROP"];
+    unconfirmed -> confirmed [color="#16a34a", style=bold, label="ACCEPT"];
+    confirmed -> established [color="#2563eb", style=bold, label="reply arrives\n(reply tuple hit)"];
+    confirmed -> related [color="#7c3aed", label="expected (helper)\nflow's 1st packet"];
+    established -> established [color="#2563eb", label="subsequent packets\nrefresh ct->timeout"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="A forward (ORIGINAL-direction) hit is NOT always ESTABLISHED:\lresolve_normal_ct picks the info from the entry's status --\lESTABLISHED only once IPS_SEEN_REPLY is set, RELATED for an\lexpected flow, otherwise still NEW (e.g. a retransmitted SYN).\l"];
+    established -> note [style=invis];
+}

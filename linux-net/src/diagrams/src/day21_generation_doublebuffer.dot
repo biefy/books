@@ -1,0 +1,52 @@
+digraph generation_doublebuffer {
+    rankdir=TB;
+    labelloc=t;
+    label="Atomic update: nftables generation double-buffer vs iptables wholesale realloc";
+    fontname="Helvetica"; fontsize=14;
+    node [fontname="Monaco", fontsize=10];
+
+    // nftables panel
+    subgraph cluster_nft {
+        label="nftables: two per-chain blobs + a cursor flip under RCU";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
+
+        cursor [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+                label="net->nft.gencursor\n(genbit: which gen is live)"];
+
+        gen0 [shape=box, style="filled", fillcolor="#dbeafe",
+              label="chain->blob_gen_0\nACTIVE (live)\nold ruleset"];
+        gen1 [shape=box, style="filled", fillcolor="#fef3c7",
+              label="chain->blob_gen_1\nINACTIVE (off-line)\nnew ruleset BEING BUILT"];
+
+        cursor -> gen0 [label="genbit=0 -> live", color="#16a34a", style=bold];
+        cursor -> gen1 [label="2. flip cursor", color="#7c3aed", style=dashed];
+
+        update [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+                label="update (netlink batch):\n1. build new rules into gen_1\n2. flip gencursor\n3. RCU frees gen_0 when\n   in-flight packets finish"];
+        update -> gen1 [label="1. write off-line", color="#2563eb"];
+
+        pktnew [shape=box, style="filled", fillcolor="#dcfce7",
+                label="new packet\nreads new blob"];
+        pktold [shape=box, style="filled", fillcolor="#fee2e2",
+                label="in-flight packet\nstill reads gen_0\nvia RCU (safe)"];
+        pktnew -> gen1 [label="after flip", color="#16a34a", style=dashed];
+        pktold -> gen0 [label="grabbed earlier", color="#dc2626"];
+    }
+
+    // iptables panel
+    subgraph cluster_ipt {
+        label="iptables: ONE whole-table buffer, reallocated wholesale";
+        fontname="Helvetica"; fontsize=11; style="rounded"; color="#dc2626";
+
+        priv [shape=box, style="filled", fillcolor="#dbeafe",
+              label="table->private\n(xt_table_info)\nentire ruleset, one buffer"];
+        newbuf [shape=box, style="filled", fillcolor="#fef3c7",
+                label="NEW xt_table_info\nentire ruleset copied in\n(realloc for ANY change)"];
+        swap [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+              label="xt_replace_table:\nallocate whole new buffer,\ncopy all rules, swap pointer"];
+        priv -> swap [label="add 1 rule", color="#dc2626"];
+        swap -> newbuf [label="copy everything", color="#dc2626", style=bold];
+    }
+
+    cursor -> priv [style=invis];
+}
