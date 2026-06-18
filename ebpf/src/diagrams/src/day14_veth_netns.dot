@@ -11,7 +11,7 @@ digraph veth_netns {
         veth0 [shape=box, style="filled,rounded", fillcolor="#dbeafe",
             label="veth0\n10.0.0.1/24"];
         lo [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
-            label="lo (loopback)\nXX would short-circuit XX\nif 10.0.0.2 were local"];
+            label="lo (loopback)\nwould short-circuit delivery\nif 10.0.0.2 were a local address"];
     }
 
     subgraph cluster_ns1 {
