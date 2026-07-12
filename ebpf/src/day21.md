@@ -253,85 +253,22 @@ Each is exchanged independently. The `btf_record` for this value type has **two*
 ## The lab
 
 ```c
-/* task_assoc.bpf.c */
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_tracing.h>
-
-char LICENSE[] SEC("license") = "GPL";
-
-extern struct task_struct *bpf_task_acquire(struct task_struct *p) __ksym;
-extern void bpf_task_release(struct task_struct *p) __ksym;
-
-struct val {
-    struct task_struct __kptr *task;
-    __u64 saved_at_ns;
-};
-
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 1024);
-    __type(key, __u32);
-    __type(value, struct val);
-} stash SEC(".maps");
-
-SEC("fentry/filename_unlinkat")
-int BPF_PROG(on_unlink)
-{
-    struct task_struct *cur = bpf_get_current_task_btf();
-    struct task_struct *acq = bpf_task_acquire(cur);
-    if (!acq) return 0;
-
-    __u32 tid = bpf_get_current_pid_tgid() & 0xffffffff;
-
-    /* Initial map upsert with NULL kptr + timestamp */
-    struct val v = { .task = NULL, .saved_at_ns = bpf_ktime_get_ns() };
-    bpf_map_update_elem(&stash, &tid, &v, BPF_ANY);
-
-    /* Lookup the slot to xchg the kptr in */
-    struct val *vp = bpf_map_lookup_elem(&stash, &tid);
-    if (!vp) {
-        bpf_task_release(acq);  /* couldn't insert; release manually */
-        return 0;
-    }
-
-    /* Move acq into the map slot. xchg returns previous occupant. */
-    struct task_struct *old = bpf_kptr_xchg(&vp->task, acq);
-    if (old)
-        bpf_task_release(old);
-
-    return 0;
-}
-
-SEC("fexit/filename_unlinkat")
-int BPF_PROG(on_unlink2)
-{
-    /* Genuinely "later": fexit fires on the function's *return*, after the
-     * fentry program above has already stashed the task on entry. */
-    __u32 tid = bpf_get_current_pid_tgid() & 0xffffffff;
-    struct val *vp = bpf_map_lookup_elem(&stash, &tid);
-    if (!vp) return 0;
-
-    struct task_struct *t = bpf_kptr_xchg(&vp->task, NULL);
-    if (!t) return 0;  /* slot was empty */
-
-    bpf_printk("retrieved pid=%d, was saved %llu ns ago",
-               t->pid, bpf_ktime_get_ns() - vp->saved_at_ns);
-
-    bpf_task_release(t);
-    return 0;
-}
+{{#include ../labs/day21/task_assoc.bpf.c:book}}
 ```
 
 Why `filename_unlinkat`? It's a real, stable function — `int filename_unlinkat(int dfd, struct filename *name)` at `fs/namei.c:5536` — on the path of every `rm`/`unlink`. The fentry program runs on the way *in* and stashes; the fexit program runs on the way *out* (the function's return) and retrieves. So the save and the read are genuinely separated in time by the body of `filename_unlinkat`, which is the cross-invocation scenario this whole chapter is about.
 
 Note the manual-release path inside the failed-lookup branch: if the `bpf_map_lookup_elem` right after the upsert somehow returns NULL, `acq` still holds an `rcu_users` ref that the map never took ownership of, so you must `bpf_task_release(acq)` yourself or leak it. The kptr machinery only auto-frees what actually made it *into* a slot.
 
-Build and run:
+Build and run (the loader is the standard skeleton open/load/attach pattern and attaches both the fentry and fexit programs):
+
+```c
+{{#include ../labs/day21/task_assoc.c:book}}
+```
 
 ```bash
-make
-sudo ./task_assoc &
+make task_assoc
+sudo ./.output/day21/task_assoc &
 touch /tmp/x && rm /tmp/x       # fentry stashes on entry, fexit retrieves on return
 sudo cat /sys/kernel/debug/tracing/trace_pipe
 ```

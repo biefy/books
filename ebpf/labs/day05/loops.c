@@ -1,0 +1,81 @@
+// ANCHOR: book
+#include <errno.h>
+#include <signal.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+
+#include <bpf/libbpf.h>
+
+#include "loops.skel.h"
+
+static volatile sig_atomic_t exiting;
+
+static void handle_signal(int signal_number)
+{
+    (void)signal_number;
+    exiting = 1;
+}
+
+static int install_signal_handlers(void)
+{
+    const struct sigaction action = {
+        .sa_handler = handle_signal,
+    };
+
+    if (sigaction(SIGINT, &action, NULL) != 0 ||
+        sigaction(SIGTERM, &action, NULL) != 0) {
+        fprintf(stderr, "failed to install signal handlers: %s\n",
+                strerror(errno));
+        return -errno;
+    }
+
+    return 0;
+}
+
+int main(void)
+{
+    /* kernel_log_level = 1 prints the verifier log (including the
+     * "processed N insns" line) for each program on load, which is how you
+     * compare the inline loop against the bpf_loop callback. */
+    LIBBPF_OPTS(bpf_object_open_opts, opts, .kernel_log_level = 1);
+    struct loops_bpf *skel = NULL;
+    int err;
+
+    setvbuf(stdout, NULL, _IOLBF, 0);
+
+    err = install_signal_handlers();
+    if (err)
+        return 1;
+
+    skel = loops_bpf__open_opts(&opts);
+    if (!skel) {
+        fprintf(stderr, "failed to open loops BPF skeleton\n");
+        return 1;
+    }
+
+    err = loops_bpf__load(skel);
+    if (err) {
+        fprintf(stderr, "failed to load loops BPF programs: %s\n",
+                strerror(-err));
+        goto cleanup;
+    }
+
+    err = loops_bpf__attach(skel);
+    if (err) {
+        fprintf(stderr, "failed to attach loops BPF programs: %s\n",
+                strerror(-err));
+        goto cleanup;
+    }
+
+    puts("Both loop shapes loaded and attached; press Ctrl-C to stop.");
+    while (!exiting)
+        sleep(1);
+
+    err = 0;
+
+cleanup:
+    loops_bpf__destroy(skel);
+    return err != 0;
+}
+// ANCHOR_END: book

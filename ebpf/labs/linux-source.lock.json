@@ -1,0 +1,6 @@
+{
+  "version": "7.1",
+  "url": "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.1.tar.xz",
+  "sha256": "691f44797fbe790dc8a321604c927087526ad27b6d649925d60f8eed0a2564a0",
+  "git_commit": "8cd9520d35a6c38db6567e97dd93b1f11f185dc6"
+}

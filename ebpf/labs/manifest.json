@@ -1,0 +1,587 @@
+{
+  "schema": 1,
+  "labs": [
+    {
+      "id": "day01",
+      "chapter": "day01.md",
+      "backend": "standalone",
+      "apps": [
+        "day01/hello"
+      ],
+      "sources": [
+        "day01/hello.bpf.c",
+        "day01/hello.c",
+        "day01/hello.h"
+      ],
+      "book_sources": [
+        "day01/hello.h",
+        "day01/hello.bpf.c",
+        "day01/hello.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF+skeleton+link",
+        "smoke": "owned unlink trigger"
+      }
+    },
+    {
+      "id": "day02",
+      "chapter": "day02.md",
+      "backend": "standalone",
+      "apps": [
+        "day02/count"
+      ],
+      "sources": [
+        "day02/count.bpf.c",
+        "day02/count.c"
+      ],
+      "book_sources": [
+        "day02/count.bpf.c",
+        "day02/count.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF+skeleton+link",
+        "smoke": "owned unlink triggers"
+      }
+    },
+    {
+      "id": "day03",
+      "chapter": "day03.md",
+      "backend": "standalone",
+      "apps": [
+        "day03/parent"
+      ],
+      "sources": [
+        "day03/parent.bpf.c",
+        "day03/parent.c",
+        "day03/parent.h"
+      ],
+      "book_sources": [
+        "day03/parent.h",
+        "day03/parent.bpf.c",
+        "day03/parent.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF+skeleton+link",
+        "smoke": "owned unlink trigger"
+      }
+    },
+    {
+      "id": "day04",
+      "chapter": "day04.md",
+      "backend": "standalone",
+      "apps": [
+        "day04/reject"
+      ],
+      "sources": [
+        "day04/reject.bpf.c",
+        "day04/reject.c"
+      ],
+      "book_sources": [
+        "day04/reject.bpf.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF+skeleton+link",
+        "smoke": "controlled child syscall"
+      }
+    },
+    {
+      "id": "day05",
+      "chapter": "day05.md",
+      "backend": "standalone",
+      "apps": [
+        "day05/loops"
+      ],
+      "sources": [
+        "day05/loops.bpf.c",
+        "day05/loops.c"
+      ],
+      "book_sources": [
+        "day05/loops.bpf.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF+skeleton+link",
+        "smoke": "controlled child syscall"
+      }
+    },
+    {
+      "id": "day06",
+      "chapter": "day06.md",
+      "backend": "standalone",
+      "apps": [
+        "day06/latency"
+      ],
+      "sources": [
+        "day06/latency.bpf.c",
+        "day06/latency.c",
+        "day06/latency.h"
+      ],
+      "book_sources": [
+        "day06/latency.h",
+        "day06/latency.bpf.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF+skeleton+link",
+        "smoke": "controlled child syscall"
+      }
+    },
+    {
+      "id": "day07",
+      "chapter": "day07.md",
+      "backend": "standalone",
+      "apps": [
+        "day07/inspect"
+      ],
+      "sources": [
+        "day07/inspect.bpf.c",
+        "day07/inspect.c"
+      ],
+      "book_sources": [
+        "day07/inspect.bpf.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF+skeleton+link",
+        "smoke": "controlled child syscall"
+      }
+    },
+    {
+      "id": "day08",
+      "chapter": "day08.md",
+      "backend": "standalone",
+      "apps": [
+        "day08/schedlat"
+      ],
+      "sources": [
+        "day08/schedlat.bpf.c",
+        "day08/schedlat.c",
+        "day08/schedlat.h"
+      ],
+      "book_sources": [
+        "day08/schedlat.h",
+        "day08/schedlat.bpf.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF+skeleton+link",
+        "smoke": "controlled scheduler load"
+      }
+    },
+    {
+      "id": "day09",
+      "chapter": "day09.md",
+      "backend": "standalone",
+      "apps": [
+        "day09/stacks"
+      ],
+      "sources": [
+        "day09/stacks.bpf.c",
+        "day09/stacks.c"
+      ],
+      "book_sources": [
+        "day09/stacks.bpf.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF+skeleton+link",
+        "smoke": "controlled child syscall"
+      }
+    },
+    {
+      "id": "day10",
+      "chapter": "day10.md",
+      "backend": "standalone",
+      "apps": [
+        "day10/bashspy"
+      ],
+      "sources": [
+        "day10/bashspy.bpf.c",
+        "day10/bashspy.c",
+        "day10/bashspy.h"
+      ],
+      "book_sources": [
+        "day10/bashspy.h",
+        "day10/bashspy.bpf.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF+skeleton+link",
+        "smoke": "controlled probe target"
+      }
+    },
+    {
+      "id": "day11",
+      "chapter": "day11.md",
+      "backend": "standalone",
+      "apps": [
+        "day11/multi"
+      ],
+      "sources": [
+        "day11/multi.bpf.c",
+        "day11/multi.c"
+      ],
+      "book_sources": [
+        "day11/multi.bpf.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF+skeleton+link",
+        "smoke": "controlled child syscalls"
+      }
+    },
+    {
+      "id": "day12",
+      "chapter": "day12.md",
+      "backend": "standalone",
+      "apps": [
+        "day12/openat_path"
+      ],
+      "sources": [
+        "day12/openat_path.bpf.c",
+        "day12/openat_path.c",
+        "day12/openat_path.h"
+      ],
+      "book_sources": [
+        "day12/openat_path.h",
+        "day12/openat_path.bpf.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF+skeleton+link",
+        "smoke": "owned path trigger"
+      }
+    },
+    {
+      "id": "day13",
+      "chapter": "day13.md",
+      "backend": "standalone",
+      "apps": [
+        "day13/dropviz"
+      ],
+      "sources": [
+        "day13/dropviz.bpf.c",
+        "day13/dropviz.c",
+        "day13/dropviz.h"
+      ],
+      "book_sources": [
+        "day13/dropviz.h",
+        "day13/dropviz.bpf.c",
+        "day13/dropviz.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF+skeleton+link",
+        "smoke": "owned vfs_read workload"
+      }
+    },
+    {
+      "id": "day14",
+      "chapter": "day14.md",
+      "backend": "standalone",
+      "apps": [
+        "day14/xdp_count"
+      ],
+      "sources": [
+        "day14/xdp_count.bpf.c",
+        "day14/xdp_count.c"
+      ],
+      "book_sources": [
+        "day14/xdp_count.bpf.c",
+        "day14/xdp_count.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF+skeleton+link",
+        "smoke": "owned netns/veth XDP"
+      }
+    },
+    {
+      "id": "day15",
+      "chapter": "day15.md",
+      "backend": "standalone",
+      "apps": [
+        "day15/block"
+      ],
+      "tools": [
+        "day15/blockcli"
+      ],
+      "sources": [
+        "day15/block.bpf.c",
+        "day15/block.c",
+        "day15/block.h",
+        "day15/blockcli.c"
+      ],
+      "book_sources": [
+        "day15/block.h",
+        "day15/block.bpf.c",
+        "day15/blockcli.c",
+        "day15/block.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF+skeleton+loader+CLI link",
+        "smoke": "owned netns/veth XDP and pin directory"
+      }
+    },
+    {
+      "id": "day16",
+      "chapter": "day16.md",
+      "backend": "standalone-object",
+      "objects": [
+        "day16/tc"
+      ],
+      "sources": [
+        "day16/tc.bpf.c"
+      ],
+      "book_sources": [
+        "day16/tc.bpf.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF inspection",
+        "smoke": "owned netns/veth tc command"
+      }
+    },
+    {
+      "id": "day17",
+      "chapter": "day17.md",
+      "backend": "standalone",
+      "apps": [
+        "day17/tcx"
+      ],
+      "sources": [
+        "day17/tcx.bpf.c",
+        "day17/tcx.c"
+      ],
+      "book_sources": [
+        "day17/tcx.bpf.c",
+        "day17/tcx.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF+skeleton+link",
+        "smoke": "owned netns/veth tcx"
+      }
+    },
+    {
+      "id": "day18",
+      "chapter": "day18.md",
+      "backend": "standalone",
+      "apps": [
+        "day18/xsk"
+      ],
+      "sources": [
+        "day18/xsk.bpf.c",
+        "day18/xsk.c"
+      ],
+      "book_sources": [
+        "day18/xsk.bpf.c",
+        "day18/xsk.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF+skeleton+libxdp-link",
+        "smoke": "owned netns/veth AF_XDP"
+      }
+    },
+    {
+      "id": "day19",
+      "chapter": "day19.md",
+      "backend": "standalone",
+      "apps": [
+        "day19/fw",
+        "day19/tune"
+      ],
+      "sources": [
+        "day19/fw.bpf.c",
+        "day19/fw.c",
+        "day19/tune.bpf.c",
+        "day19/tune.c"
+      ],
+      "book_sources": [
+        "day19/fw.bpf.c",
+        "day19/fw.c",
+        "day19/tune.bpf.c",
+        "day19/tune.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF+skeleton+link",
+        "smoke": "owned child cgroup/process"
+      }
+    },
+    {
+      "id": "day20",
+      "chapter": "day20.md",
+      "backend": "standalone",
+      "apps": [
+        "day20/kfunc_demo"
+      ],
+      "sources": [
+        "day20/kfunc_demo.bpf.c",
+        "day20/kfunc_demo.c"
+      ],
+      "book_sources": [
+        "day20/kfunc_demo.bpf.c",
+        "day20/kfunc_demo.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF+skeleton+link",
+        "smoke": "owned unlink trigger"
+      }
+    },
+    {
+      "id": "day21",
+      "chapter": "day21.md",
+      "backend": "standalone",
+      "apps": [
+        "day21/task_assoc"
+      ],
+      "sources": [
+        "day21/task_assoc.bpf.c",
+        "day21/task_assoc.c"
+      ],
+      "book_sources": [
+        "day21/task_assoc.bpf.c",
+        "day21/task_assoc.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF+skeleton+link",
+        "smoke": "owned unlink trigger"
+      }
+    },
+    {
+      "id": "day22",
+      "chapter": "day22.md",
+      "backend": "kernel-selftest",
+      "target": "tools/testing/selftests/bpf:progs/bpf_dctcp.c",
+      "build": "day22/build.sh",
+      "sources": [
+        "day22/build.sh",
+        "day22/config.env",
+        "day22/run.sh"
+      ],
+      "book_sources": [
+        "day22/build.sh",
+        "day22/run.sh"
+      ],
+      "runtime": {
+        "proof": "locked-v7.1 canonical DCTCP object build",
+        "smoke": "opt-in temporary owned registration"
+      }
+    },
+    {
+      "id": "day23",
+      "chapter": "day23.md",
+      "backend": "kernel-derivative",
+      "target": "logged_dctcp",
+      "build": "day23/build.sh",
+      "sources": [
+        "day23/build.sh",
+        "day23/dctcp_compat.bpf.h",
+        "day23/logged_dctcp.bpf.c",
+        "day23/logged_dctcp.c",
+        "day23/logged_dctcp.h",
+        "day23/run.sh"
+      ],
+      "book_sources": [
+        "day23/logged_dctcp.h",
+        "day23/logged_dctcp.bpf.c",
+        "day23/logged_dctcp.c",
+        "day23/run.sh"
+      ],
+      "runtime": {
+        "proof": "locked-v7.1 derivative compile+skeleton+link",
+        "smoke": "owned netns/netem/iperf struct_ops"
+      }
+    },
+    {
+      "id": "day24",
+      "chapter": "day24.md",
+      "backend": "standalone",
+      "apps": [
+        "day24/cpumask_demo"
+      ],
+      "sources": [
+        "day24/cpumask_demo.bpf.c",
+        "day24/cpumask_demo.c"
+      ],
+      "book_sources": [
+        "day24/cpumask_demo.bpf.c",
+        "day24/cpumask_demo.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF+skeleton+link",
+        "smoke": "owned unlink trigger"
+      }
+    },
+    {
+      "id": "day25",
+      "chapter": "day25.md",
+      "backend": "sched-ext-upstream",
+      "target": "tools/sched_ext/scx_simple",
+      "build": "day25/build.sh",
+      "sources": [
+        "day25/build.sh",
+        "day25/run.sh"
+      ],
+      "book_sources": [
+        "day25/build.sh",
+        "day25/run.sh"
+      ],
+      "runtime": {
+        "proof": "locked-v7.1 sched_ext build",
+        "smoke": "opt-in bounded scx_simple"
+      }
+    },
+    {
+      "id": "day26",
+      "chapter": "day26.md",
+      "backend": "sched-ext-derivative",
+      "target": "scx_priority",
+      "build": "day26/build.sh",
+      "sources": [
+        "day26/build.sh",
+        "day26/run.sh",
+        "day26/scx_priority.bpf.c",
+        "day26/scx_priority.c"
+      ],
+      "book_sources": [
+        "day26/scx_priority.bpf.c",
+        "day26/scx_priority.c",
+        "day26/run.sh"
+      ],
+      "runtime": {
+        "proof": "locked-v7.1 sched_ext derivative build",
+        "smoke": "opt-in owned child cgroup"
+      }
+    },
+    {
+      "id": "day27",
+      "chapter": "day27.md",
+      "backend": "sched-ext-upstream",
+      "target": "tools/sched_ext/scx_central",
+      "build": "day27/build.sh",
+      "sources": [
+        "day27/build.sh",
+        "day27/run.sh"
+      ],
+      "book_sources": [
+        "day27/build.sh",
+        "day27/run.sh"
+      ],
+      "runtime": {
+        "proof": "locked-v7.1 sched_ext build",
+        "smoke": "opt-in bounded scx_central"
+      }
+    },
+    {
+      "id": "day28-30",
+      "chapter": "day28-30.md",
+      "backend": "standalone",
+      "apps": [
+        "day28-30/capstone_latency"
+      ],
+      "sources": [
+        "day28-30/capstone_latency.bpf.c",
+        "day28-30/capstone_latency.c",
+        "day28-30/capstone_latency.h"
+      ],
+      "book_sources": [
+        "day28-30/capstone_latency.h",
+        "day28-30/capstone_latency.bpf.c",
+        "day28-30/capstone_latency.c"
+      ],
+      "runtime": {
+        "proof": "compile+ELF+BTF+skeleton+link",
+        "smoke": "controlled latency workload"
+      }
+    }
+  ]
+}

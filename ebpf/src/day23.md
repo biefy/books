@@ -116,45 +116,30 @@ The `in_ack_event` callback is ideal for our purpose: it fires per incoming ACK,
 
 ### Step 1: declare a ringbuf
 
-Add near the top of `bpf_dctcp.c`:
+The repo-owned lab lives under `ebpf/labs/day23/` and is a **derivative** of the
+kernel's `bpf_dctcp.c` (see the SPDX/provenance header in each file): it keeps the
+real DCTCP algorithm, drops the selftest-only fault-injection scaffolding, and
+adds the telemetry below. The shared record sits in its own header so the BPF
+producer and the userspace consumer cannot drift —
+`ebpf/labs/day23/logged_dctcp.h`:
 
 ```c
-struct tcp_event {
-    __u64 ts_ns;
-    __u32 srtt_us;
-    __u32 cwnd;
-    __u32 in_flight;
-    __u64 sk_cookie;
-};
+{{#include ../labs/day23/logged_dctcp.h}}
+```
 
-struct {
-    __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 256 * 1024);
-} rb SEC(".maps");
+The ring buffer is declared near the top of the derivative,
+`ebpf/labs/day23/logged_dctcp.bpf.c`:
+
+```c
+{{#include ../labs/day23/logged_dctcp.bpf.c:ringbuf}}
 ```
 
 ### Step 2: add telemetry without replacing the policy
 
-Do **not** replace `.in_ack_event` with a logging-only callback. DCTCP's alpha update depends on that callback. Instead, insert the telemetry at the top of the existing `bpf_dctcp_update_alpha` function (the BPF program bound to the `.in_ack_event` slot) and leave the original logic below it unchanged:
+Do **not** replace `.in_ack_event` with a logging-only callback. DCTCP's alpha update depends on that callback. Instead, insert the telemetry at the top of the existing `bpf_dctcp_update_alpha` function (the BPF program bound to the `.in_ack_event` slot) and leave the original logic below it unchanged. This is exactly how the lab source is structured — the telemetry emit, then the untouched DCTCP alpha update:
 
 ```c
-SEC("struct_ops/bpf_dctcp_update_alpha")
-void BPF_PROG(bpf_dctcp_update_alpha, struct sock *sk, __u32 flags)
-{
-    struct tcp_sock *tp = (void *)sk;
-
-    struct tcp_event *e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
-    if (e) {
-        e->ts_ns     = bpf_ktime_get_ns();
-        e->srtt_us   = tp->srtt_us >> 3;          /* srtt is stored in eighths of a us */
-        e->cwnd      = tp->snd_cwnd;              /* see note: kernel C uses tcp_snd_cwnd(tp) */
-        e->in_flight = tp->packets_out - (tp->sacked_out + tp->lost_out) + tp->retrans_out;
-        e->sk_cookie = (__u64)(unsigned long)sk;  /* per-flow id; see note below */
-        bpf_ringbuf_submit(e, 0);
-    }
-
-    /* Keep the original DCTCP alpha-update logic here. */
-}
+{{#include ../labs/day23/logged_dctcp.bpf.c:telemetry}}
 ```
 
 Each field maps straight back to the mental model: `srtt_us >> 3` is the smoothed RTT in real microseconds; `snd_cwnd` is the current speed limit in segments; the `in_flight` expression is how full the pipe is *right now*. When you watch these scroll by, you're watching the ACK clock tick.
@@ -176,15 +161,10 @@ With `BPF_SK_STORAGE_GET_F_CREATE` it allocates and initializes the blob on firs
 
 ### Step 3: keep the callback slot, change only the algorithm name
 
-Find the `SEC(".struct_ops") struct tcp_congestion_ops dctcp = { ... }` block. Keep the `.in_ack_event` slot pointed at the DCTCP implementation and change the name to avoid colliding with the original:
+Find the `SEC(".struct_ops") struct tcp_congestion_ops dctcp = { ... }` block. Keep the `.in_ack_event` slot pointed at the DCTCP implementation and change the name to avoid colliding with the original. The lab's assembled vtable — the full required-plus-optional slot set, named `bpf_dctcp_log`:
 
 ```c
-SEC(".struct_ops")
-struct tcp_congestion_ops dctcp = {
-    /* existing entries... */
-    .in_ack_event = (void *)bpf_dctcp_update_alpha,
-    .name = "bpf_dctcp_log",
-};
+{{#include ../labs/day23/logged_dctcp.bpf.c:vtable}}
 ```
 
 > **Name length matters.** Congestion-control names are capped at `TCP_CA_NAME_MAX - 1` = **15 usable characters** because the struct field is `char name[16]` and needs room for a trailing NUL. Since we load this CC as a BPF **struct_ops** module, a 16-character name fails at *load* time, not at selection. When the kernel initializes the `name` member, `bpf_tcp_ca_init_member()` (`net/ipv4/bpf_tcp_ca.c:228`) calls `bpf_obj_name_cpy(tcp_ca->name, ..., sizeof(name)=16)`. That helper (`kernel/bpf/syscall.c:1208`) copies until it hits a NUL within the 16-byte window; with 16 non-NUL chars there's no room for a terminator, `src` reaches `end`, and it returns `-EINVAL`. `init_member` propagates that negative return, and `__bpf_struct_ops_map_update_elem` (`kernel/bpf/bpf_struct_ops.c:763`) does `goto reset_unlock` — so the whole struct_ops map update **fails with EINVAL**. A 16-character name like `bpf_dctcp_logged` therefore never registers at all: it never appears in `tcp_available_congestion_control`, so there is no "registers fine," no later truncated lookup, and no `ENOENT`-on-select. (That truncated-select-then-`ENOENT` story is only how the *legacy kernel-module* registration path behaves, which is not what this chapter does.) Keep the name to 15 chars or fewer: `bpf_dctcp_log` is 13 characters and safe.
@@ -193,54 +173,53 @@ struct tcp_congestion_ops dctcp = {
 
 ## Userspace consumer
 
-`logged_dctcp` is a **new, out-of-tree libbpf program** — not something `make` inside `selftests/bpf` produces (that builds `test_progs`). Copy your edited `bpf_dctcp.c` into your own project, generate the skeleton with `bpftool gen skeleton bpf_dctcp.bpf.o > bpf_dctcp.skel.h`, and build the loader against `libbpf` (reuse the Day 22 struct_ops loader and the Day 13 ringbuf consumer — this is just those two stitched together).
+`logged_dctcp` is a **new, out-of-tree libbpf program** — not something `make` inside `selftests/bpf` produces (that builds `test_progs`). In this repo it is owned at `ebpf/labs/day23/logged_dctcp.c` and built by the lab `Makefile`. It is the Day 3 ringbuf loader plus a struct_ops attach.
 
 The load is a struct_ops attach (distinct from a normal program attach), then a standard ringbuf poll loop:
 
 ![The per-ACK telemetry path: an incoming ACK reaches tcp_in_ack_event, which makes one indirect call into bpf_dctcp_update_alpha; that BPF callback reserves a ringbuf record, fills the tcp_event fields, and submits; the record crosses the shared ringbuf to the userspace ring_buffer__poll loop, handle_event, and printf](diagrams/day23_telemetry_flow.png)
 
-```c
-struct bpf_dctcp *skel = bpf_dctcp__open_and_load();
-/* struct_ops-specific attach — registers the CC in the kernel */
-struct bpf_link *link = bpf_map__attach_struct_ops(skel->maps.dctcp);
-
-struct ring_buffer *rb =
-    ring_buffer__new(bpf_map__fd(skel->maps.rb), handle_event, NULL, NULL);
-while (!stop)
-    ring_buffer__poll(rb, 100 /* ms */);
-```
-
-In `handle_event`, print per event:
+The full loader — `bpf_map__attach_struct_ops` to register the CC, the ring-buffer poll loop, and a SIGINT/SIGTERM path that destroys the link (detaching and unregistering the CC) before freeing the consumer and skeleton:
 
 ```c
-printf("[sk=%llu t=%lluns] cwnd=%u in_flight=%u srtt=%uus\n",
-       e->sk_cookie, e->ts_ns, e->cwnd, e->in_flight, e->srtt_us);
+{{#include ../labs/day23/logged_dctcp.c:book}}
 ```
 
-Build it with your project's libbpf `Makefile` so `make` produces the `logged_dctcp` binary the Run section uses.
+`handle_event` prints one line per event, validating the record size first:
+
+```
+[sk=18446612345678900 t=12345...] cwnd=10 in_flight=0 srtt=24us
+```
+
+Build it with the lab `Makefile` so `make` produces the `logged_dctcp` binary the Run section uses.
 
 ## Run
 
+Loading a struct_ops CC, adding it to the *allowed* list, running `iperf3`, and
+then unwinding all of that cleanly is fiddly to do by hand — and a half-finished
+run leaves a registered algorithm and a mutated sysctl behind. The repo ships a
+safe runner, `ebpf/labs/day23/run.sh`, that **owns every piece of live state and
+restores it on any exit** (success, error, or Ctrl-C): it captures
+`tcp_allowed_congestion_control` and restores it, starts the loader and SIGTERMs
+it (so the struct_ops link is destroyed and `bpf_dctcp_log` unregistered),
+builds and tears down a `netns` + `veth` + `netem` path, and owns the `iperf3`
+server and client by PID. Like `scripts/smoke.sh`, it is opt-in:
+
 ```bash
-sudo ./logged_dctcp &              # loads + attaches the struct_ops CC (job %1)
+make -C ebpf/labs day23          # build the loader first (see the Lab environment page)
 
-# Verify it registered
-cat /proc/sys/net/ipv4/tcp_available_congestion_control   # should now list bpf_dctcp_log
+# veth+netem path (default) — the lossy path that makes the sawtooth visible:
+EBPF_LABS_ALLOW_PRIVILEGED=1 \
+  sudo --preserve-env=EBPF_LABS_ALLOW_PRIVILEGED ebpf/labs/day23/run.sh veth
 
-# Selecting a non-default CC needs CAP_NET_ADMIN or membership in the allowed list.
-# A freshly registered struct_ops CC is added to *available* but NOT *allowed*, so an
-# unprivileged client gets EPERM ("Operation not permitted"). Either run the client with
-# sudo, or add the algorithm to the allowed list (keep cubic so other sockets still work):
-sudo sysctl -w net.ipv4.tcp_allowed_congestion_control="cubic bpf_dctcp_log"
-
-# Server
-iperf3 -s &                        # job %2
-
-# Client (in another terminal)
-iperf3 -c 127.0.0.1 -C bpf_dctcp_log
+# or the always-available loopback path (monotonic climb only):
+EBPF_LABS_ALLOW_PRIVILEGED=1 \
+  sudo --preserve-env=EBPF_LABS_ALLOW_PRIVILEGED ebpf/labs/day23/run.sh loopback
 ```
 
-Output (the `sk=` value is now the kernel socket address — a stable per-flow id for the life of the connection, not an SO_COOKIE id):
+The loader prints one line per ACK to its stdout (the `sk=` value is the kernel
+socket address — a stable per-flow id for the life of the connection, not an
+SO_COOKIE id):
 
 ```
 [sk=18446612345678900 t=12345...] cwnd=10 in_flight=0  srtt=24us
@@ -249,22 +228,20 @@ Output (the `sk=` value is now the kernel socket address — a stable per-flow i
 ...
 ```
 
-You're now seeing TCP's internal CC decisions in real time, per ACK, in a flow that runs through your custom BPF-defined algorithm. Read it against the model: `cwnd` starts at 10 (the kernel's initial window) and **grows** — and because each ACK bumps it by ~1, you're watching slow start's exponential ramp. `srtt` updates per ACK as new RTT samples arrive. `in_flight` tracks how full the pipe is, hugging just under `cwnd` — exactly the in_flight curve from the sawtooth diagram. What you *won't* see here is the teeth, and the next box explains why.
+You're now seeing TCP's internal CC decisions in real time, per ACK, in a flow that runs through your custom BPF-defined algorithm. Read it against the model: `cwnd` starts at 10 (the kernel's initial window) and **grows** — and because each ACK bumps it by ~1, you're watching slow start's exponential ramp. `srtt` updates per ACK as new RTT samples arrive. `in_flight` tracks how full the pipe is, hugging just under `cwnd` — exactly the in_flight curve from the sawtooth diagram. What you *won't* see on `loopback` is the teeth, and the next box explains why.
 
-> **Loopback caveat.** Over `127.0.0.1` there is no packet loss and the RTT is microseconds, so you only ever see `cwnd` grow monotonically — you will **not** see the loss-driven `cwnd` collapse and RTT spikes that the anomaly-detection use case below depends on. To make those dynamics observable, run the transfer across a `netem`-delayed `veth` pair: create a `veth` pair in a separate netns and apply `sudo tc qdisc add dev <veth> root netem delay 20ms loss 1%`, then `iperf3 -c <veth-peer-ip> -C bpf_dctcp_log`. With 1% loss injected, you'll finally see `cwnd` cut on a drop and climb back — the sawtooth made real.
+> **Loopback caveat.** Over `127.0.0.1` there is no packet loss and the RTT is microseconds, so you only ever see `cwnd` grow monotonically — you will **not** see the loss-driven `cwnd` collapse and RTT spikes that the anomaly-detection use case below depends on. That is exactly why the runner defaults to the `veth` mode: it puts the peer in a separate netns and applies `netem delay 20ms loss 1%` to both directions, so with 1% loss injected you finally see `cwnd` cut on a drop and climb back — the sawtooth made real. `run.sh loopback` is the fallback when your host can't create a netns.
 
-### Cleanup
+The runner handles cleanup itself — on exit it unregisters `bpf_dctcp_log`, restores the exact `tcp_allowed_congestion_control` value it captured at start, and deletes the netns/veth it created. Its full text (read it before running anything privileged):
+
+<details>
+<summary><code>ebpf/labs/day23/run.sh</code></summary>
 
 ```bash
-kill %2 2>/dev/null              # iperf3 -s
-sudo pkill -f logged_dctcp       # exiting the loader detaches the struct_ops link
-                                 # and unregisters bpf_dctcp_log from the CC framework
-# restore the allowed list. Your build's default varies — check it *before* mutating
-# with `sysctl net.ipv4.tcp_allowed_congestion_control` and restore that exact value
-# (on this BBR-enabled kernel it's `reno cubic bbr`). The sysctl change isn't persistent
-# across reboot anyway, so a reboot also restores it.
-sudo sysctl -w net.ipv4.tcp_allowed_congestion_control="reno cubic bbr"
+{{#include ../labs/day23/run.sh}}
 ```
+
+</details>
 
 ## What to do with this data
 

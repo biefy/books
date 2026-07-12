@@ -283,48 +283,64 @@ The general structure of the kernel was already vtable-heavy (`file_operations`,
 
 The kernel ships `tools/testing/selftests/bpf/progs/bpf_dctcp.c` — a BPF reimplementation of DCTCP that you can load directly. Everything you just learned is in there: the `struct bpf_dctcp` that lands in `icsk_ca_priv`, reached via the `inet_csk_ca(sk)` line each callback opens with, and the assembled `tcp_congestion_ops` vtable filling the required slots.
 
+Because that program is part of the moving kernel tree, this repo does **not** copy it. Instead the lab ships thin wrappers under `ebpf/labs/day22/` that compile the canonical in-tree object from the verified `v7.1` source and drive its registration. They read the target's locked identifiers from `ebpf/labs/day22/config.env` and resolve the kernel source through the shared `scripts/linux-source.sh` (which honors `$LINUX_SRC` if you set it, else the pinned/fetched default) — so nothing needs `LINUX_SRC` exported by hand.
+
 ### Build and load
 
+The build wrapper is what the lab dispatcher runs for this day (`make -C ebpf/labs day22`). It generates a narrow v7.1 TCP type header from the locked kernel tree, then builds the canonical `bpf_dctcp.bpf.o` into `ebpf/labs/.output/day22/` with the pinned bpftool:
+
 ```bash
-cd ~/code/linux/tools/testing/selftests/bpf
-make -j$(nproc)
-sudo ./test_progs -t bpf_tcp_ca/dctcp
+{{#include ../labs/day22/build.sh}}
 ```
 
-You should see `#NN/1 bpf_tcp_ca/dctcp:OK`. (The DCTCP case lives under the `bpf_tcp_ca` test now; `-t dctcp` on its own matches nothing.) The test loaded the BPF struct_ops, attached it, ran a connection through it, and verified the behavior — but then **tore it down on exit**. `test_progs` only proves the module loads, verifies, and works; it does *not* leave `bpf_dctcp` registered. Check and you'll see no `bpf_dctcp`:
+The operator wrapper drives that object. Its default `selftest` subcommand creates a PID-scoped pin directory, registers the valid DCTCP vtable, verifies `bpf_dctcp` appears, unregisters it, and removes the directory on every exit. The separate `register`/`inspect`/`unregister` commands manage an explicitly persistent registration in `/sys/fs/bpf/dctcp`:
 
 ```bash
-cat /proc/sys/net/ipv4/tcp_available_congestion_control
+{{#include ../labs/day22/run.sh}}
+```
+
+So the build-and-load flow is:
+
+```bash
+make -C ebpf/labs day22            # dispatcher → day22/build.sh
+
+EBPF_LABS_ALLOW_PRIVILEGED=1 EBPF_LABS_ALLOW_STRUCT_OPS=1 \
+  sudo --preserve-env=EBPF_LABS_ALLOW_PRIVILEGED,EBPF_LABS_ALLOW_STRUCT_OPS \
+  ebpf/labs/day22/run.sh selftest
+```
+
+You should see `temporary registration verified and removed`. The check loads the exact upstream BPF struct_ops object, asserts that its `bpf_dctcp` algorithm joined the available list, then **tears it down before returning**. Check afterward and you will see no `bpf_dctcp`:
+
+```bash
+ebpf/labs/day22/run.sh available
 # reno cubic bbr
 ```
 
 Note there's no native `dctcp` in that list by default: on this kernel DCTCP is built as a loadable module (`CONFIG_TCP_CONG_DCTCP=m`) and isn't loaded unless you `sudo modprobe tcp_dctcp`. Its absence here is expected, not a sign the lab failed. (If you *do* load the module, the `dctcp` you'd then see is the kernel's **native C** implementation, `net/ipv4/tcp_dctcp.c` — not our BPF one; don't mistake native `dctcp` for proof the BPF lab worked.)
 
-To make the BPF version persist so the next steps have something to use, register the prebuilt object yourself. `register` installs the struct_ops map in the kernel, which is what keeps the algorithm alive after `bpftool` exits (this object's vtable uses the map-based `SEC(".struct_ops")`, so nothing is actually pinned into the directory — it stays empty):
+To make the BPF version persist so the next steps have something to use, register the prebuilt object yourself. `register` installs the struct_ops map in the kernel, which is what keeps the algorithm alive after `bpftool` exits (this object's vtable uses the map-based `SEC(".struct_ops")`, so nothing is actually pinned into the directory — it stays empty). The operator refuses to adopt an existing pin directory and runs `bpftool struct_ops register ebpf/labs/.output/day22/bpf_dctcp.bpf.o /sys/fs/bpf/dctcp`:
 
 ```bash
-# the selftest build above produced bpf_dctcp.bpf.o in this dir
-sudo mkdir -p /sys/fs/bpf/dctcp
-sudo bpftool struct_ops register bpf_dctcp.bpf.o /sys/fs/bpf/dctcp
+EBPF_LABS_ALLOW_PRIVILEGED=1 EBPF_LABS_ALLOW_STRUCT_OPS=1 \
+  sudo --preserve-env=EBPF_LABS_ALLOW_PRIVILEGED,EBPF_LABS_ALLOW_STRUCT_OPS \
+  ebpf/labs/day22/run.sh register
 ```
 
-`bpf_dctcp.bpf.o` carries **two** vtables (`dctcp` → name `bpf_dctcp`, and `dctcp_nouse` → name `bpf_dctcp_nouse`). On v7.1 only `bpf_dctcp` registers — `dctcp_nouse` is intentionally incomplete (it defines only `init`/`set_state`, not the required `ssthresh`/`undo_cwnd`/`cong_avoid`), so `tcp_validate_congestion_control` rejects it with the `does not implement required ops` error and `bpftool` prints a non-fatal error while still registering the valid one. This is the required-ops gate from earlier firing in real life:
+`bpf_dctcp.bpf.o` carries **two** vtables (`dctcp` → name `bpf_dctcp`, and `dctcp_nouse` → name `bpf_dctcp_nouse`). On v7.1 only `bpf_dctcp` registers — `dctcp_nouse` is intentionally incomplete (it defines only `init`/`set_state`, not the required `ssthresh`/`undo_cwnd`/`cong_avoid`), so `tcp_validate_congestion_control` rejects it with the `does not implement required ops` error and `bpftool` prints a non-fatal error while still registering the valid one (the wrapper tolerates that non-zero exit and then asserts `bpf_dctcp` actually appeared). This is the required-ops gate from earlier firing in real life:
 
-```bash
-sudo bpftool struct_ops register bpf_dctcp.bpf.o /sys/fs/bpf/dctcp
+```text
 # Error: can't register struct_ops dctcp_nouse: Invalid argument
 # Registered tcp_congestion_ops dctcp id <id>
-
-cat /proc/sys/net/ipv4/tcp_available_congestion_control
+# ... and `available` now prints:
 # reno cubic bbr bpf_dctcp
 # (registration is purely additive — the base algorithms stay; bpf_dctcp is appended)
 ```
 
-When you're done with the whole lab, unregister the algorithm. Because `bpf_dctcp.c` uses the map-based `SEC(".struct_ops")` (not `.struct_ops.link`), `register` does not pin a link into the directory — so removing the directory alone does **not** unregister it. Use `unregister`, then clean up the (empty) pin dir:
+When you're done with the whole lab, unregister the algorithm. Because `bpf_dctcp.c` uses the map-based `SEC(".struct_ops")` (not `.struct_ops.link`), `register` does not pin a link into the directory — so removing the directory alone does **not** unregister it. The operator's `unregister` runs `bpftool struct_ops unregister name dctcp` and then removes the (empty) pin dir:
 
 ```bash
-sudo bpftool struct_ops unregister name dctcp
-sudo rm -rf /sys/fs/bpf/dctcp
+EBPF_LABS_ALLOW_PRIVILEGED=1 \
+  sudo --preserve-env=EBPF_LABS_ALLOW_PRIVILEGED ebpf/labs/day22/run.sh unregister
 ```
 
 ### Use it on a connection
@@ -366,13 +382,13 @@ A hit proves this connection is running BPF-provided DCTCP — that socket's `ic
 
 ### Inspect
 
-These need the struct_ops live, so run them only after the `bpftool struct_ops register` step above (after `test_progs` exits, nothing is loaded and `list` prints nothing while `dump` returns `[]`). The registered map takes the name of its `SEC(".struct_ops")` variable — **`dctcp`** — not the algorithm name `bpf_dctcp` set in `.name`, so `dump name dctcp` is what matches (and `dctcp_nouse` was rejected at register time):
+These need the struct_ops live, so run them only after the persistent `register` step above (after `selftest` exits, nothing is loaded and `list` prints nothing while `dump` returns `[]`). The registered map takes the name of its `SEC(".struct_ops")` variable — **`dctcp`** — not the algorithm name `bpf_dctcp` set in `.name`, so `dump name dctcp` is what matches (and `dctcp_nouse` was rejected at register time). The operator's `inspect` subcommand runs both `bpftool struct_ops list` and `bpftool struct_ops dump name dctcp`:
 
 ```bash
-sudo bpftool struct_ops list
+EBPF_LABS_ALLOW_PRIVILEGED=1 \
+  sudo --preserve-env=EBPF_LABS_ALLOW_PRIVILEGED ebpf/labs/day22/run.sh inspect
 # <id>: dctcp            tcp_congestion_ops
-
-sudo bpftool struct_ops dump name dctcp
+# ... followed by the field-by-field vtable dump
 ```
 
 `dump` shows the vtable field-by-field, with each implemented function-pointer slot (`ssthresh`, `cong_avoid`, `init`, `undo_cwnd`, ...) resolved to the BPF prog id that serves it. That's the payoff, and it's the literal picture from the start of the day: a kernel function-pointer table whose entries are BPF programs, ready for a socket's `icsk_ca_ops` to point at.

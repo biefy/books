@@ -208,49 +208,15 @@ Two files to change: `tools/sched_ext/scx_simple.bpf.c` and the userspace driver
 
 ### BPF side: read a config variable, branch on cgroup
 
-```c
-/* near the top of scx_simple.bpf.c — which already #includes <scx/common.bpf.h> */
-const volatile __u64 priority_cgroup_id = 0;   /* full kernfs id; set from userspace */
+The complete derivative lives in the lab as `scx_priority.bpf.c` — a copy of
+`scx_simple.bpf.c` with exactly this change. First the one new load-time global:
 
-/* scx_bpf_task_cgroup(), bpf_cgroup_ancestor(), and bpf_cgroup_release() all
- * come from <scx/common.bpf.h> (scx_bpf_task_cgroup is a compat macro). Don't
- * re-declare them with your own `extern ... __ksym;` — that collides with the
- * header and fails to compile. Just call them, as scx_flatcg.bpf.c does. */
+{{#include ../labs/day26/scx_priority.bpf.c:config}}
 
-void BPF_STRUCT_OPS(simple_enqueue, struct task_struct *p, u64 enq_flags)
-{
-    u64 vtime = p->scx.dsq_vtime;
-    u64 slice = SCX_SLICE_DFL;
+and then the rewritten `simple_enqueue` (the two lines that clamp idle budget are
+carried over unchanged from stock scx_simple):
 
-    /* Walk up the cgroup hierarchy looking for the priority cgroup.
-     * bpf_cgroup_ancestor(cgrp, level) returns the ancestor at the given
-     * level (0 = root), as an ACQUIRED reference we must release. We iterate
-     * with bpf_for(), the same idiom scx_flatcg uses: it gives the verifier a
-     * provable bound on a runtime limit (owned->level), which an ordinary
-     * `for` on a memory-read value would not. */
-    if (priority_cgroup_id) {
-        struct cgroup *owned = scx_bpf_task_cgroup(p);
-        if (owned) {
-            int lvl;
-            bpf_for(lvl, 0, owned->level + 1) {
-                struct cgroup *anc = bpf_cgroup_ancestor(owned, lvl);
-                if (!anc)
-                    continue;
-                if (anc->kn->id == priority_cgroup_id) {
-                    vtime -= 1000000;   /* push 1 ms earlier in queue */
-                    slice *= 2;          /* longer time slice */
-                    bpf_cgroup_release(anc);
-                    break;
-                }
-                bpf_cgroup_release(anc);
-            }
-            bpf_cgroup_release(owned);
-        }
-    }
-
-    scx_bpf_dsq_insert_vtime(p, SHARED_DSQ, slice, vtime, enq_flags);
-}
-```
+{{#include ../labs/day26/scx_priority.bpf.c:enqueue}}
 
 Two effects:
 - **Lower vtime** = pushed earlier in the vtime-ordered DSQ; runs sooner.
@@ -281,32 +247,10 @@ The new wrinkle: notice `bpf_cgroup_ancestor` is also **`KF_RET_NULL`** (and `KF
 
 ### Userspace side: pass the cgroup ID
 
-In `scx_simple.c`, before `scx_simple__attach()`:
+The lab's `scx_priority.c` is the stock `scx_simple.c` driver plus a portable
+cgroup-id reader:
 
-```c
-#include <fcntl.h>
-#include <sys/stat.h>
-
-/* The BPF side matches against cgrp->kn->id, the full 64-bit kernfs id.
- * On 64-bit-ino Linux (x86-64, arm64) that id equals st_ino, so stat would
- * work; on a 32-bit-ino kernel st_ino is only the low 32 bits and would drop
- * the generation. name_to_handle_at() returns the full 64-bit id on both, so
- * use it for a portable read. */
-__u64 read_cgroup_id(const char *path) {
-    struct {
-        struct file_handle fh;
-        __u64 id;
-    } h = { .fh = { .handle_bytes = sizeof(__u64) } };
-    int mount_id;
-
-    if (name_to_handle_at(AT_FDCWD, path, &h.fh, &mount_id, 0) < 0)
-        return 0;
-    return h.id;
-}
-
-skel->rodata->priority_cgroup_id = read_cgroup_id("/sys/fs/cgroup/priority");
-fprintf(stderr, "priority cgroup id = %llu\n", skel->rodata->priority_cgroup_id);
-```
+{{#include ../labs/day26/scx_priority.c:read_cgroup_id}}
 
 Both sides must use the *same* 64-bit value or the equality at `anc->kn->id == priority_cgroup_id` never fires: the kernel stores the full `u64` in `kn->id`, and `read_cgroup_id()` copies the first `__u64` out of the file handle — the same 64 bits. (`rodata->priority_cgroup_id` is the userspace handle for the BPF program's `const volatile __u64 priority_cgroup_id` — settable before load, read-only after, as the `.rodata` section above explained.)
 
@@ -316,17 +260,22 @@ Both sides must use the *same* 64-bit value or the equality at `anc->kn->id == p
 priority cgroup id = 12046204
 ```
 
-If it prints `0`, `name_to_handle_at()` failed (wrong path, or the directory isn't on cgroup2). Verify `/sys/fs/cgroup/priority` exists and `mount | grep cgroup2` lists `/sys/fs/cgroup`. A `0` here is dead-code-eliminated by the verifier (see the `.rodata` section), so the feature is compiled out entirely — which is why we fail loudly instead. Add before `scx_simple__attach()`:
+If it prints `0`, `name_to_handle_at()` failed (wrong path, or the directory isn't on cgroup2). Verify `/sys/fs/cgroup/priority` exists and `mount | grep cgroup2` lists `/sys/fs/cgroup`. A `0` here is dead-code-eliminated by the verifier (see the `.rodata` section), so the feature is compiled out entirely — which is why the driver sets the id and fails loudly, all in the `.rodata` window before load:
 
-```c
-if (skel->rodata->priority_cgroup_id == 0) {
-    fprintf(stderr, "FATAL: could not read priority cgroup id; "
-                    "create /sys/fs/cgroup/priority first\n");
-    return 1;
-}
-```
+{{#include ../labs/day26/scx_priority.c:set_id}}
 
 ### Build and run
+
+The repo lab builds this derivative against the locked v7.1 sched_ext support
+(`make -C ebpf/labs day26`) and ships a safe, self-cleaning runner. `run.sh`
+creates a throwaway priority cgroup it *owns*, starts a small workload in it,
+loads `scx_priority` pointed at that cgroup for a bounded interval, and on any
+exit ejects the scheduler and removes only the cgroup it made:
+
+{{#include ../labs/day26/run.sh:book}}
+
+To explore the effect by hand instead — the manual, contrast-driven workflow the
+rest of this section walks through:
 
 **Prerequisites.** This step needs three non-default tools — install them first:
 

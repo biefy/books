@@ -254,50 +254,18 @@ libc's USDTs include `lll_lock_wait`, `lll_lock_wait_private`, `setjmp`, `longjm
 
 ## The lab
 
+### `bashspy.h` — the shared event record
+
+```c
+{{#include ../labs/day10/bashspy.h}}
+```
+
 ### `bashspy.bpf.c`
 
 The output channel is a **ringbuf** — recall it from Day 1: a kernel→userspace MPSC channel where you `reserve` a slot, fill it, and `submit` (zero-copy), and a single userspace consumer drains it via a callback. Nothing uprobe-specific; just the same pattern.
 
 ```c
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_tracing.h>
-
-char LICENSE[] SEC("license") = "GPL";
-
-#define MAX_LINE 256
-
-struct event {
-    __u32 pid;
-    char comm[16];
-    char line[MAX_LINE];
-};
-
-struct {
-    __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 256 * 1024);
-} rb SEC(".maps");
-
-/* Track the prompt arg per TID so we can read the result on return.
- * For readline, the *return value* is what the user typed —
- * a malloc'd char* the caller frees.
- */
-
-SEC("uretprobe//bin/bash:readline")
-int BPF_KRETPROBE(on_readline_ret, const char *line)
-{
-    if (!line) return 0;
-
-    struct event *e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
-    if (!e) return 0;
-
-    e->pid = bpf_get_current_pid_tgid() >> 32;
-    bpf_get_current_comm(&e->comm, sizeof(e->comm));
-    bpf_probe_read_user_str(&e->line, sizeof(e->line), line);
-
-    bpf_ringbuf_submit(e, 0);
-    return 0;
-}
+{{#include ../labs/day10/bashspy.bpf.c:book}}
 ```
 
 ### What's new

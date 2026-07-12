@@ -23,7 +23,7 @@ You have heard "cgroups partition resources (CPU, memory, IO, network)" a hundre
 
 **A cgroup v2 hierarchy is a single tree of directories**, mounted once at `/sys/fs/cgroup` with filesystem type `cgroup2`. That word *single* is the whole point. Old cgroup v1 had a *separate* tree per controller — one mount for `cpu`, another for `memory`, another for `net_cls` — and a process could sit in different places in each tree at once. v2 collapsed all of that into **one unified hierarchy**: every process lives at exactly one node in one tree, and all controllers (cpu, memory, io, …) are just knobs enabled on the nodes of that one tree. When you `mount | grep cgroup2` and see `cgroup2 on /sys/fs/cgroup type cgroup2`, you are looking at the root of that single tree.
 
-**Each directory is a cgroup. Membership is a file.** Make a directory under `/sys/fs/cgroup` and you have created a child cgroup. Inside it the kernel materializes control files — `cgroup.procs`, `cgroup.controllers`, and so on. The one that matters today is `cgroup.procs`: **writing a PID into a cgroup's `cgroup.procs` file moves that task (and all its threads) into that cgroup.** That is *literally all* membership is — a number written into a file. When the lab runs `echo $$ | sudo tee /sys/fs/cgroup/test_block/cgroup.procs`, `$$` is the shell's PID and that one write relocates the shell into `test_block`. And because membership is just a write, moving the shell *back* to the root cgroup (`echo $$ | sudo tee /sys/fs/cgroup/cgroup.procs`) is a perfectly valid escape hatch — which is exactly the Break 2 recovery.
+**Each directory is a cgroup. Membership is a file.** Make a directory under `/sys/fs/cgroup` and you have created a child cgroup. Inside it the kernel materializes control files — `cgroup.procs`, `cgroup.controllers`, and so on. The one that matters today is `cgroup.procs`: **writing a PID into a cgroup's `cgroup.procs` file moves that task (and all its threads) into that cgroup.** That is *literally all* membership is — a number written into a file. When a controlled child runs `echo $$ > "$CG/cgroup.procs"`, `$$` is that child shell's PID and the write relocates only that child into the owned cgroup. Membership can be changed again with another `cgroup.procs` write, but this lab deliberately leaves your interactive shell untouched.
 
 ![socket carries a pointer to its cgroup; egress program attaches to the directory](diagrams/day19_cgroup_tree.png)
 
@@ -60,7 +60,7 @@ A Unix-domain socket or a netlink socket sails straight through your egress fire
 
 ### How you attach, and what "hierarchical" means
 
-A cgroup BPF program does **not** attach to an interface or a PID. It attaches to a **cgroup directory's file descriptor**. That is why the loader does `open("/sys/fs/cgroup/test_block", O_RDONLY)` — it is opening the *directory* to get an fd, and `bpf_program__attach_cgroup` hands that fd to the kernel. From then on the program fires for **every socket whose `sk_cgrp_data` points at that cgroup** (or a descendant of it). This is why a process that joins the cgroup *after* you attach is immediately covered: it inherits the cgroup, its new sockets get `sk_cgrp_data` pointing there, and the dispatch path finds your program. Nothing has to be re-attached.
+A cgroup BPF program does **not** attach to an interface or a PID. It attaches to a **cgroup directory's file descriptor**. That is why the loader does `open(cg_path, O_RDONLY | O_DIRECTORY)` — it is opening the explicitly supplied *directory* to get an fd, and `bpf_program__attach_cgroup` hands that fd to the kernel. From then on the program fires for **every socket whose `sk_cgrp_data` points at that cgroup** (or a descendant of it). This is why a process that joins the cgroup *after* you attach is immediately covered: it inherits the cgroup, its new sockets get `sk_cgrp_data` pointing there, and the dispatch path finds your program. Nothing has to be re-attached.
 
 Attachment is **hierarchical**: a program on a parent cgroup also covers its children. When more than one level wants a program, v7.1 gives you attach flags to choose how they combine:
 
@@ -106,30 +106,15 @@ Create a test cgroup and block egress UDP for any process in it.
 > **Prerequisite:** cgroup v2 (unified hierarchy) mounted at `/sys/fs/cgroup` — verify with `mount | grep cgroup2` (expect `cgroup2 on /sys/fs/cgroup type cgroup2 ...`) — and a kernel built with `CONFIG_CGROUP_BPF=y` (check `zgrep CGROUP_BPF /proc/config.gz` or `/boot/config-$(uname -r)`). On cgroup v1 / hybrid hosts the path and attach semantics differ.
 
 ```bash
-sudo mkdir /sys/fs/cgroup/test_block
-echo $$ | sudo tee /sys/fs/cgroup/test_block/cgroup.procs   # only this shell
+CG=/sys/fs/cgroup/practical-ebpf-day19-$$
+sudo mkdir "$CG"
 ```
 
-That second line is the membership write from the cgroup section: it moves *this shell* (PID `$$`) into `test_block`. Every socket this shell opens from now on will have `sk_cgrp_data` pointing at `test_block`, which is what makes them subject to the program we attach.
+Do **not** move your interactive shell. Each trigger below starts a short-lived child shell, writes only that child's PID to `$CG/cgroup.procs`, and then `exec`s the test command. Every socket that controlled child opens has `sk_cgrp_data` pointing at the owned cgroup; your terminal and SSH connection stay in the root cgroup.
 
 `fw.bpf.c`:
 ```c
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_endian.h>
-
-char LICENSE[] SEC("license") = "GPL";
-
-SEC("cgroup_skb/egress")
-int block_udp(struct __sk_buff *skb)
-{
-    void *data = (void *)(long)skb->data;
-    void *end  = (void *)(long)skb->data_end;
-    struct iphdr *ip = data;
-    if (ip + 1 > end) return 1;       /* allow if can't parse */
-    if (ip->protocol == IPPROTO_UDP) return 0;  /* drop UDP */
-    return 1;
-}
+{{#include ../labs/day19/fw.bpf.c:book}}
 ```
 
 **Wait — why does `data` point straight at the IP header here?** Recall from Day 16 that `__sk_buff` exposes `data`/`data_end` for bounds-checked direct packet access: every read you make must be *proven* in-range before the verifier accepts it (that's why the `if (ip + 1 > end)` check is mandatory before touching `ip->protocol`). Same discipline applies here. But there's a difference Day 16 didn't prepare you for, and it would trip you up if nobody flagged it.
@@ -151,46 +136,45 @@ Note: `cgroup_skb/ingress` returns **1 = allow, 0 = drop**. `cgroup_skb/egress` 
 Userspace attach. Compile this loader with the day's Makefile (same skeleton-driven pattern as earlier days) and **keep it running** while you test — `bpf_program__attach_cgroup` returns a `struct bpf_link *` whose lifetime is tied to the process. When the loader exits, the link is freed and UDP egress is allowed again:
 
 ```c
-int cg_fd = open("/sys/fs/cgroup/test_block", O_RDONLY);   /* attach to the DIRECTORY fd */
+int cg_fd = open(cg_path, O_RDONLY | O_DIRECTORY);   /* explicit DIRECTORY fd */
 struct fw_bpf *skel = fw_bpf__open_and_load();
 struct bpf_link *l = bpf_program__attach_cgroup(skel->progs.block_udp, cg_fd);
 printf("attached, Ctrl-C to detach\n");
 pause();   /* keep the process (and the link) alive */
 ```
 
-Notice the attach target is `cg_fd`, the **cgroup directory fd** — not an interface, not a PID. That is the attachment model from the cgroup section made concrete: the program now fires for every socket whose `sk_cgrp_data` points at `test_block`.
+Notice the attach target is `cg_fd`, the **cgroup directory fd** — not an interface, not a PID. That is the attachment model from the cgroup section made concrete: the program now fires for every socket whose `sk_cgrp_data` points at `$CG`.
 
-If you want the policy to survive loader exit, pin the link instead: `bpf_link__pin(l, "/sys/fs/bpf/block_udp")` (needs bpffs mounted at `/sys/fs/bpf`, which is standard). Run the loader in one terminal, then perform the Test below from the `test_block` shell while it is still running.
+A production policy can pin the link to a uniquely owned bpffs path, but this lab intentionally keeps it process-owned: stopping the exact loader PID is guaranteed to detach it. The trigger itself is a controlled child placed in `$CG`.
+
+The complete loader (`fw.c`) wraps that sketch with signal handling and safe cgroup-argument handling: it requires an explicit cgroup-v2 directory path and opens it with `O_DIRECTORY`, so it cannot silently attach to a fixed or unexpected cgroup. Build it with `make -C ebpf/labs fw`:
+
+```c
+{{#include ../labs/day19/fw.c:book}}
+```
 
 Test. Use a UDP probe whose success/failure is *visible* — `dig` defaults to UDP/53, exactly the protocol/port the filter drops, so the timeout-vs-answer contrast is unambiguous (raw `nc -u` would hang identically in both cases and reveal nothing):
 
 ```bash
-# from the shell that's in test_block (egress UDP dropped):
-dig +tries=1 +timeout=2 @1.1.1.1 example.com
-#   -> ";; communications error to 1.1.1.1#53: timed out
-#       ... no servers could be reached"   (UDP/53 blocked)
-ping -c 3 1.1.1.1            # works: 3 replies (ICMP, not UDP)
+make -C ebpf/labs day19
+sudo ebpf/labs/.output/day19/fw "$CG" &
+FW_PID=$!
+trap 'sudo kill -INT "$FW_PID" 2>/dev/null || true; wait "$FW_PID" 2>/dev/null || true; sudo rmdir "$CG" 2>/dev/null || true' EXIT
+sleep 0.5
 
-# from another shell (NOT in test_block):
+# only this controlled child enters the cgroup (UDP/53 is dropped):
+sudo sh -c 'echo $$ > "$1/cgroup.procs"; exec dig +tries=1 +timeout=2 @1.1.1.1 example.com' _ "$CG"
+#   -> communications error / no servers could be reached
+sudo sh -c 'echo $$ > "$1/cgroup.procs"; exec ping -c 3 1.1.1.1' _ "$CG"
+#   -> works: ICMP is not UDP
+
+# this ordinary process remains outside the cgroup and receives an answer:
 dig +tries=1 +timeout=2 @1.1.1.1 example.com
-#   -> returns an A-record ANSWER section, e.g.
-#        example.com.   215   IN   A   104.20.23.154   (UDP/53 allowed)
 ```
 
-The second shell sees its packets sail through because *its* sockets' `sk_cgrp_data` points at the root cgroup, not `test_block` — the program is simply not in their dispatch path. This ties back to the chapter's own check question: DNS over UDP/53 is exactly what a `cgroup_skb/egress` UDP drop kills.
+The ordinary process sees its packets sail through because its sockets' `sk_cgrp_data` points at the root cgroup, not `$CG` — the program is simply not in their dispatch path. This ties back to the chapter's own check question: DNS over UDP/53 is exactly what a `cgroup_skb/egress` UDP drop kills.
 
-**Teardown** (run this when done — and it's also the Break 2 recovery):
-```bash
-# 1. move your shell back to the root cgroup (run from another shell if the
-#    current one is locked out by the egress drop):
-echo $$ | sudo tee /sys/fs/cgroup/cgroup.procs
-# 2. stop the loader (Ctrl-C). Since the bpf_link isn't pinned, this detaches
-#    the egress program automatically.
-# 3. remove the cgroup (rmdir only succeeds once it has no procs):
-sudo rmdir /sys/fs/cgroup/test_block
-```
-
-Step 1 is the membership write in reverse: writing `$$` into the *root's* `cgroup.procs` relocates your shell out of `test_block`, so the egress program stops applying to it instantly. That is why moving the shell is a complete recovery even if the loader is still attached — same reason as the Part A test above, the program only runs while your socket's cgroup pointer still names `test_block`.
+**Teardown** is the trap installed above: it signals the exact loader PID, waits for skeleton destruction to detach the link, and removes only `$CG`. The trigger commands `exec`, so their temporary cgroup is already empty when they exit. Your interactive shell never moved and needs no recovery step.
 
 ### Part B: sock_ops TCP tuning
 
@@ -247,25 +231,20 @@ and the implementation behind it is `__bpf_setsockopt(struct sock *sk, int level
 
 Brief framing only — we do **not** teach the algorithm here (that's Days 22–23, struct_ops congestion control): congestion control is the pluggable kernel logic that decides how big the send window may grow. CUBIC is the default; BBR is rate/RTT-based. The point *for Day 19* is that you can pick a different one **per socket / per cgroup** without touching the global `net.ipv4.tcp_congestion_control` sysctl. That per-socket selectability is the entire value proposition of this hook.
 
-`tune.bpf.c`:
+`tune.bpf.c` (the full file adds the usual `vmlinux.h`/`bpf_helpers.h` includes, the GPL `LICENSE`, and fallback `SOL_TCP`/`TCP_CONGESTION` defines — those UAPI constants are `#define`s, not BTF types, so `vmlinux.h` does not supply them):
 ```c
-SEC("sockops")
-int tcp_tune(struct bpf_sock_ops *skops)
-{
-    if (skops->op == BPF_SOCK_OPS_TCP_CONNECT_CB ||
-        skops->op == BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB ||
-        skops->op == BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB) {
-        /* Set BBR for connections in this cgroup */
-        char cc[] = "bbr";
-        bpf_setsockopt(skops, SOL_TCP, TCP_CONGESTION, cc, sizeof(cc));
-    }
-    return 0;
-}
+{{#include ../labs/day19/tune.bpf.c:prog}}
 ```
 
 Attach to a cgroup:
 ```c
 struct bpf_link *l = bpf_program__attach_cgroup(skel->progs.tcp_tune, cg_fd);
+```
+
+The complete loader (`tune.c`) shares `fw.c`'s safe cgroup-argument handling — required explicit cgroup path plus `O_DIRECTORY` — and attaches `tcp_tune` instead. Build it with `make -C ebpf/labs tune`:
+
+```c
+{{#include ../labs/day19/tune.c:book}}
 ```
 
 Verify. There's nothing to observe until a *fresh* TCP connection fires sockops from inside the cgroup, and BBR must actually be available — otherwise `bpf_setsockopt(...,"bbr",...)` fails silently (that's Break 3). Also scope `ss` to the target so you don't match unrelated sockets (e.g. your SSH session, which may itself be on BBR):
@@ -274,19 +253,23 @@ Verify. There's nothing to observe until a *fresh* TCP connection fires sockops 
 # prerequisite: BBR must be available
 sudo modprobe tcp_bbr 2>/dev/null   # no-op if built in
 sysctl net.ipv4.tcp_available_congestion_control
-#   -> net.ipv4.tcp_available_congestion_control = reno cubic bbr ...
-#      (exact list is host-dependent; all that matters is 'bbr' appears)
 
-# with the loader attached, run from the shell that's in the cgroup so a fresh
-# connect fires sockops; keep the socket alive long enough to observe it:
-curl -s https://speed.cloudflare.com/__up -T /dev/zero --max-time 4 >/dev/null &
+# stop Part A's exact loader, then attach sockops to the same owned cgroup:
+sudo kill -INT "$FW_PID"; wait "$FW_PID" || true
+sudo ebpf/labs/.output/day19/tune "$CG" &
+TUNE_PID=$!
+trap 'sudo kill -INT "$TUNE_PID" 2>/dev/null || true; wait "$TUNE_PID" 2>/dev/null || true; sudo rmdir "$CG" 2>/dev/null || true' EXIT
+sleep 0.5
+
+# only this short-lived child enters the cgroup and opens the fresh TCP socket:
+sudo sh -c 'echo $$ > "$1/cgroup.procs"; exec curl -s https://speed.cloudflare.com/__up -T /dev/zero --max-time 4' _ "$CG" >/dev/null &
+CLIENT_PID=$!
 sleep 1
 ss -ti dst :443 | grep bbr
-#   -> the info line for this socket shows 'bbr', e.g.
-#        bbr wscale:6,10 rto:219 rtt:18.6/1.2 ... bbr:(bw:7.35Mbps,...)
+wait "$CLIENT_PID" || true
 ```
 
-Expected: the in-cgroup connection's `ss -i` info line contains `bbr`. A socket opened from a shell **not** in the cgroup shows the *host default* CC instead — which differs from your per-cgroup choice as long as the default isn't already `bbr` (on this devbox the default happens to be `bbr`, so to see the contrast pick a non-default name like `"cubic"` in `tune.bpf.c`). Same reason as Part A: a non-cgroup socket's cgroup pointer doesn't name `test_block`, so `tcp_tune` never runs for it. If `ss` is empty, either no fresh connection was made from the cgroup, or BBR is not loaded (the `bpf_setsockopt` failed silently — Break 3).
+Expected: the in-cgroup connection's `ss -i` info line contains `bbr`. A socket opened from a shell **not** in the cgroup shows the *host default* CC instead — which differs from your per-cgroup choice as long as the default isn't already `bbr` (on this devbox the default happens to be `bbr`, so to see the contrast pick a non-default name like `"cubic"` in `tune.bpf.c`). Same reason as Part A: a non-cgroup socket's cgroup pointer doesn't name `$CG`, so `tcp_tune` never runs for it. If `ss` is empty, either no fresh connection was made from the cgroup, or BBR is not loaded (the `bpf_setsockopt` failed silently — Break 3).
 
 ---
 
@@ -356,7 +339,7 @@ The "cn" bit is a *separate channel* (`BPF_RET_SET_CN`), which is the source of 
 
 ### Break 2 — Forget the IPPROTO check
 
-Drop *all* packets in cgroup_skb/egress (`return 0` always). Your shell loses all network access. Be careful with cgroup attachment — you can lock yourself out as easily as with `iptables -P OUTPUT DROP`. Recover with the **Teardown** steps above: either kill the loader (which detaches the filter from `test_block`) or, from a second shell, move your stuck shell back to the root cgroup with `echo $$ | sudo tee /sys/fs/cgroup/cgroup.procs`. Either restores network, because the egress program only runs for procs still inside the cgroup — and a `cgroup.procs` write, as we saw, is all it takes to leave.
+Drop *all* packets in cgroup_skb/egress (`return 0` always). The controlled child in `$CG` loses network access; your terminal does not. Recover by signaling the exact loader PID, which destroys the link, or simply let the child exit and the trap remove the now-empty owned cgroup. This is why the lab never moves your interactive shell into a policy it is deliberately breaking.
 
 ### Break 3 — TCP CC not loaded
 
