@@ -1,5 +1,5 @@
 digraph int3_xol_timeline {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="Entry uprobe hit: int3 trap, BPF runs, displaced instruction replayed out-of-line, resume";
     fontname="Helvetica"; fontsize=14;

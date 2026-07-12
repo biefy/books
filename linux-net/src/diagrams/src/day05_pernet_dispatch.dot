@@ -1,5 +1,5 @@
 digraph pernet_dispatch {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="pernet_operations: the assembly line that furnishes every struct net";
     fontname="Helvetica"; fontsize=14;
@@ -15,6 +15,7 @@ digraph pernet_dispatch {
         conntrack [label="conntrack"];
         tcp [label="tcp"];
         nftables [label="nftables"];
+        routing -> netfilter -> conntrack -> tcp -> nftables [style=invis];
     }
 
     // The list

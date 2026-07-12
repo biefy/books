@@ -1,5 +1,5 @@
 digraph pbuf_ring {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="Provided buffer ring: kernel picks a buffer on data arrival, returns its bid";
     fontname="Helvetica"; fontsize=14;

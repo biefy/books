@@ -1,5 +1,5 @@
 digraph dst_attach {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="The route lookup builds an rtable; skb_dst_set staples it on; dst_input jumps through dst->input";
     fontname="Helvetica"; fontsize=13;

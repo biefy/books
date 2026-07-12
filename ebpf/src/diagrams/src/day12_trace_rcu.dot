@@ -1,5 +1,5 @@
 digraph trace_rcu {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="Two read-side lanes: classic RCU (no sleep) vs tasks-trace RCU (may sleep)";
     fontname="Helvetica"; fontsize=14;

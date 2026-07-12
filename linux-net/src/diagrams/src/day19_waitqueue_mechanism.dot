@@ -1,5 +1,5 @@
 digraph waitqueue_mechanism {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="One socket wait queue, two kinds of waiter — the .func indirection";
     fontname="Helvetica"; fontsize=14;

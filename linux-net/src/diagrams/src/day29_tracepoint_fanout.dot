@@ -1,5 +1,5 @@
 digraph tracepoint_fanout {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="One skb:kfree_skb tracepoint, fanned out to three independent subscribers";
     fontname="Helvetica"; fontsize=14;

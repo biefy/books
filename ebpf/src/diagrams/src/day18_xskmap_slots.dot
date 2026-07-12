@@ -1,5 +1,5 @@
 digraph xskmap_slots {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="BPF_MAP_TYPE_XSKMAP: array indexed by RX queue, each slot points to a live AF_XDP socket";
     fontname="Helvetica"; fontsize=14;

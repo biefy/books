@@ -1,5 +1,5 @@
 digraph tuple_pair {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="One nf_conn, two tuples, one global hash";
     fontname="Helvetica"; fontsize=14;

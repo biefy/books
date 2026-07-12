@@ -1,5 +1,5 @@
 digraph reorder {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="Reordering looks like loss: keep one flow on one path";
     fontname="Helvetica"; fontsize=14;

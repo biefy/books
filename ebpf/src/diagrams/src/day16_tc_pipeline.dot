@@ -56,4 +56,5 @@ digraph tc_pipeline {
     }
 
     netdev -> band0 [label="enqueue\n(real bytes)", color="#dc2626", style=bold, fontname="Helvetica", fontsize=9];
+    in_filt -> band0 [style=invis, weight=100];
 }

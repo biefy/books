@@ -21,6 +21,8 @@ digraph three_lanes {
         kn -> knote [style=invis];
     }
 
+    knote -> f1 [style=invis, weight=100];
+
     // Lane 2: fentry
     subgraph cluster_fentry {
         label="Lane 2: fentry  (N per-target BPF trampolines)";
@@ -36,6 +38,8 @@ digraph three_lanes {
                label="no trap, but ONE\ltrampoline PER target\l"];
         fn -> fnote [style=invis];
     }
+
+    fnote -> m_link [style=invis, weight=100];
 
     // Lane 3: kprobe.multi / fprobe
     subgraph cluster_multi {

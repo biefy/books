@@ -1,5 +1,5 @@
 digraph sendfile_zerocopy {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="sendfile() over HTTPS: classic 3-copy path vs kTLS zero-copy (skb frags point at page cache)";
     fontname="Helvetica"; fontsize=14;

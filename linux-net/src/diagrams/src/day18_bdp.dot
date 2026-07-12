@@ -1,5 +1,5 @@
 digraph bdp {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="Bandwidth-delay product: the pipe must hold one BDP of in-flight data";
     fontname="Helvetica"; fontsize=14;

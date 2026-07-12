@@ -30,6 +30,7 @@ digraph mprog {
     counter -> before  [style=dashed, color="#16a34a", label="name a neighbor"];
     counter -> after   [style=dashed, color="#16a34a", label="name a neighbor"];
     counter -> replace [style=dashed, color="#7c3aed", label="hand over the link"];
+    before -> after -> replace [style=invis, weight=100];
 
     /* ---- Naming note: neighbor vs target ---- */
     naming [label="Two different addressing schemes:\l  BEFORE / AFTER  -> name a NEIGHBOR\l      relative_id (+BPF_F_ID) or relative_fd\l  REPLACE         -> name the TARGET program\l      LINK_UPDATE: the link's own program\l      prog-attach:  replace_bpf_fd\l", shape=note, style="filled", fillcolor="#fef3c7", fontsize=10];

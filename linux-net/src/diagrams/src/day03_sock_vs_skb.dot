@@ -1,5 +1,5 @@
 digraph sock_vs_skb {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="struct sock owns the chain — sk_buff is just one link";
     fontname="Helvetica"; fontsize=14;

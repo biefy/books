@@ -1,5 +1,5 @@
 digraph cwnd_sawtooth {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="The cwnd sawtooth: slow start (x2/RTT) -> congestion avoidance (+1/RTT) -> loss cut -> climb again";
     fontname="Helvetica"; fontsize=14;

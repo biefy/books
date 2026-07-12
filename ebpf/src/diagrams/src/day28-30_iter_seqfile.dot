@@ -1,5 +1,5 @@
 digraph iter_seqfile {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="BPF iterator: kernel runs the prog on demand to fill each read()";
     fontname="Helvetica"; fontsize=14;

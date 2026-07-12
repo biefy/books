@@ -1,5 +1,5 @@
 digraph vtable_dispatch {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="One call site, many targets: icsk_ca_ops->ssthresh(sk) dispatches through the table pointer";
     fontname="Helvetica"; fontsize=14;

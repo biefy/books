@@ -69,11 +69,11 @@
 .content img {
   cursor: zoom-in;
   transition: opacity 0.15s;
-  /* Every diagram fills the content column (up to its native width), centered.
-     No height cap inline — a tall diagram just makes the page scroll, which
-     keeps its text at readable size. The lightbox handles zoom for detail. */
+  /* Center every diagram at its native width, shrinking only when it exceeds
+     the content column. Upscaling a medium PNG makes its labels much larger
+     than neighbouring diagrams; the special classes below handle exceptions. */
   display: block;
-  width: 100%;
+  width: auto;
   max-width: 100%;
   height: auto;
   margin-left: auto;
@@ -87,4 +87,40 @@
 .content img.diagram-small {
   width: auto;
   max-width: 100%;
+}
+/* Portrait diagrams otherwise inherit width: 100%, which enlarges their text
+   far beyond neighbouring landscape diagrams. Keep them centered at a bounded
+   fraction of the content column; the lightbox still opens at natural size. */
+.content img.diagram-portrait {
+  width: 58%;
+  max-width: 600px;
+}
+.content img.diagram-portrait-tall {
+  width: 52%;
+  max-width: 560px;
+}
+.content img.diagram-portrait-compact {
+  width: 35%;
+  max-width: 350px;
+}
+/* Dense, large-canvas diagrams and wide strips need more than the 1000px
+   column to keep their labels readable. JS assigns a readable width inside
+   this local scroller; clicking still opens the unchanged full-size lightbox. */
+.content .diagram-scroll {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  margin: 0 auto;
+}
+.content .diagram-scroll img.diagram-detail,
+.content .diagram-scroll img.diagram-wide {
+  width: var(--diagram-scroll-width);
+  max-width: none;
+}
+@media (max-width: 700px) {
+  .content img.diagram-portrait,
+  .content img.diagram-portrait-tall,
+  .content img.diagram-portrait-compact {
+    width: 100%;
+  }
 }

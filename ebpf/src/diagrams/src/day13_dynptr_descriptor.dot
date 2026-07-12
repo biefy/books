@@ -1,5 +1,5 @@
 digraph dynptr_descriptor {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="bpf_dynptr: a (data, offset, size) capability the Verifier tracks";
     fontname="Helvetica"; fontsize=14;

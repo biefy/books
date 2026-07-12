@@ -1,5 +1,5 @@
 digraph printk_trace_pipe {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="bpf_printk: every writer shares one global ftrace buffer";
     fontname="Helvetica"; fontsize=14;

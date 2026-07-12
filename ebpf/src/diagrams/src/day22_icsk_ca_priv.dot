@@ -1,5 +1,5 @@
 digraph icsk_ca_priv {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="inet_csk_ca(sk): the inline icsk_ca_priv[104] scratch, cast to struct bpf_dctcp *";
     fontname="Helvetica"; fontsize=14;

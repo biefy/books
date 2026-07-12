@@ -1,5 +1,5 @@
 digraph token_bucket {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="The token bucket: rate fills it, packets spend L tokens to pass";
     fontname="Helvetica"; fontsize=14;

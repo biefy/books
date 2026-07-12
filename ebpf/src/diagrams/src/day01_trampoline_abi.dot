@@ -1,5 +1,5 @@
 digraph trampoline_abi {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="The trampoline bridges two incompatible calling conventions";
     fontname="Helvetica"; fontsize=14;

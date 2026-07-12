@@ -1,10 +1,35 @@
 (function () {
   function classify(img) {
-    // Diagrams fill the column width by default (see lightbox.css). The only
-    // special case is a genuinely small diagram (narrow native width): it must
-    // NOT be upscaled to the column (it would blur), so tag it to render at its
-    // natural size, centered.
-    img.classList.toggle("diagram-small", img.naturalWidth < 560);
+    // Diagrams fill the column width by default (see lightbox.css). Narrow
+    // native images stay at their natural width; portrait diagrams use less of
+    // the column so their labels match the scale of neighbouring diagrams.
+    var isSmall = img.naturalWidth < 560;
+    var aspect = img.naturalWidth / img.naturalHeight;
+
+    img.classList.toggle("diagram-small", isSmall);
+    img.classList.toggle("diagram-portrait",
+                         !isSmall && aspect >= 0.33 && aspect < 0.65);
+    img.classList.toggle("diagram-portrait-tall",
+                         !isSmall && aspect < 0.33);
+    img.classList.toggle("diagram-portrait-compact",
+                         img.naturalWidth >= 500 &&
+                         img.naturalWidth <= 560 && aspect < 0.33);
+
+    var isDetail = img.naturalWidth >= 3000;
+    var isWide = !isDetail && img.naturalWidth >= 1400 && aspect > 1.8;
+    img.classList.toggle("diagram-detail", isDetail);
+    img.classList.toggle("diagram-wide", isWide);
+    if (isDetail || isWide) {
+      var factor = isDetail ? 0.5 : 1.0;
+      img.style.setProperty("--diagram-scroll-width",
+                            Math.round(img.naturalWidth * factor) + "px");
+      if (!img.parentElement.classList.contains("diagram-scroll")) {
+        var scroll = document.createElement("span");
+        scroll.className = "diagram-scroll";
+        img.parentNode.insertBefore(scroll, img);
+        scroll.appendChild(img);
+      }
+    }
   }
 
   function init() {

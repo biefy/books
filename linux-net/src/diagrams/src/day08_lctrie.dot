@@ -55,11 +55,11 @@ digraph lctrie {
     }
 
     // node struct legend (record, kept at bottom)
-    legend [shape=record, style="filled", fillcolor="#dbeafe", fontsize=9,
-            label="struct key_vector|pos = which bit tested (path compression)|bits = bits consumed/step (level compression)|bits == 0 means leaf, bits \> 0 means tnode"];
+    legend [shape=box, style="filled", fillcolor="#dbeafe", fontsize=9,
+            label="struct key_vector\npos = tested bit (path compression)\nbits = bits consumed per step (level compression)\nbits == 0: leaf; bits > 0: tnode"];
 
     // arrange panels left-to-right, legend below
-    warn1 -> pa [style=invis];
-    note2 -> wide [style=invis];
-    warn1 -> legend [style=invis];
+    warn1 -> pa [style=invis, weight=100];
+    note2 -> wide [style=invis, weight=100];
+    note3 -> legend [style=invis, weight=100];
 }
