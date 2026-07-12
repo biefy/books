@@ -1,6 +1,7 @@
 # Summary
 
 [Introduction](README.md)
+[Lab environment](lab-environment.md)
 
 ---
 

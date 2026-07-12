@@ -1,0 +1,91 @@
+name: Build eBPF labs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/ebpf-labs.yml
+      - .gitmodules
+      - ebpf/labs/**
+      - ebpf/src/day01.md
+      - ebpf/src/day02.md
+      - ebpf/src/day03.md
+      - ebpf/src/lab-environment.md
+  pull_request:
+    paths:
+      - .github/workflows/ebpf-labs.yml
+      - .gitmodules
+      - ebpf/labs/**
+      - ebpf/src/day01.md
+      - ebpf/src/day02.md
+      - ebpf/src/day03.md
+      - ebpf/src/lab-environment.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out pinned dependencies
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            llvm \
+            git \
+            make \
+            gcc \
+            libc6-dev \
+            libelf-dev \
+            zlib1g-dev \
+            pkg-config
+
+      - name: Check the host and dependency pins
+        run: ebpf/labs/scripts/preflight.sh
+
+      - name: Build objects, skeletons, and loaders
+        run: make -C ebpf/labs check
+
+      - name: Inspect generated artifacts
+        run: |
+          set -euo pipefail
+          for object in \
+            ebpf/labs/.output/day01/hello.bpf.o \
+            ebpf/labs/.output/day02/count.bpf.o \
+            ebpf/labs/.output/day03/parent.bpf.o; do
+            readelf --sections --wide "$object" | grep -q '\.BTF'
+            readelf --sections --wide "$object" | grep -q '\.BTF.ext'
+            ebpf/labs/.output/bpftool/bootstrap/bpftool btf dump \
+              file "$object" >/dev/null
+          done
+
+          for skeleton in \
+            ebpf/labs/.output/day01/hello.skel.h \
+            ebpf/labs/.output/day02/count.skel.h \
+            ebpf/labs/.output/day03/parent.skel.h; do
+            test -s "$skeleton"
+          done
+
+          for loader in \
+            ebpf/labs/.output/day01/hello \
+            ebpf/labs/.output/day02/count \
+            ebpf/labs/.output/day03/parent; do
+            test -x "$loader"
+          done
+
+      - name: Verify clean rebuild
+        run: |
+          make -C ebpf/labs clean
+          test ! -e ebpf/labs/.output
+          make -C ebpf/labs check
+
+      # Runtime attachment is intentionally excluded. It needs a disposable,
+      # privileged kernel host and is covered only by the opt-in smoke script.

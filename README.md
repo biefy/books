@@ -21,6 +21,16 @@ cd ebpf      && mdbook serve --port 4002
 
 Open `http://127.0.0.1:4001` and `http://127.0.0.1:4002`.
 
+The repo-owned eBPF labs for Days 1–3 build on Linux with recursive submodules:
+
+```bash
+git submodule update --init --recursive
+ebpf/labs/scripts/preflight.sh
+make -C ebpf/labs check
+```
+
+See the eBPF book's [Lab environment](ebpf/src/lab-environment.md) for packages, runtime privileges, and the chapters covered by this scaffold.
+
 ## Layout
 
 ```
@@ -35,12 +45,17 @@ books/
 │       └── diagrams/*.png
 ├── ebpf/
 │   ├── book.toml
+│   ├── labs/                    ← runnable, CI-compiled source for Days 1–3
+│   │   ├── day01/ … day03/
+│   │   └── vendor/libbpf-bootstrap/  ← pinned recursive submodule
 │   └── src/
 │       ├── SUMMARY.md
 │       ├── README.md
 │       ├── day01.md … day28-30.md
 │       └── diagrams/*.png
-└── .github/workflows/deploy.yml
+└── .github/workflows/
+    ├── deploy.yml
+    └── ebpf-labs.yml
 ```
 
 ## Diagram sources

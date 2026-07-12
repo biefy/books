@@ -247,71 +247,52 @@ Reads a NUL-terminated string. Bounds the read at `sizeof(dst)`. Returns the act
 
 ## The lab
 
+Continue in the repository's `ebpf/labs` directory. `make parent` compiles the exact anchored listings shown below.
+
+### `parent.h` — the shared event record
+
+```c
+{{#include ../labs/day03/parent.h}}
+```
+
 ### `parent.bpf.c`
 
 ```c
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_tracing.h>
-#include <bpf/bpf_core_read.h>
-
-char LICENSE[] SEC("license") = "GPL";
-
-struct event {
-    __u32 pid;
-    __u32 ppid;
-    char comm[16];
-    char pcomm[16];
-};
-
-struct {
-    __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 256 * 1024);
-} rb SEC(".maps");
-
-SEC("fentry/filename_unlinkat")
-int BPF_PROG(on_unlink)
-{
-    struct task_struct *task = (struct task_struct *)bpf_get_current_task_btf();
-    struct task_struct *parent;
-    struct event *e;
-
-    e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
-    if (!e)
-        return 0;
-
-    e->pid  = bpf_get_current_pid_tgid() >> 32;
-    e->ppid = BPF_CORE_READ(task, real_parent, tgid);
-    BPF_CORE_READ_STR_INTO(&e->comm, task, comm);
-    BPF_CORE_READ_STR_INTO(&e->pcomm, task, real_parent, comm);
-
-    bpf_ringbuf_submit(e, 0);
-    return 0;
-}
+{{#include ../labs/day03/parent.bpf.c:book}}
 ```
 
 What's new:
 
 - `bpf_get_current_task_btf()` returns a typed `struct task_struct *`. Its proto's return type is `RET_PTR_TO_BTF_ID_TRUSTED`, so the Verifier marks the register a trusted, non-NULL `PTR_TO_BTF_ID` — you can deref its fields directly with no NULL check.
-- `BPF_CORE_READ(task, real_parent, tgid)` — three-arg form. Walks `task → real_parent → tgid` (recall: `tgid` is the user-visible PID, so the parent's `tgid` is the PPID). Each hop is a CO-RE-relocated `bpf_probe_read_kernel`.
-- `BPF_CORE_READ_STR_INTO(&e->comm, task, comm)` — reads `task->comm` (a 16-byte char array, not a pointer). Note `comm` is the last arg; for non-pointer fields you don't need a final `*` deref hop.
+- `__builtin_memset(event, 0, sizeof(*event))` initializes the whole reserved record before helper reads. If a fault-tolerant string read fails, userspace receives an empty string instead of stale ringbuf bytes.
+- `BPF_CORE_READ(task, real_parent, tgid)` walks `task → real_parent → tgid` (recall: `tgid` is the user-visible PID, so the parent's `tgid` is the PPID). Each hop is a CO-RE-relocated `bpf_probe_read_kernel`.
+- `BPF_CORE_READ_STR_INTO(&event->comm, task, comm)` reads `task->comm` (a 16-byte char array, not a pointer). Note `comm` is the last arg; for non-pointer fields you don't need a final `*` deref hop.
 - Unlike Day 1, `BPF_PROG(on_unlink)` takes no extra params — we don't need the unlink arguments (`dfd`/`name`) today, because `bpf_get_current_task_btf()` hands us the task directly.
 
 ### Userspace `parent.c`
 
-Same skeleton + ringbuf consumer pattern as Day 1. Print:
+The loader mirrors Day 1's checked error and signal paths, validates the shared `struct parent_event`, and releases both ringbuf and skeleton on exit:
 
 ```c
-printf("PID %d (%s) ppid %d (%s) deleted a file\n",
-       e->pid, e->comm, e->ppid, e->pcomm);
+{{#include ../labs/day03/parent.c:book}}
 ```
 
 ### Run it
 
+In terminal 1:
+
 ```bash
-make
-sudo ./parent &
-touch /tmp/x && rm /tmp/x
+make parent
+sudo ./.output/day03/parent
+```
+
+In terminal 2:
+
+```bash
+scratch=$(mktemp -d /tmp/ebpf-day03.XXXXXX)
+touch "$scratch/x"
+rm "$scratch/x"
+rmdir "$scratch"
 ```
 
 Expected:
@@ -320,15 +301,9 @@ Expected:
 PID 24501 (rm) ppid 24450 (bash) deleted a file
 ```
 
-That `ppid 24450 (bash)` is `real_parent->tgid` and `real_parent->comm` working exactly as the `task_struct` section promised: `rm`'s real parent is the `bash` that forked it, and its `tgid` is the PPID `ps` would show.
+That parent is `real_parent->tgid` and `real_parent->comm` working exactly as the `task_struct` section promised: `rm`'s real parent is the shell that forked it, and its `tgid` is the PPID `ps` would show.
 
-We backgrounded the consumer with `&`, so stop it before moving on (otherwise it keeps polling the ringbuf and printing into the shell while you run the inspect/break steps):
-
-```bash
-sudo pkill -f ./parent
-```
-
-(Or, mirroring Day 1, run `sudo ./parent` in the foreground in one terminal, do the `touch /tmp/x && rm /tmp/x` in a second terminal, and Ctrl-C the consumer when done.)
+Press Ctrl-C in terminal 1 when the event appears. The loader frees the ringbuf and destroys the skeleton, detaching its fentry link without a broad `pkill`.
 
 ---
 
@@ -339,7 +314,7 @@ This is the most important step today. You need to *see* the relocations to beli
 Disassemble the object with relocations interleaved (the `-r` flag is what makes the CO-RE records appear — `-d` alone never prints them):
 
 ```bash
-llvm-objdump -dr parent.bpf.o | grep CO-RE
+llvm-objdump -dr .output/day03/parent.bpf.o | grep CO-RE
 ```
 
 (If `llvm-objdump` isn't found, your distro may only ship versioned binaries — try `llvm-objdump-21` or `llvm-objdump-18`. Either works; the `-dr` flags and output are identical.)
@@ -357,19 +332,19 @@ Recent LLVM annotates the BPF disassembly with the CO-RE relocation records read
 To inspect the embedded types instead:
 
 ```bash
-bpftool btf dump file parent.bpf.o
+./.output/bpftool/bootstrap/bpftool btf dump file .output/day03/parent.bpf.o
 ```
 
-You'll see your maps (`VAR 'rb'` and the `.maps` DATASEC), your `on_unlink` program function, and references to kernel types like `task_struct.real_parent`. (`struct event` itself is a function-local stack type, so the compiler does not emit it into the object's BTF — only types reachable from maps, globals, and func prototypes appear.)
+You'll see your maps (`VAR 'rb'` and the `.maps` DATASEC), your `on_unlink` program function, and references to kernel types like `task_struct.real_parent`. (`struct parent_event` is used only inside function code and is not reachable from a map, global, or function prototype, so the compiler does not emit it into the object's BTF.)
 
-> **Aside — shipping minimal BTF.** `bpftool gen min_core_btf /sys/kernel/btf/vmlinux min.btf parent.bpf.o` writes a minimal BTF file containing only the types your program references (it prints nothing to stdout). That's for *portability* — shipping a tiny BTF alongside your `.o` for kernels without `/sys/kernel/btf/vmlinux` — not for inspecting relocations.
+> **Aside — shipping minimal BTF.** `./.output/bpftool/bootstrap/bpftool gen min_core_btf /sys/kernel/btf/vmlinux min.btf .output/day03/parent.bpf.o` writes a minimal BTF file containing only the types your program references (it prints nothing to stdout). That's for *portability* — shipping a tiny BTF alongside your `.o` for kernels without `/sys/kernel/btf/vmlinux` — not for inspecting relocations.
 
 To watch the relocations get applied at load time, you need **libbpf's own debug log**, not the kernel verifier log. The two are different: `.kernel_log_level` feeds `bpf_attr.log_level`, which controls the in-kernel *verifier* log (a disassembled, post-relocation instruction dump plus verifier state). CO-RE patching happens in libbpf userspace *before* the `BPF_PROG_LOAD` syscall, so the verifier log contains no `CO-RE` string and no relocation provenance — grepping it for `CO-RE` finds nothing.
 
 The patching messages come out of libbpf's print callback at the `LIBBPF_DEBUG` level. Easiest from the shell — load with bpftool's `-d` flag (which sets libbpf to `LIBBPF_DEBUG`) and grep for the relocation lines:
 
 ```bash
-sudo bpftool -d prog load parent.bpf.o /sys/fs/bpf/parent 2>&1 | grep relo
+sudo ./.output/bpftool/bootstrap/bpftool -d prog load .output/day03/parent.bpf.o /sys/fs/bpf/parent 2>&1 | grep relo
 sudo rm -f /sys/fs/bpf/parent   # clean up the pin
 ```
 
@@ -429,7 +404,7 @@ The point of `bpf_core_field_exists` is fields that *appear or disappear across 
 Replace the macro form with direct deref:
 
 ```c
-e->ppid = task->real_parent->tgid;
+event->ppid = task->real_parent->tgid;
 ```
 
 Compiles. Verifier accepts. Runs. **Faster** than `BPF_CORE_READ` because no `bpf_probe_read_kernel` call — this is the trusted-`PTR_TO_BTF_ID` plain-load fast path we dissected earlier. The Verifier already knows `task` is a non-NULL `task_struct`, so it lets the JIT emit a bare load with no fault net.
