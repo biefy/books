@@ -49,6 +49,34 @@ Hold onto one idea: **a packet's payload often lives in independent pages that t
 
 > Connect forward: **Day 2's RX path starts in the driver's NAPI poll draining this exact ring.** Today we only need to know the ring exists and that it leaves packet bytes pre-positioned in pages.
 
+## A common zero-copy RX path: DMA page → skb window
+
+Here's the part most treatments skip, and it's the part that makes everything else click. On a common high-performance receive path, the driver gives the NIC a kernel-owned buffer for DMA, then wraps that same storage in an skb instead of copying the frame. This is an important path — **not a contract every driver must follow**.
+
+![RX ring to skb window to recycle](diagrams/day01_rx_ring_skb.png)
+
+A modern NIC and its driver commonly communicate through a **descriptor ring**: a fixed-size circular array where each receive descriptor names a DMA-capable buffer. In a page-pool-based driver, the handshake looks like this:
+
+1. **Before a packet arrives**, the driver obtains a page (often from a page pool), maps it for DMA, and writes its DMA address into a free receive descriptor. The kernel owns the memory; the descriptor lends it to the NIC.
+2. **A frame lands.** The NIC DMA-engines the bytes into that buffer, marks the descriptor done, and eventually causes NAPI polling to run.
+3. **The driver processes the completion.** Native XDP, when supported and attached, can inspect the raw buffer here. After `XDP_PASS`, many drivers call **`build_skb`** or `napi_build_skb`: the helper allocates an skb descriptor and points `skb->head` at the caller-provided storage. That branch avoids a payload copy.
+4. **The skb travels up the stack** — `ip_rcv`, routing, TCP — with its pointers describing bytes in that buffer.
+5. **The last data reference releases the head.** `head_frag` tells `skb_free_head()` that the head came from a page or page fragment. Separately, a page-pool-aware driver calls `skb_mark_for_recycle()`, setting `pp_recycle`; only then does the free path try to return the page to its page pool. Without that marker, the page-fragment free path releases it normally.
+
+The alternatives matter. Some drivers allocate an skb with `napi_alloc_skb()` and copy a small frame into it (a receive **copybreak**); others use different buffer managers. Generic XDP also runs later, after an skb already exists. So `build_skb` means "wrap caller-provided storage," not "all RX is page-pool zero-copy."
+
+This is why `build_skb` exists alongside `__alloc_skb`. `__alloc_skb` allocates a descriptor plus fresh linear storage. `build_skb` allocates the descriptor around storage supplied by its caller; that storage may be a DMA-filled page, but the helper itself neither knows about a NIC ring nor opts the skb into page-pool recycling.
+
+Three consequences fall out of the common page-backed path:
+
+- **`head_frag` and `pp_recycle` answer different questions.** `head_frag` selects page-fragment release rather than `kfree`; `pp_recycle` asks the page-pool path to reclaim eligible storage.
+- **Native XDP can run before skb construction.** A drop or redirect can therefore avoid allocating the skb descriptor at all. (Day 27.)
+- **The driver reserves headroom and tailroom deliberately.** `NET_SKB_PAD`-style headroom permits later `skb_push`; tailroom must include aligned `skb_shared_info`. The exact layout is driver-specific.
+
+The transmit side uses a related ring but not a perfect ownership mirror (Day 3). TCP may retain its original skb in the retransmit tree while a charged clone travels through IP, the qdisc, and the driver. The driver maps that downstream skb for a TX descriptor, and completion releases the downstream reference.
+
+Hold onto the qualified picture: **RX descriptor → driver-owned DMA buffer → optional native XDP → skb view (or copy) → stack → release/recycle.** Days 2 and 3 walk it function by function.
+
 ## The descriptor and the data
 
 The `sk_buff` itself is a *descriptor*. The packet bytes live elsewhere — in a separately-allocated linear buffer plus, optionally, a tail of page fragments.

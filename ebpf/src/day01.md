@@ -177,13 +177,9 @@ Source: `kernel/bpf/btf.c`.
 
 ### vmlinux.h
 
-A C header containing every type definition the running kernel exposes via BTF. You generate it once:
+A C header generated from kernel BTF, containing the kernel types a BPF program can name. You can generate one from a running host with `bpftool btf dump file /sys/kernel/btf/vmlinux format c`.
 
-```bash
-sudo bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h
-```
-
-Including it in your `.bpf.c` gives access to `struct task_struct`, `struct file`, `struct sk_buff`, etc. — with the **exact layout** of the kernel that produced it.
+The repo-owned labs compile against the architecture header pinned with libbpf-bootstrap, not a file regenerated on every reader's machine. That gives CI and local builds one stable type universe; at load time CO-RE still resolves the accessed fields against the **running** kernel's `/sys/kernel/btf/vmlinux`. If you are developing outside this scaffold, generating `vmlinux.h` from a known reference kernel is the equivalent workflow.
 
 ### CO-RE — Compile Once, Run Everywhere
 
@@ -218,64 +214,40 @@ Replaced **perfbuf** (`BPF_MAP_TYPE_PERF_EVENT_ARRAY`) for most uses. Perfbuf is
 
 ### Setup (one time)
 
+Start with the [Lab environment](lab-environment.md) page, then run these commands from the books repository on your Linux lab host:
+
 ```bash
-# On your Linux 7.1 box
-mkdir -p ~/ebpf-labs/day01 && cd ~/ebpf-labs/day01
-
-# Clone libbpf-bootstrap — it provides the Makefile and the vendored
-# libbpf + bpftool submodules the build needs. --recurse-submodules is
-# required; without it the Makefile build fails for lack of libbpf/bpftool.
-git clone --recurse-submodules https://github.com/libbpf/libbpf-bootstrap ~/libbpf-bootstrap
-
-# Generate vmlinux.h (regenerate after kernel upgrades)
-sudo bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h
+git submodule update --init --recursive
+cd ebpf/labs
+./scripts/preflight.sh
+make hello
 ```
 
-Copy `~/libbpf-bootstrap/examples/c/Makefile` into this directory and change its `APPS = bootstrap` line to `APPS = hello`. With `APPS = hello`, the Makefile expects your two source files to be named *exactly* `hello.bpf.c` (kernel side) and `hello.c` (userspace side), and it generates `hello.skel.h` for you. You also need:
+The repository pins libbpf-bootstrap and all of its nested dependencies. The shared Makefile builds that exact libbpf and bpftool, selects the pinned `vmlinux.h` for your architecture, compiles `day01/hello.bpf.c`, generates `.output/day01/hello.skel.h`, and links `.output/day01/hello`. Nothing is installed system-wide.
 
-- `clang` ≥ 17 with `-target bpf`
-- `bpftool gen skeleton`
-- libbpf headers and `-lbpf` for userspace
+You still need Clang 17 or newer with `-target bpf`, a C compiler and Make, plus libelf and zlib development headers. `preflight.sh` checks those inputs but never installs packages or invokes `sudo`.
 
-The vendored `libbpf` and `bpftool` under `~/libbpf-bootstrap/` (pulled in by `--recurse-submodules` above) satisfy the last two; the Makefile builds them for you on first `make`.
+### `hello.h` — the shared event record
+
+The producer and consumer include one header, so a layout change cannot silently desynchronize the two sides:
+
+```c
+{{#include ../labs/day01/hello.h}}
+```
 
 ### `hello.bpf.c` — the kernel side
 
+This listing is included from the file the lab build and CI compile:
+
 ```c
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_tracing.h>
-
-char LICENSE[] SEC("license") = "GPL";
-
-struct event {
-    __u32 pid;
-    char comm[16];
-};
-
-struct {
-    __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 256 * 1024);
-} rb SEC(".maps");
-
-SEC("fentry/filename_unlinkat")
-int BPF_PROG(on_unlink, int dfd, struct filename *name)
-{
-    struct event *e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
-    if (!e)
-        return 0;
-    e->pid = bpf_get_current_pid_tgid() >> 32;
-    bpf_get_current_comm(&e->comm, sizeof(e->comm));
-    bpf_ringbuf_submit(e, 0);
-    return 0;
-}
+{{#include ../labs/day01/hello.bpf.c:book}}
 ```
 
 Walkthrough of every line that's new:
 
 - `#include "vmlinux.h"` — pulls in every kernel type, including `struct filename` used in the prototype.
 - `char LICENSE[] SEC("license") = "GPL";` — a load-time gate, not legal advice. The kernel rejects a non-GPL program *only* if it calls a GPL-only helper. Many of the most useful helpers are GPL-only (`bpf_probe_read_kernel`, `bpf_get_current_task`, `bpf_get_stackid`, …), but the four simple helpers this lab uses are *not* — so this line has no teeth yet today (see Break 3).
-- `struct event` — the type we'll send through ringbuf. Both kernel and userspace include this same definition; ringbuf transports raw bytes.
+- `#include "hello.h"` — the shared `struct hello_event` sent through ringbuf. Ringbuf transports raw bytes, so both sides must agree on this layout.
 - The `SEC(".maps")` block — modern map declaration syntax. The `__uint(...)` macros from `bpf_helpers.h` produce BTF the loader uses to know it's a 256-KiB ringbuf. (This is the BTF that drives the `BPF_MAP_CREATE` command libbpf issues for `rb`.)
 - `SEC("fentry/filename_unlinkat")` — attach point. `filename_unlinkat` is in `fs/namei.c`, called on every `unlink()` and `unlinkat()` syscall.
 - `BPF_PROG(on_unlink, int dfd, struct filename *name)` — macro from `bpf_tracing.h` that unpacks the trampoline's argument array into the typed parameters `dfd` and `name` (the ABI bridge from earlier, made concrete).
@@ -286,51 +258,14 @@ Walkthrough of every line that's new:
 
 #### A one-paragraph refresher: "the task" and where 16 comes from
 
-Two of those helpers read "the current task," and the magic number `16` shows up with no explanation — so, briefly: every schedulable thread in the kernel is represented by a `struct task_struct`. What BPF calls **`current`** is simply the `task_struct` of the thread running on this CPU right now, and `bpf_get_current_pid_tgid` / `bpf_get_current_comm` both read fields out of it. The `comm` field is a fixed-size, NUL-padded **short thread name** — the `rm` you'll see in the lab output — declared as `char comm[TASK_COMM_LEN]` in `struct task_struct` (`include/linux/sched.h:1173`). And `TASK_COMM_LEN` is **16** (`include/linux/sched.h:325`). So the `16` in `sizeof(e->comm)` isn't arbitrary; it's the kernel's compile-time size of that field. That's the whole refresher — we'll do a proper `task_struct` tour another day; today you just need "always 16" and "the task's comm" to stop being unexplained constants. (The pid-vs-tgid split above already covered why we shift by 32.)
+Two of those helpers read "the current task," and the magic number `16` shows up with no explanation — so, briefly: every schedulable thread in the kernel is represented by a `struct task_struct`. What BPF calls **`current`** is simply the `task_struct` of the thread running on this CPU right now, and `bpf_get_current_pid_tgid` / `bpf_get_current_comm` both read fields out of it. The `comm` field is a fixed-size, NUL-padded **short thread name** — the `rm` you'll see in the lab output — declared as `char comm[TASK_COMM_LEN]` in `struct task_struct` (`include/linux/sched.h:1173`). And `TASK_COMM_LEN` is **16** (`include/linux/sched.h:325`). So the `16` in `sizeof(event->comm)` isn't arbitrary; it's the kernel's compile-time size of that field. That's the whole refresher — we'll do a proper `task_struct` tour another day; today you just need "always 16" and "the task's comm" to stop being unexplained constants. (The pid-vs-tgid split above already covered why we shift by 32.)
 
 ### `hello.c` — the userspace side
 
-Copy `libbpf-bootstrap/examples/c/bootstrap.c`, then strip it down. The essence:
+The loader checks each libbpf step, validates the ringbuf record size, handles SIGINT/SIGTERM, and releases both the consumer and skeleton on every exit path:
 
 ```c
-#include <stdio.h>
-#include <signal.h>
-#include <bpf/libbpf.h>
-#include "hello.skel.h"
-
-struct event {
-    __u32 pid;
-    char comm[16];
-};
-
-static volatile sig_atomic_t exiting;
-static void sigh(int s) { exiting = 1; }
-
-static int handle(void *ctx, void *data, size_t sz) {
-    struct event *e = data;
-    printf("PID %d %s deleted a file\n", e->pid, e->comm);
-    return 0;
-}
-
-int main(void)
-{
-    struct hello_bpf *skel;
-    struct ring_buffer *rb;
-
-    skel = hello_bpf__open_and_load();
-    if (!skel) return 1;
-    if (hello_bpf__attach(skel)) return 1;
-
-    rb = ring_buffer__new(bpf_map__fd(skel->maps.rb), handle, NULL, NULL);
-
-    signal(SIGINT, sigh);
-    while (!exiting)
-        ring_buffer__poll(rb, 100);
-
-    ring_buffer__free(rb);
-    hello_bpf__destroy(skel);
-    return 0;
-}
+{{#include ../labs/day01/hello.c:book}}
 ```
 
 `bpf_map__fd(skel->maps.rb)` is exactly the map fd that `BPF_MAP_CREATE` returned during load — the userspace side polls it; the kernel side writes into it.
@@ -338,8 +273,8 @@ int main(void)
 ### Run it
 
 ```bash
-make
-sudo ./hello
+make hello
+sudo ./.output/day01/hello
 # in another terminal:
 scratch=$(mktemp -d /tmp/ebpf-day01.XXXXXX)
 touch "$scratch/one" "$scratch/two"
@@ -366,7 +301,7 @@ This is the part you don't skip. Every break teaches one concept.
 
 ### Break 1 — Drop the null check
 
-Remove the `if (!e) return 0;`. Rebuild. The verifier rejects with something like:
+Remove the `if (!event) return 0;`. Rebuild. The verifier rejects with something like:
 
 ```
 0: (85) call bpf_ringbuf_reserve#131
@@ -418,39 +353,44 @@ The lesson: the license string is a load-time gate with teeth **only** for GPL-o
 
 > ### Sharpen your pencil
 >
-> Before you run anything: what is `sizeof(struct event)`? The struct is a 4-byte `__u32 pid` followed by a 16-byte `char comm[16]`. Add them up — you'll see this number printed as `sz=` in a moment.
+> Before you run anything: what is `sizeof(struct hello_event)`? The struct is a 4-byte `__u32 pid` followed by a 16-byte `char comm[16]`. Add them up — you'll see this number printed as `size=` in a moment.
 >
-> .  
-> .  
+> .
+> .
 > .
 >
 > **Answer:** 20. There's no padding to worry about here — a `__u32` needs 4-byte alignment and `char[16]` needs only 1, so the 4 + 16 layout packs with no gaps. Hold "20" in mind; the `20 → 21` shift is the whole point of this break.
 
-The lesson here is that **ringbuf records are sized at reserve time, not at submit time** — but the consumer in `hello.c` never looks at the record length, so right now you can't see it. First make the size visible. Change `handle()` to print the delivered length `sz`:
+The lesson here is that **ringbuf records are sized at reserve time, not at submit time**. The checked-in `handle_event()` deliberately rejects any size other than `sizeof(*event)`, so replace that equality check with a lower-bound check and print the delivered `size`:
 
 ```c
-printf("PID %d %s deleted a file (sz=%zu)\n", e->pid, e->comm, sz);
+if (size < sizeof(*event)) {
+    fprintf(stderr, "short ringbuf record: %zu\n", size);
+    return 0;
+}
+printf("PID %u %.*s deleted a file (size=%zu)\n", event->pid,
+       (int)sizeof(event->comm), event->comm, size);
 ```
 
 Rebuild and run the **unmodified** program. Each line now ends with the record size:
 
 ```
-PID 13421 rm deleted a file (sz=20)
+PID 13421 rm deleted a file (size=20)
 ```
 
-`sizeof(struct event)` is 20 — a 4-byte `pid` plus a 16-byte `comm`. Now over-allocate the reservation while still writing only `sizeof(*e)` bytes:
+`sizeof(struct hello_event)` is 20 — a 4-byte `pid` plus a 16-byte `comm`. Now over-allocate the reservation while still writing only `sizeof(*event)` bytes:
 
 ```c
-struct event *e = bpf_ringbuf_reserve(&rb, sizeof(*e) + 1, 0);
+event = bpf_ringbuf_reserve(&rb, sizeof(*event) + 1, 0);
 ```
 
 The Verifier accepts it (you reserved enough). Rebuild, run, delete a file again:
 
 ```
-PID 13421 rm deleted a file (sz=21)
+PID 13421 rm deleted a file (size=21)
 ```
 
-The record is one byte larger even though you wrote the same bytes — the length is fixed when you **reserve**, not when you **submit**. (That trailing byte is uninitialized; we don't print it, the `20 → 21` size delta is the observable signal.) Restore the original `sizeof(*e)` reservation before moving on.
+The record is one byte larger even though you wrote the same bytes — the length is fixed when you **reserve**, not when you **submit**. (That trailing byte is uninitialized; we don't print it, the `20 → 21` size delta is the observable signal.) Restore the original `sizeof(*event)` reservation and exact-size consumer check before moving on.
 
 ---
 
@@ -465,10 +405,10 @@ Open these files in your `~/code/linux` checkout. Skim, don't memorize.
 ### Optional: read the generated skeleton
 
 ```bash
-bpftool gen skeleton hello.bpf.o
+./.output/bpftool/bootstrap/bpftool gen skeleton .output/day01/hello.bpf.o
 ```
 
-It prints the same `hello.skel.h` your Makefile generated. Read it once. You'll see it's just stamped-out boilerplate calling `bpf_object__find_map_by_name` and friends. Demystified.
+It prints the same skeleton stored at `.output/day01/hello.skel.h`. Read it once. You'll see it's just stamped-out boilerplate calling `bpf_object__find_map_by_name` and friends. Demystified.
 
 ---
 

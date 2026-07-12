@@ -251,15 +251,16 @@ The minisock holds only what's needed to recognise and correctly ACK a retransmi
 - **timestamps** (for PAWS / `tcp_tw_reuse`),
 - the **death-row timer** hook that fires after `TCP_TIMEWAIT_LEN`.
 
-The conversion lives in `tcp_time_wait` (`net/ipv4/tcp_minisocks.c:326`). Read it and you'll see the shape exactly:
+#### The exact hand-off: replace the full socket without a lookup gap
 
-1. `tw = inet_twsk_alloc(...)` builds the minisock.
-2. It copies `tcptw->tw_rcv_nxt = tp->rcv_nxt`, `tcptw->tw_snd_nxt = tp->snd_nxt`, the timestamps, etc.
-3. For a true TIME_WAIT it sets `timeo = TCP_TIMEWAIT_LEN`.
-4. `inet_twsk_hashdance_schedule(...)` hashes the minisock into the ehash **in place of** the original socket and arms its timer.
-5. Finally — and this is the punchline — `tcp_done(sk)` finishes the *original* socket, setting it to **TCP_CLOSE** (state 7).
+![TIME_WAIT minisock hand-off](diagrams/day15_timewait_minisock.png)
 
-So after entering TIME_WAIT, two things are true at once: a **minisock** sits in the ehash in state `TCP_TIME_WAIT` (6), and the **original full socket** has been set to `TCP_CLOSE` (7) and is on its way to being freed. This is why today's `bpftrace` on the original socket's `tcp_set_state` shows `… → 5 → 7` and **never** `→ 6`: state 6 lives on a *different object* the probe isn't watching. Keep that in your pocket — it's the experiment's "aha."
+`tcp_time_wait()` performs a controlled replacement:
+
+1. `inet_twsk_alloc()` allocates an `inet_timewait_sock`/`tcp_timewait_sock` and copies the connection identity plus the limited sequence, receive-window, timestamp, mark, and queue-mapping state needed to classify late segments. It has no TCP data queues or congestion-control state.
+2. `inet_twsk_hashdance_schedule()` adds the minisock to bind ownership, then under the ehash lock atomically replaces the full socket's ehash node with the minisock's node. Lookups for the same namespace and 4-tuple therefore continue to find an object without a gap. The minisock receives references for its bind link, ehash link, and timer, and the timer is armed for `TCP_TIMEWAIT_LEN` when this is true TIME_WAIT.
+3. Back in `tcp_time_wait()`, `tcp_done(sk)` moves the **original full socket** to TCP_CLOSE. Its memory is released only after its remaining references drain. This is why `fentry:tcp_set_state` on the full socket shows `… → 5 → 7`, never `→ 6`; the minisock was initialized directly with `TCP_TIME_WAIT` and does not pass through `tcp_set_state`.
+4. A later segment still hits ehash first (Day 13). `tcp_v4_rcv` sees the returned object's `TCP_TIME_WAIT` state and calls `tcp_timewait_state_process`, which may request an ACK, request a reset, consume the segment, or allow an eligible SYN to be retried against a listener after removing the old minisock. Timer expiry eventually unhashes and frees it."
 
 This also gives the **cost** of TIME_WAIT a concrete shape: each TIME_WAIT consumes one small minisock plus one ehash slot. That's why a busy short-connection server (HTTP, microservices) accumulates tens of thousands of them, and why there's a cap — `tcp_max_tw_buckets` — on the total.
 

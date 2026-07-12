@@ -219,35 +219,12 @@ Why use it? Because (as the RCU section just showed) the lookup pointer is unloc
 
 ## The lab
 
+Continue from Day 1 in the repository's `ebpf/labs` directory. The listings below are included from the source compiled by `make count` and CI.
+
 ### `count.bpf.c` — swap yesterday's ringbuf for a hash map
 
 ```c
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_tracing.h>
-
-char LICENSE[] SEC("license") = "GPL";
-
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 8192);
-    __type(key, __u32);
-    __type(value, __u64);
-} counts SEC(".maps");
-
-SEC("fentry/filename_unlinkat")
-int BPF_PROG(on_unlink)
-{
-    __u32 pid = bpf_get_current_pid_tgid() >> 32;
-    __u64 *cnt = bpf_map_lookup_elem(&counts, &pid);
-    if (cnt) {
-        __sync_fetch_and_add(cnt, 1);
-    } else {
-        __u64 one = 1;
-        bpf_map_update_elem(&counts, &pid, &one, BPF_NOEXIST);
-    }
-    return 0;
-}
+{{#include ../labs/day02/count.bpf.c:book}}
 ```
 
 ![Lookup → null-check → update flow](diagrams/day02_lookup_flow.png)
@@ -256,60 +233,42 @@ What's new:
 
 - The map is declared just like ringbuf: a struct in `SEC(".maps")` whose macros set type/size/key/value through BTF.
 - `bpf_map_lookup_elem(&counts, &pid)` — the **BPF-side** function from the table above. It takes the map *by address* and returns a *live pointer*. Note we pass the address of `pid`, not the value. The kernel reads `key_size` bytes starting from that address. If you accidentally passed `pid` (a value), you'd be telling the kernel to interpret an integer as a pointer. The Verifier catches this.
-- The `else` branch uses `BPF_NOEXIST` instead of `BPF_ANY`. Why? Because we know `cnt == NULL` here, so we expect insert. If two CPUs race and both see NULL, only one's `BPF_NOEXIST` succeeds; the other gets `-EEXIST` and we silently miss one increment. With `BPF_ANY`, the loser would silently overwrite the winner's count to 1. Neither is perfect; for production-grade you'd either use percpu hash (no race) or retry on `-EEXIST`. For today the cosmetic miss is fine.
+- The insert uses `BPF_NOEXIST` instead of `BPF_ANY`. If two CPUs both observe a miss, one inserts and the other gets `-EEXIST`; the losing path then looks up the new entry and atomically contributes its increment. `BPF_ANY` would instead let the loser overwrite the winner's count back to 1. A per-CPU hash is still the better high-contention design, but this retry closes the first-insert race without changing today's map type.
 
 ### `count.c` — userspace dumper
 
-Same `fentry` hook as Day 1, but the output channel changes from a ringbuf to a map: instead of polling a ringbuf, periodically iterate the map — and now you know the iteration is driven entirely from userspace, one syscall per call:
+Same `fentry` hook as Day 1, but the output channel changes from a ringbuf to a map. The loader periodically iterates the map, starts with a NULL previous key, distinguishes normal `ENOENT` exhaustion from iteration errors, and destroys the skeleton on SIGINT/SIGTERM:
 
 ```c
-#include <stdio.h>
-#include <unistd.h>
-#include <bpf/libbpf.h>
-#include "count.skel.h"
-
-int main(void)
-{
-    struct count_bpf *skel = count_bpf__open_and_load();
-    if (!skel) return 1;
-    if (count_bpf__attach(skel)) return 1;
-
-    int fd = bpf_map__fd(skel->maps.counts);
-    while (1) {
-        sleep(2);
-        printf("--- snapshot ---\n");
-        __u32 key, next;
-        __u32 *prev = NULL;          /* NULL on the first call → first key */
-        __u64 val;
-        while (bpf_map_get_next_key(fd, prev, &next) == 0) {
-            if (bpf_map_lookup_elem(fd, &next, &val) == 0)
-                printf("PID %u: %llu unlinks\n", next, val);
-            key = next;
-            prev = &key;
-        }
-    }
-}
+{{#include ../labs/day02/count.c:book}}
 ```
 
 Three things to connect back to the "two doors" section:
 
 - `bpf_map__fd(skel->maps.counts)` pulls the **integer fd** out of the skeleton — that's userspace's only handle on the kernel map.
-- `bpf_map_get_next_key(fd, prev, &next)` walks the map. Calling it with a NULL previous-key pointer returns the first key; calling it with the previous key returns the next; it returns `-ENOENT` when iteration is exhausted. Each call is one `sys_bpf(BPF_MAP_GET_NEXT_KEY, …)`. *This* is why the loop lives in userspace.
+- `bpf_map_get_next_key(fd, previous, &next)` walks the map. Calling it with a NULL previous-key pointer returns the first key; calling it with the previous key returns the next. It returns `-1` with `errno == ENOENT` when iteration is exhausted; the checked-in loader treats other errors as failures instead of spinning forever. Each call is one `sys_bpf(BPF_MAP_GET_NEXT_KEY, …)`. *This* is why the loop lives in userspace.
 - `bpf_map_lookup_elem(fd, &next, &val)` here is the **userspace** function — it copies the value into `val`, which we then read. (Contrast with the BPF side, which got a live pointer.)
 
 ### Run it
 
+In terminal 1:
+
 ```bash
-make
-sudo ./count &
-# in another terminal, generate work — let ONE rm process do all 100 unlinks
-# so the count aggregates under a single PID:
-for i in $(seq 1 100); do touch /tmp/x$i; done
-rm /tmp/x*
-# wait 2s for the next snapshot
+make count
+sudo ./.output/day02/count
 ```
 
-Note the two-step workload: if you `rm` *inside* the loop (`touch ... && rm ...`), the shell forks a brand-new `rm` process every iteration, so each `unlink` comes from a different PID and the map fills with ~100 entries of value 1 — the exact opposite of what we're demonstrating. Batching the deletes into a single `rm /tmp/x*` makes one process issue all 100 `unlinkat` calls, so they aggregate under one PID.
+In terminal 2, generate work inside a directory this lab owns. One `rm` process performs all 100 unlinks, so they aggregate under one PID:
+
+```bash
+scratch=$(mktemp -d /tmp/ebpf-day02.XXXXXX)
+for i in $(seq 1 100); do touch "$scratch/x$i"; done
+rm "$scratch"/x*
+rmdir "$scratch"
+# wait 2s for the next snapshot, then Ctrl-C the loader in terminal 1
+```
+
+If you `rm` *inside* the loop (`touch ... && rm ...`), the shell forks a brand-new `rm` process every iteration, so each `unlink` comes from a different PID and the map fills with ~100 entries of value 1 — the exact opposite of what we're demonstrating. Batching the deletes makes one process issue all 100 `unlinkat` calls.
 
 Expected — the snapshot also lists other PIDs from unrelated background `unlink` activity (systemd, systemd-logind, etc.), so look for the line showing `100`:
 
@@ -318,19 +277,13 @@ Expected — the snapshot also lists other PIDs from unrelated background `unlin
 PID 14392: 100 unlinks
 ```
 
-You can also dump from `bpftool` without writing the userspace iterator:
+You can also dump from the pinned bpftool without writing the userspace iterator:
 
 ```bash
-sudo bpftool map dump name counts
+sudo ./.output/bpftool/bootstrap/bpftool map dump name counts
 ```
 
-When you're done, stop the backgrounded dumper — it runs an infinite `while(1)` snapshot loop and won't exit on its own:
-
-```bash
-sudo kill %1   # or: sudo pkill -f ./count
-```
-
-(The scratch files are already gone — `rm /tmp/x*` above removed them.)
+Ctrl-C sets the loader's exit flag; after an interrupted sleep it destroys the skeleton, which detaches the fentry link and closes the map. The scratch directory is already gone.
 
 ---
 
@@ -390,7 +343,7 @@ int BPF_PROG(on_read)
 Run for a minute. Watch the map fill:
 
 ```bash
-sudo bpftool map dump name counts | wc -l
+sudo ./.output/bpftool/bootstrap/bpftool map dump name counts | wc -l
 ```
 
 Without `bpf_map_delete_elem` somewhere, every TID that ever called `vfs_read` gets a permanent entry. Once you hit `max_entries`, new TIDs silently fail to insert. This is the bug Day 9 is about — but the lesson is here too: **map entries don't expire on their own. If you insert, plan to delete.**
@@ -426,7 +379,7 @@ Two CPUs simultaneously execute the program for the same PID, both observe `cnt 
 <details>
 <summary>Click to reveal answer</summary>
 
-**Answer:** The first to acquire the bucket lock (in `htab_map_update_elem`) succeeds and inserts. The second observes the entry now exists and returns `-EEXIST`. The losing CPU's increment is lost — value is 1 instead of 2. To avoid this entirely, use `BPF_MAP_TYPE_PERCPU_HASH` (no cross-CPU contention) or detect `-EEXIST` and retry with `__sync_fetch_and_add` on the now-existing entry.
+**Answer:** The first to acquire the bucket lock (in `htab_map_update_elem`) succeeds and inserts. The second observes the entry now exists and returns `-EEXIST`. In the checked-in lab, that losing CPU re-runs the lookup and applies `__sync_fetch_and_add` to the winner's entry, so both increments are represented. Without that retry the value would remain 1 instead of 2. A `BPF_MAP_TYPE_PERCPU_HASH` removes this cross-CPU hot-slot contention entirely, at the cost of summing per-CPU values in userspace.
 
 </details>
 

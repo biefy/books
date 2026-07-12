@@ -1,0 +1,94 @@
+direction: down
+
+title: |md
+  ### TCP ownership and TSQ: retained originals vs downstream clones
+| {near: top-center; shape: text}
+
+writeq: "TCP write queue" {
+  style.fill: "#dbeafe"
+  w_body: |md
+    New data skb starts on `sk_write_queue`.
+
+    `sk_wmem_queued` is charged when TCP
+    creates/appends the skb.
+
+    tcp_write_xmit checks cwnd, rwnd,
+    Nagle, TSO, and pacing constraints.
+  |
+}
+
+rtxq: "TCP retransmit tree" {
+  style.fill: "#ede9fe"
+  r_body: |md
+    After first successful transmission,
+    `tcp_event_new_data_sent()` moves the
+    original skb:
+
+    `sk_write_queue` → `tcp_rtx_queue`
+
+    The `sk_wmem_queued` charge remains
+    until ACK/free (`tcp_wmem_free_skb`).
+  |
+}
+
+check: "TSQ gate before another send" {
+  style.fill: "#fef3c7"
+  c_body: |md
+    `tcp_small_queue_check()` compares
+    `sk_wmem_alloc` with:
+
+    min(max(2 × skb->truesize,
+            pacing_rate >> pacing_shift),
+        tcp_limit_output_bytes)
+
+    Usually a two-skb floor or ~1 ms of
+    pacing-rate bytes per socket.
+  |
+}
+
+clone: "Downstream transmit clone" {
+  style.fill: "#dcfce7"
+  cl_body: |md
+    `tcp_transmit_skb()` normally clones
+    the retained TCP skb for output.
+
+    The clone is charged to `sk_wmem_alloc`
+    and gets destructor `tcp_wfree`.
+
+    It can occupy IP/qdisc/device queues;
+    it is not the retained rtx-tree original.
+  |
+}
+
+throttle: "Over limit: TSQ_THROTTLED" {
+  style.fill: "#fee2e2"
+  t_body: |md
+    Stop sending another skb.
+
+    Not-yet-sent originals stay on the write
+    queue; already-sent originals remain in
+    the retransmit tree.
+
+    This bounds one socket's occupancy below
+    TCP, not aggregate backlog across flows.
+  |
+}
+
+free: "Downstream release: tcp_wfree" {
+  style.fill: "#fff7ed"
+  f_body: |md
+    Remove the clone's `sk_wmem_alloc` charge.
+
+    If TSQ throttled this socket, queue it on
+    per-CPU BH work so tcp_write_xmit can retry
+    outside the qdisc-locking context.
+  |
+}
+
+writeq -> check: "consider next unsent skb"
+check -> clone: "under limit: transmit clone"
+clone -> rtxq: "successful first send retains original"
+check -> throttle: "still over limit" {style.stroke-dash: 4}
+clone -> free: "qdisc/device releases clone"
+free -> check: "wake and try more" {style.stroke: "#16a34a"}
+throttle -> free: "wait for a prior clone to drain" {style.stroke-dash: 4}

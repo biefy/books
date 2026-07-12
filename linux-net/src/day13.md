@@ -330,6 +330,24 @@ The original listening socket stays — accept just hands you a *new* socket for
 
 Per-netns. Alongside `bhash`/`ehash`, `struct inet_hashinfo` carries a separate listener table, **`lhash2`**, hashed by `(local port, local address)`. It's a sibling of the bind and established tables, not part of `bhash`, and it speeds up finding the listening socket on an incoming SYN (it also carries the `SO_REUSEPORT` groups that listener lookup then selects from — Day 24).
 
+### How an arriving segment finds its socket: the two-tier lookup
+
+Here's the part the static field list above skips, and it's the whole reason these two tables exist. Every TCP segment that arrives off the wire is just bytes with a 4-tuple in its headers — `(saddr, sport, daddr, dport)`. Somewhere in the kernel there may be a `struct sock` that owns this conversation, or a listener willing to start one, or nobody at all. **Demultiplexing** is the act of turning that 4-tuple into the right `sk` pointer, and it happens on *every single inbound packet*. Get the mental model for this and the rest of L4 falls into place, because every later day (TCP state machine, congestion control, retransmission) assumes the segment has already been routed to its sock.
+
+![inbound TCP demux](diagrams/day13_inbound_demux.png)
+
+The entry point is `tcp_v4_rcv`, which calls `__inet_lookup_skb` → `__inet_lookup`. That helper searches in **two tiers, in a deliberate order**:
+
+1. **Try the ehash first — entries with full identity.** `__inet_lookup_established` computes `inet_ehashfn(net, daddr, dport, saddr, sport)`, selects one bucket, and walks its nulls list under RCU. `inet_match` verifies namespace, exact address/port pair, and interface constraints. A hit can be a full connection, a TIME_WAIT minisock, or a `TCP_NEW_SYN_RECV` request sock; `tcp_v4_rcv` branches on those special states before normal full-socket processing.
+2. **Only if ehash misses, try listener lookup.** `__inet_lookup_listener` first offers the segment to the BPF `SK_LOOKUP` hook when enabled. It then hashes `(netns, daddr, dport)` with `ipv4_portaddr_hash` and searches that `lhash2` bucket; if no specific-address listener wins, it repeats with `INADDR_ANY`. Candidate scoring accounts for namespace, address, and bound-device specificity. A reuseport candidate invokes `reuseport_select_sock`, but lhash2 is the normal listener table, not a reuseport-only structure.
+
+An ehash miss is not proof that the segment is a SYN — stray ACKs and other unmatched segments take the same fallback. TCP state processing decides what a listener accepts. The ordering still optimizes the common data path: established traffic performs one full-identity bucket lookup, while wildcard/scored listener selection runs only after that misses.
+
+Two consequences fall out of this:
+
+- **An ehash hit takes a refcount.** `__inet_lookup_established` uses `refcount_inc_not_zero` and revalidates the match before returning, so an established/request/TIME_WAIT entry cannot vanish mid-RX. The listener path is RCU-protected and reports `refcounted = false`; its caller follows the appropriate listener lifetime rules.
+- **Both tiers missing is the "no socket" path.** `tcp_v4_rcv` assigns `SKB_DROP_REASON_NO_SOCKET` and, after policy/checksum checks, sends a reset for a segment that permits one. A connect attempt observes that reset as `ECONNREFUSED`; not every no-socket packet corresponds to a userspace connect.
+
 ## Today's experiment
 
 ```bash

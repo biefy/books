@@ -1,0 +1,101 @@
+direction: down
+
+title: |md
+  ### Inbound TCP demux: full identity first, listeners second
+| {near: top-center; shape: text}
+
+pkt: "tcp_v4_rcv: validated TCP segment" {
+  style.fill: "#dbeafe"
+  p_body: |md
+    Header supplies peer/local addresses + ports.
+
+    `__inet_lookup_skb()` may first reuse a
+    prefetched skb socket; otherwise it calls
+    `__inet_lookup()` with namespace and
+    ingress-device identity.
+  |
+}
+
+ehash: "Tier 1: ehash full-identity lookup" {
+  style.fill: "#dcfce7"
+  e_body: |md
+    `__inet_lookup_established()`
+
+    hash(netns, daddr, dport, saddr, sport)
+      → one ehash bucket
+
+    RCU nulls-list walk + exact revalidation:
+    namespace, address/port pair, interfaces
+
+    Hit takes a refcount and can be:
+    - full TCP socket
+    - TCP_TIME_WAIT minisock
+    - TCP_NEW_SYN_RECV request sock
+  |
+}
+
+special: "Dispatch by returned socket state" {
+  style.fill: "#ede9fe"
+  s_body: |md
+    TIME_WAIT
+      → tcp_timewait_state_process (Day 15)
+
+    NEW_SYN_RECV
+      → listener/request completion path
+
+    LISTEN or full connection
+      → policy/filter + tcp_v4_do_rcv
+         (or full-socket backlog if user-owned)
+  |
+}
+
+listener: "Tier 2: listener lookup after ehash miss" {
+  style.fill: "#fef3c7"
+  l_body: |md
+    1. Optional BPF SK_LOOKUP redirect
+    2. lhash2(netns, daddr, dport)
+       score specific-address candidates
+    3. lhash2(netns, INADDR_ANY, dport)
+       score wildcard listeners
+
+    `ipv4_portaddr_hash`, not the 4-tuple hash.
+    SO_REUSEPORT selection occurs within a
+    candidate group; lhash2 serves all listeners.
+
+    A miss is not proof the packet was a SYN.
+  |
+}
+
+miss: "No matching full-identity entry or listener" {
+  style.fill: "#fee2e2"
+  m_body: |md
+    Set `SKB_DROP_REASON_NO_SOCKET`.
+
+    After policy and checksum validation,
+    send a reset when the segment permits one;
+    then release the skb.
+
+    A connect attempt sees that RST as
+    ECONNREFUSED, but stray packets use this path too.
+  |
+}
+
+namespace: "Where the tables live" {
+  style.fill: "#fff7ed"
+  n_body: |md
+    Lookup is always namespace-aware.
+
+    Child netns may request a private ehash via
+    `tcp_child_ehash_entries`; otherwise it uses
+    shared global hash storage with netns in
+    hash/match identity.
+  |
+}
+
+pkt -> ehash: "lookup full identity"
+ehash -> special: "hit + held reference"
+ehash -> listener: "miss"
+listener -> special: "listener selected"
+listener -> miss: "no candidate"
+namespace -> ehash: "select hashinfo + namespace identity" {style.stroke-dash: 4}
+namespace -> listener: "namespace participates in lookup" {style.stroke-dash: 4}

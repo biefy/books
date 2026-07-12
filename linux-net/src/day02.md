@@ -309,9 +309,21 @@ static int deliver_skb(struct sk_buff *skb, struct packet_type *pt_prev,
 
 Why the indirection? Because `deliver_skb` does a `refcount_inc(&skb->users)` (the **descriptor** refcount from Day 1) for each receiver. In the overwhelmingly common case of **exactly one receiver** (just `ip_rcv`, no tcpdump running), the deferral lets the core call that single handler **without** the extra atomic bump — it knows there's no other taker. This is precisely why Stage 3 dispatches via `pt_prev->func()` rather than calling `ip_rcv` directly.
 
-**Cross-link to Day 1:** when there *are* multiple takers (e.g. tcpdump's `ptype_all` socket **and** `ip_rcv`), each extra delivery clones the skb. That's the `skb_clone` from Day 1 — one cheap clone (new descriptor, shared data buffer via `dataref`) per additional receiver.
+**Cross-link to Day 1:** when there *are* multiple takers (e.g. tcpdump's `ptype_all` socket **and** `ip_rcv`), `deliver_skb` gives each earlier taker another reference to the **same skb descriptor** by incrementing `skb->users`; it does not call `skb_clone`. The final taker consumes the original reference without that extra atomic increment.
 
-![packet_type demux: __netif_receive_skb_core walks ptype_all (tcpdump tap → skb_clone) then indexes ptype_base by skb->protocol to reach ip_rcv, with pt_prev deferral skipping the extra users bump](diagrams/day02_packet_type_demux.png)
+![packet_type demux: __netif_receive_skb_core walks ptype_all, shares the skb by reference when needed, then indexes ptype_base by skb->protocol to reach ip_rcv, with pt_prev deferral skipping the extra users bump](diagrams/day02_packet_type_demux.png)
+
+### Scope and batching beyond the global bucket
+
+![ptype demux and pt_prev](diagrams/day02_ptype_demux.png)
+
+The two global structures are only the first layer. AF_PACKET adds scoped lists rather than making every socket another global protocol handler. `ETH_P_ALL` capture taps live in the receive network namespace's `ptype_all` list or a device's `ptype_all`; protocol-bound packet sockets can live in namespace/device `ptype_specific` lists. `__netif_receive_skb_core` visits all-protocol taps early, before ingress processing may redirect or change `skb->dev`. After ingress, VLAN, and any RX handler, it walks the global ethertype bucket and then the applicable namespace/original/current-device protocol-specific lists. `ip_rcv` is normally the final match from the global bucket.
+
+The **`pt_prev` deferral spans all of those walks**. `deliver_ptype_list_skb` flushes the previous match with `deliver_skb` only when it discovers a subsequent one; `deliver_skb` increments `skb->users` before invoking that earlier callback. With one matching L3 handler and no tap, the final `pt_prev` reaches `__netif_receive_skb_one_core`, which dispatches it with `INDIRECT_CALL_INET(..., ipv6_rcv, ip_rcv, ...)` and avoids the extra reference operation entirely. Adding an `ETH_P_ALL` capture tap means the tap must be flushed before the later L3 consumer, which is one reason packet capture has measurable cost.
+
+There is also a **list receive path**. IPv4 registers `.list_func = ip_list_rcv` alongside `.func = ip_rcv`. `__netif_receive_skb_list_core` classifies each skb through the same core, groups adjacent packets with the same final `packet_type` and original device, then calls that list callback. Handlers without one fall back to per-skb `.func` calls. The scalar deferral and list batching are two layers of the same optimization: avoid unnecessary references for one consumer, then preserve batches for a consumer that can process them together.
+
+If no handler matches, `pt_prev` remains `NULL`, `dev_core_stats_rx_dropped_inc` records the unhandled protocol, and `kfree_skb_reason` releases the packet.
 
 ---
 
