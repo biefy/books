@@ -21,15 +21,15 @@ cd ebpf      && mdbook serve --port 4002
 
 Open `http://127.0.0.1:4001` and `http://127.0.0.1:4002`.
 
-The repo-owned eBPF labs for Days 1–3 build on Linux with recursive submodules:
+Every eBPF chapter has a manifest-backed lab entry. Build all repo-owned standalone programs on Linux with recursive submodules:
 
 ```bash
 git submodule update --init --recursive
 ebpf/labs/scripts/preflight.sh
-make -C ebpf/labs check
+make -C ebpf/labs check-standalone
 ```
 
-See the eBPF book's [Lab environment](ebpf/src/lab-environment.md) for packages, runtime privileges, and the chapters covered by this scaffold.
+The exhaustive `make -C ebpf/labs check` additionally builds the canonical locked Linux v7.1 DCTCP object and sched_ext entries after `ebpf/labs/scripts/linux-source.sh fetch`. See the eBPF book's [Lab environment](ebpf/src/lab-environment.md) for packages, runtime privileges, dependency locks, and backend details.
 
 ## Layout
 
@@ -45,9 +45,10 @@ books/
 │       └── diagrams/*.png
 ├── ebpf/
 │   ├── book.toml
-│   ├── labs/                    ← runnable, CI-compiled source for Days 1–3
-│   │   ├── day01/ … day03/
-│   │   └── vendor/libbpf-bootstrap/  ← pinned recursive submodule
+│   ├── labs/                    ← manifest-backed labs for every chapter
+│   │   ├── day01/ … day28-30/
+│   │   ├── manifest.json        ← coverage/build/runtime contract
+│   │   └── vendor/              ← pinned bootstrap + xdp-tools submodules
 │   └── src/
 │       ├── SUMMARY.md
 │       ├── README.md

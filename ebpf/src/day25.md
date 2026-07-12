@@ -215,6 +215,23 @@ Custom DSQs (created via `scx_bpf_create_dsq`) let you implement more complex po
 
 `scx_simple` is the "hello world" of sched_ext: a BPF scheduler that dispatches everything to a single shared queue. (scx_simple creates its own DSQ rather than `SCX_DSQ_GLOBAL` — see the DSQ section for why a built-in FIFO can't be vtime-ordered.)
 
+### Repo lab: build and run the exact upstream scheduler
+
+The book's lab doesn't reimplement `scx_simple` — Day 25 is about running the
+*unmodified* in-tree example. `make -C ebpf/labs day25` builds it straight from
+the locked Linux v7.1 tree with the kernel's own `tools/sched_ext` Makefile,
+sending every artifact under `.output/` so the pinned source stays clean:
+
+{{#include ../labs/day25/build.sh:book}}
+
+`run.sh` is the opt-in, self-cleaning runner: it loads that binary for a bounded
+interval on a disposable sched_ext-capable VM, then ejects it so CFS is restored:
+
+{{#include ../labs/day25/run.sh:book}}
+
+The rest of this section is the same thing done by hand, so you can watch each
+step.
+
 ### Build
 
 ```bash

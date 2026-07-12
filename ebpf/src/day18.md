@@ -340,13 +340,11 @@ sudo apt install clang llvm bpftool libxdp-dev libbpf-dev linux-headers-$(uname 
 # On some distros bpftool ships in linux-tools-$(uname -r) / linux-tools-common instead.
 # On a self-built kernel the matching linux-headers-$(uname -r) package may not exist
 # in apt; use your in-tree headers (the kernel source you built from) instead.
-
-git clone https://github.com/xdp-project/xdp-tutorial
-# We build and run xdp-tutorial/advanced03-AF_XDP below; the listings in this
-# chapter are an annotated walk-through of what that example does.
 ```
 
-The BPF object includes `vmlinux.h`. If you compile it yourself rather than using the tutorial Makefile, generate that header first with bpftool:
+Unlike the earlier network days, this lab links against **libxdp** (`-lxdp`) for the AF_XDP ring helpers in addition to libbpf. The repository's lab build supplies the `xdp/xsk.h` include path and the `-lxdp` link flag for this day; the anchored listings below are the exact bytes it compiles.
+
+The BPF object includes `vmlinux.h`, generated from the pinned vendored header by the lab build. If you compile it standalone instead, generate the header first with bpftool:
 
 ```bash
 bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h
@@ -355,131 +353,20 @@ bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h
 ### `xsk.bpf.c`
 
 ```c
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-
-char LICENSE[] SEC("license") = "GPL";
-
-struct {
-    __uint(type, BPF_MAP_TYPE_XSKMAP);
-    __uint(max_entries, 64);
-    __type(key, __u32);
-    __type(value, __u32);    /* xsk fd */
-} xsks_map SEC(".maps");
-
-SEC("xdp")
-int xsk_redirect(struct xdp_md *ctx)
-{
-    __u32 q = ctx->rx_queue_index;
-    if (bpf_map_lookup_elem(&xsks_map, &q))
-        return bpf_redirect_map(&xsks_map, q, 0);
-    return XDP_PASS;
-}
+{{#include ../labs/day18/xsk.bpf.c:book}}
 ```
 
 The `if (bpf_map_lookup_elem(...))` guard is the "is a socket armed on this queue?" check we discussed: a hit redirects the raw frame into that socket's RX ring; a miss falls through to `XDP_PASS` so the kernel stack still gets the packet.
 
-### `xsk_recv.c` — userspace receiver (annotated walk-through)
+### `xsk.c` — userspace receiver (complete, buildable loader)
 
-> This listing is **reference-only** — read it to understand the AF_XDP lifecycle, don't compile it verbatim. It deliberately elides glue: it never loads the BPF object, so `xsks_map_fd` and `exiting` have no source here, and the `stdio.h`/`unistd.h`/`stdlib.h`/`signal.h` includes are omitted. To actually **Run**, build the complete `xdp-tutorial/advanced03-AF_XDP` example below — it wires all of this up (loading the object and obtaining the XSKMAP fd through `xsk_socket__create`, installing a SIGINT handler to set `exiting`).
+Unlike a reference sketch, this is the whole program the lab compiles and runs. It loads the XDP object through its skeleton, attaches it to the interface itself (trying native mode, then falling back to SKB/generic so it runs on veth and drivers without a native path), creates the UMEM and AF_XDP socket with libxdp, arms the XSKMAP slot, pre-fills the FILL ring, and runs the poll-driven receive/recycle loop until SIGINT/SIGTERM. Teardown removes the XSKMAP entry before destroying the socket, then detaches XDP.
+
+Read it as four mechanisms stacked: the FILL/RX operations are the ring protocol (§"The ring"), `i * FRAME_SIZE` and `xsk_umem__get_data` are UMEM offsets (§"UMEM"), `bpf_map_update_elem(map_fd, …)` is the XSKMAP arm/disarm (§"XSKMAP"), and `xsk_umem__create`/`xsk_socket__create` are the socket setup ladder (§"socket"). It's busier than previous labs because AF_XDP exposes the rings directly — libxdp helps but doesn't hide everything. It passes `XSK_LIBXDP_FLAGS__INHIBIT_PROG_LOAD` so libxdp neither loads its own program nor manages the map: the loader owns both.
 
 ```c
-#include <bpf/libbpf.h>
-#include <xdp/xsk.h>
-#include <net/if.h>
-
-#define UMEM_NUM_FRAMES 4096
-#define FRAME_SIZE 2048
-
-struct umem_info {
-    void *buffer;
-    struct xsk_ring_prod fq;
-    struct xsk_ring_cons cq;
-    struct xsk_umem *umem;
-};
-
-int main(int argc, char **argv) {
-    int ifindex = if_nametoindex(argv[1]);
-
-    /* 1. Allocate UMEM: one page-aligned region, NUM_FRAMES chunks of FRAME_SIZE */
-    void *buffer;
-    posix_memalign(&buffer, 4096, UMEM_NUM_FRAMES * FRAME_SIZE);
-
-    /* xsk_umem__create wraps socket(AF_XDP) + setsockopt(XDP_UMEM_REG) +
-       sizing/mmap of the FILL ring (fq) and COMPLETION ring (cq). */
-    struct umem_info umem = {.buffer = buffer};
-    xsk_umem__create(&umem.umem, buffer,
-                     UMEM_NUM_FRAMES * FRAME_SIZE, &umem.fq, &umem.cq, NULL);
-
-    /* 2. Create AF_XDP socket: wraps setsockopt(XDP_RX_RING/XDP_TX_RING),
-          mmap of the RX/TX rings, and bind(sockaddr_xdp: ifindex+queue 0). */
-    struct xsk_socket *xsk;
-    struct xsk_ring_prod tx;
-    struct xsk_ring_cons rx;
-    struct xsk_socket_config cfg = {.libxdp_flags = XSK_LIBXDP_FLAGS__INHIBIT_PROG_LOAD};
-    xsk_socket__create(&xsk, argv[1], 0, umem.umem, &rx, &tx, &cfg);
-
-    /* 3. Load and attach the BPF program separately */
-    /* (the libxdp default would do this for you, but we want to control it) */
-
-    /* 4. Arm queue 0: insert this socket's fd into the XSKMAP. The redirect
-          only fires AFTER this insert — that's what "arming" means. */
-    int xsk_fd = xsk_socket__fd(xsk);
-    __u32 qid = 0;
-    bpf_map_update_elem(xsks_map_fd, &qid, &xsk_fd, BPF_ANY);
-
-    /* 5. Pre-fill the FILL ring — producer protocol: reserve, write, submit.
-          We hand the driver one offset per frame: i*FRAME_SIZE. */
-    __u32 idx;
-    __u32 got = xsk_ring_prod__reserve(&umem.fq, UMEM_NUM_FRAMES, &idx);
-    if (got != UMEM_NUM_FRAMES) { /* ring full / no space — handle it */ }
-    for (__u32 i = 0; i < got; i++)
-        *xsk_ring_prod__fill_addr(&umem.fq, idx + i) = i * FRAME_SIZE;  /* byte offset! */
-    xsk_ring_prod__submit(&umem.fq, got);
-
-    /* 6. Poll loop */
-    while (!exiting) {
-        /* consumer protocol on the RX ring: peek, read, release. */
-        __u32 idx_rx, n;
-        n = xsk_ring_cons__peek(&rx, 64, &idx_rx);
-        if (!n) {
-            usleep(10);
-            continue;
-        }
-        __u64 addrs[64];
-        for (__u32 i = 0; i < n; i++) {
-            __u64 addr = xsk_ring_cons__rx_desc(&rx, idx_rx + i)->addr;  /* offset */
-            __u32 len  = xsk_ring_cons__rx_desc(&rx, idx_rx + i)->len;   /* real length */
-            addrs[i]   = addr;           /* remember it so we can recycle below */
-            void *pkt  = xsk_umem__get_data(buffer, addr);  /* offset -> pointer */
-            /* process pkt directly — zero copy */
-            printf("got %u bytes: %02x:%02x:%02x:%02x:%02x:%02x ...\n",
-                   len, ((__u8*)pkt)[0], ((__u8*)pkt)[1], ((__u8*)pkt)[2],
-                   ((__u8*)pkt)[3], ((__u8*)pkt)[4], ((__u8*)pkt)[5]);
-        }
-        xsk_ring_cons__release(&rx, n);
-
-        /* recycle: close the ownership cycle by returning the SAME offsets to
-           the FILL ring. Skip this and the driver starves (Break 2). */
-        __u32 idx_fq;
-        __u32 reserved = xsk_ring_prod__reserve(&umem.fq, n, &idx_fq);
-        if (reserved < n) {
-            /* FILL ring full — driver hasn't drained yet; drop these or retry later */
-        }
-        for (__u32 i = 0; i < reserved; i++)
-            *xsk_ring_prod__fill_addr(&umem.fq, idx_fq + i) = addrs[i];
-        xsk_ring_prod__submit(&umem.fq, reserved);
-    }
-
-    /* teardown order matters: delete the map entry BEFORE freeing the socket,
-       or the XSKMAP holds a dangling reference. */
-    bpf_map_delete_elem(xsks_map_fd, &qid);
-    xsk_socket__delete(xsk);
-    xsk_umem__delete(umem.umem);
-}
+{{#include ../labs/day18/xsk.c:book}}
 ```
-
-The important lifecycle is: create UMEM, bind an AF_XDP socket to `(ifname, queue)`, put the socket fd in `XSKMAP`, redirect by queue id, then remove the map entry before destroying the socket. Read it as four mechanisms stacked: the FILL/RX operations are the ring protocol (§"The ring"), `i * FRAME_SIZE` and `xsk_umem__get_data` are UMEM offsets (§"UMEM"), `bpf_map_update_elem(xsks_map_fd, …)` is the XSKMAP arm/disarm (§"XSKMAP"), and the two `xsk_*__create` calls are the socket setup ladder (§"socket"). It's busier than previous labs because AF_XDP exposes the rings directly. libxdp helps but doesn't hide everything.
 
 ### Run
 
@@ -496,12 +383,11 @@ sudo ip addr add 10.0.0.2/24 dev veth1
 sudo ip link set veth1 up
 ```
 
-Now build and run the complete example (the chapter listings are a walk-through of it):
+Now build and run the receiver, binding it to `veth1`:
 
 ```bash
-cd xdp-tutorial/advanced03-AF_XDP
-make
-sudo ./af_xdp_user -d veth1
+make xsk
+sudo ./.output/day18/xsk veth1
 ```
 
 In another terminal, drive ingress **into** `veth1` from the peer side:
@@ -526,11 +412,11 @@ Each break severs one edge of the frame-ownership cycle you learned in the UMEM 
 
 ### Break 1 — Forget the FILL ring
 
-Skip the pre-fill (step 5). You never hand the driver a single free frame, so it has nothing to DMA into — the cycle never gets its first frame. The RX ring stays empty and the receiver prints nothing. Confirm the pings are actually arriving with `sudo tcpdump -ni veth1 icmp` in another terminal — when tcpdump shows the echo requests but the receiver still prints nothing, you know the empty RX ring is caused by the missing FILL pre-fill, not by absent traffic. The FILL ring is your handshake to the driver.
+Skip the pre-fill (the FILL-ring pre-fill step, `umem_prefill`). You never hand the driver a single free frame, so it has nothing to DMA into — the cycle never gets its first frame. The RX ring stays empty and the receiver prints nothing. Confirm the pings are actually arriving with `sudo tcpdump -ni veth1 icmp` in another terminal — when tcpdump shows the echo requests but the receiver still prints nothing, you know the empty RX ring is caused by the missing FILL pre-fill, not by absent traffic. The FILL ring is your handshake to the driver.
 
 ### Break 2 — Don't recycle
 
-Skip the "refill FILL ring" step in the polling loop (the recycle at the end of step 6). Now you consume frames off the RX ring but never return their offsets — so after 4096 packets the FILL ring is empty and the driver has nowhere to DMA new frames. It drops them, and the kernel bumps `rx_dropped`/`rx_queue_full` (the counters at `xsk.c:313`/`:330`/`:334` we saw earlier). Watch the per-queue drop counter climb in another terminal:
+Skip the "refill FILL ring" step in the polling loop (the recycle at the end of the receive loop, `umem_recycle`). Now you consume frames off the RX ring but never return their offsets — so after 4096 packets the FILL ring is empty and the driver has nowhere to DMA new frames. It drops them, and the kernel bumps `rx_dropped`/`rx_queue_full` (the counters at `xsk.c:313`/`:330`/`:334` we saw earlier). Watch the per-queue drop counter climb in another terminal:
 
 ```bash
 watch -n1 "ethtool -S veth1 | grep -E 'rx_queue.*drops'"

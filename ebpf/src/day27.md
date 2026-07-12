@@ -345,6 +345,20 @@ The `dispatch_to_cpu` mismatch path checks slots too (`:165`), for the same reas
 
 Now you have every mechanism the file uses. Open `tools/sched_ext/scx_central.bpf.c` — ~380 lines — and walk through it in this order: **globals → init → select_cpu → enqueue → dispatch → vtable.**
 
+### Repo lab: build and run the exact upstream scheduler
+
+Like Day 25, the lab runs the *unmodified* in-tree `scx_central`. `make -C
+ebpf/labs day27` builds it from the locked Linux v7.1 tree with the kernel's own
+`tools/sched_ext` Makefile, emitting artifacts under `.output/`:
+
+{{#include ../labs/day27/build.sh:book}}
+
+`run.sh` loads it for a bounded interval on a disposable sched_ext-capable VM,
+then ejects it — the central-dispatch scheduler drives every CPU from one, so it
+is strictly opt-in:
+
+{{#include ../labs/day27/run.sh:book}}
+
 > **Heads-up: the code blocks below are *simplified pseudocode*, not literal quotes from the file.** They capture the central-dispatch *shape* so you can follow the logic; the real `scx_central.bpf.c` uses a `central_q` queue map of pids, per-CPU kthread bypass, `SCX_DSQ_LOCAL_ON | cpu` targeting, slot checks, and a `bpf_timer` — all taught in the Background sections above, and each `### N` walkthrough cross-links the relevant one. Read the simplified versions for intuition, then read the real file for the details.
 
 ### 1. Globals

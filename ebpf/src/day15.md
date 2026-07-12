@@ -179,8 +179,8 @@ The rendezvous mechanism is a special pseudo-filesystem of type `bpf`, mounted b
 
 The flow for two processes is then:
 
-- Process A (the loader) **pins** the map by path: this creates `/sys/fs/bpf/deny` and adds a reference.
-- Process B (the CLI) calls `bpf_obj_get("/sys/fs/bpf/deny")` to obtain **its own fd** to the **same** underlying map.
+- Process A (the loader) **pins** the map by path: this creates `$PIN/deny` inside a directory the run owns and adds a reference.
+- Process B (the CLI) calls `bpf_obj_get("$PIN/deny")` to obtain **its own fd** to the **same** underlying map.
 
 Now both processes — plus the pin itself — hold references. The trie is shared, and it stays alive as long as *any* of those three references exists.
 
@@ -202,7 +202,7 @@ Notice the loader pins the **map**, not the program. The XDP program stays attac
 The consequence is a cleanup gotcha. **Killing the loader drops its `bpf_link`, which auto-detaches the XDP program** — good, the firewall stops filtering. But the *pinned map node* in bpffs is a separate reference; it lingers until you explicitly `rm` it:
 
 ```bash
-sudo rm /sys/fs/bpf/deny /sys/fs/bpf/stats
+sudo rm "$PIN/deny" "$PIN/stats" && sudo rmdir "$PIN"
 ```
 
 Forget that, and a stale `deny` trie sits in bpffs holding kernel memory, and the next `bpf_map__pin` to the same path fails with `EEXIST`.
@@ -233,62 +233,14 @@ You manage the denylist from userspace via `bpf_map_update_elem` calls (the Day 
 
 ### `block.bpf.c`
 
-```c
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_endian.h>
+The BPF program and the `blockcli` CLI share the LPM key layout through one
+header:
 
-char LICENSE[] SEC("license") = "GPL";
+{{#include ../labs/day15/block.h}}
 
-struct ipv4_lpm_key {
-    __u32 prefixlen;
-    __u32 addr;
-};
+and the program is included from the compiled source:
 
-struct {
-    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
-    __uint(max_entries, 1024);
-    __type(key, struct ipv4_lpm_key);
-    __type(value, __u32);    /* arbitrary value; we just check existence */
-    __uint(map_flags, BPF_F_NO_PREALLOC);   /* required for LPM */
-} deny SEC(".maps");
-
-struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __uint(max_entries, 2);  /* [0] = pass, [1] = drop */
-    __type(key, __u32);
-    __type(value, __u64);
-} stats SEC(".maps");
-
-static __always_inline void bump(__u32 idx) {
-    __u64 *c = bpf_map_lookup_elem(&stats, &idx);
-    if (c) (*c)++;
-}
-
-SEC("xdp")
-int xdp_block(struct xdp_md *ctx)
-{
-    void *data = (void *)(long)ctx->data;
-    void *end  = (void *)(long)ctx->data_end;
-
-    struct ethhdr *eth = data;
-    if (eth + 1 > end) goto pass;
-    if (eth->h_proto != bpf_htons(ETH_P_IP)) goto pass;
-
-    struct iphdr *ip = (void *)(eth + 1);
-    if (ip + 1 > end) goto pass;
-
-    struct ipv4_lpm_key k = { .prefixlen = 32, .addr = ip->saddr };
-    if (bpf_map_lookup_elem(&deny, &k)) {
-        bump(1);
-        return XDP_DROP;
-    }
-
-pass:
-    bump(0);
-    return XDP_PASS;
-}
-```
+{{#include ../labs/day15/block.bpf.c:book}}
 
 What's new (and where it's grounded):
 
@@ -298,71 +250,17 @@ What's new (and where it's grounded):
 
 ### `blockcli.c` — userspace CLI
 
-```c
-/* Usage: ./blockcli add 10.1.0.0/16 */
-/* Usage: ./blockcli del 10.1.0.0/16 */
-/* Usage: ./blockcli stats */
+{{#include ../labs/day15/blockcli.c:book}}
 
-static int parse_cidr(const char *s, struct ipv4_lpm_key *out) {
-    char buf[64];
-    strncpy(buf, s, sizeof(buf) - 1);
-    char *slash = strchr(buf, '/');
-    if (!slash) return -1;
-    *slash = 0;
-    out->prefixlen = atoi(slash + 1);
-    struct in_addr a;
-    if (inet_aton(buf, &a) == 0) return -1;
-    out->addr = a.s_addr;       /* already network byte order */
-    return 0;
-}
-
-int main(int argc, char **argv) {
-    /* the loader (block.c) pinned the maps; open them by path */
-    int fd = bpf_obj_get("/sys/fs/bpf/deny");
-
-    if (!strcmp(argv[1], "add")) {
-        struct ipv4_lpm_key k;
-        parse_cidr(argv[2], &k);
-        __u32 v = 1;
-        bpf_map_update_elem(fd, &k, &v, BPF_ANY);
-    } else if (!strcmp(argv[1], "del")) {
-        struct ipv4_lpm_key k;
-        parse_cidr(argv[2], &k);
-        bpf_map_delete_elem(fd, &k);
-    } else if (!strcmp(argv[1], "stats")) {
-        int sfd = bpf_obj_get("/sys/fs/bpf/stats");
-        int ncpu = libbpf_num_possible_cpus();
-        __u64 vals[ncpu];
-        __u32 k0 = 0, k1 = 1; __u64 pass = 0, drop = 0;
-        bpf_map_lookup_elem(sfd, &k0, vals);    /* index 0 = pass */
-        for (int i = 0; i < ncpu; i++) pass += vals[i];
-        bpf_map_lookup_elem(sfd, &k1, vals);    /* index 1 = drop */
-        for (int i = 0; i < ncpu; i++) drop += vals[i];
-        printf("pass=%llu drop=%llu\n", pass, drop);
-    }
-}
-```
-
-The key line is `bpf_obj_get("/sys/fs/bpf/deny")` — no skeleton, no attach. This process gets its **own fd** to the same kernel trie the loader pinned, exactly the rendezvous from the pinning section. Everything after is the ordinary Day 2 userspace map API.
+The key line is `bpf_obj_get("$PIN_DIR/deny")` — no skeleton, no attach. This process gets its **own fd** to the same kernel trie the loader pinned, exactly the rendezvous from the pinning section. Everything after is the ordinary Day 2 userspace map API.
 
 ### `block.c` — loader
 
-Neither artifact above attaches the program. Add a tiny loader (built by `make` as `./xdp_block`) that loads the object, **pins both maps** so the separate `blockcli` process can reach them, attaches the XDP program, and parks:
+Neither artifact above attaches the program. The complete loader loads the object, creates one pin directory that did not previously exist, pins both maps for the separate CLI, attaches the XDP program, and owns every resource until Ctrl-C:
 
-```c
-/* block.c — built as ./xdp_block. Usage: sudo ./xdp_block <iface> */
-int main(int argc, char **argv) {
-    struct block_bpf *skel = block_bpf__open_and_load();
-    /* pin the maps under /sys/fs/bpf so blockcli can open them by path */
-    bpf_map__pin(skel->maps.deny,  "/sys/fs/bpf/deny");
-    bpf_map__pin(skel->maps.stats, "/sys/fs/bpf/stats");
-    bpf_program__attach_xdp(skel->progs.xdp_block,
-                            if_nametoindex(argv[1]));
-    pause();   /* hold the bpf_link open until the process is killed */
-}
-```
+{{#include ../labs/day15/block.c:book}}
 
-The pin is what lets two processes share one trie: `xdp_block` owns the skeleton and the attachment; `blockcli` just opens `/sys/fs/bpf/deny` and `/sys/fs/bpf/stats` with `bpf_obj_get`. `bpf_map__pin` (`tools/lib/bpf/libbpf.c:9150`) issues the `BPF_OBJ_PIN` command; `bpf_obj_get` (`tools/lib/bpf/bpf.c:609`) issues `BPF_OBJ_GET`. Killing `xdp_block` drops its `bpf_link` and auto-detaches the program — but the pinned map nodes survive until you `rm` them (the cleanup gotcha from "Pin the map, not the program").
+The pin is what lets two processes share one trie: `block` owns the skeleton and attachment; `blockcli` opens `$PIN_DIR/deny` and `$PIN_DIR/stats` with `bpf_obj_get`. `bpf_map__pin` (`tools/lib/bpf/libbpf.c:9150`) issues `BPF_OBJ_PIN`; `bpf_obj_get` (`tools/lib/bpf/bpf.c:609`) issues `BPF_OBJ_GET`. The loader removes both pins and its directory on every exit path, so the rendezvous lasts exactly as long as this lab run.
 
 ### Run
 
@@ -379,16 +277,20 @@ sudo ip -n peer addr add 10.0.0.2/24 dev veth1 && sudo ip -n peer link set veth1
 XDP runs on **RX (ingress)**, so the drop must happen on the echo *reply* — whose source address is `10.0.0.2`. Attach the program on `veth0`, the host side that *receives* those replies:
 
 ```bash
-make
-sudo ./xdp_block veth0 &        # host side that receives the replies
+make -C ebpf/labs day15
+PIN=/sys/fs/bpf/practical-ebpf-day15-$$
+sudo ebpf/labs/.output/day15/block veth0 "$PIN" &  # host RX side
+LOADER=$!
+trap 'sudo kill -INT "$LOADER" 2>/dev/null || true; wait "$LOADER" 2>/dev/null || true; sudo ip link del veth0 2>/dev/null || true; sudo ip netns del peer 2>/dev/null || true' EXIT
+sleep 0.5
 
-ping -c 3 10.0.0.2              # replies arrive on veth0 ingress -> PASS, works
-sudo ./blockcli add 10.0.0.0/8
-ping -c 3 10.0.0.2              # replies (saddr 10.0.0.2) match 10.0.0.0/8 -> XDP_DROP -> 100% loss
-sudo ./blockcli stats          # drop count climbs
+ping -c 3 10.0.0.2              # replies arrive on veth0 ingress -> PASS
+sudo ebpf/labs/.output/day15/blockcli "$PIN" add 10.0.0.0/8
+ping -c 3 10.0.0.2              # matching replies -> XDP_DROP -> 100% loss
+sudo ebpf/labs/.output/day15/blockcli "$PIN" stats
 
-sudo ./blockcli del 10.0.0.0/8
-ping -c 3 10.0.0.2             # works again
+sudo ebpf/labs/.output/day15/blockcli "$PIN" del 10.0.0.0/8
+ping -c 3 10.0.0.2              # works again
 ```
 
 The observation is the **before/after contrast**: the first ping gets replies (0% loss), and after `add 10.0.0.0/8` the replies are dropped on `veth0` ingress so ping reports 100% loss. `blockcli stats` confirms it with a non-zero drop count:
@@ -399,16 +301,7 @@ pass=<some number> drop=3
 
 (`drop` should be 3 — one per dropped echo reply. Attaching to the in-netns `veth1` instead would *not* drop the replies, because they leave that side on TX, not RX.)
 
-Clean up when you're done — stop the loader (killing it drops the `bpf_link` and auto-detaches XDP), remove the lingering bpffs pins, and tear down the veth pair and namespace:
-
-```bash
-sudo pkill xdp_block                            # stops the loader, auto-detaches the program
-sudo rm /sys/fs/bpf/deny /sys/fs/bpf/stats      # the pins outlive the loader — remove them
-sudo ip link del veth0                          # removes the veth pair
-sudo ip netns del peer
-```
-
-Don't skip the `rm`: as the pinning section warned, the pinned trie lingers in bpffs (holding kernel memory) and makes the next run's `bpf_map__pin` fail with `EEXIST`.
+Clean up by leaving the shell or running the trap body. It signals the exact loader PID (never a broad `pkill`), waits for the loader to auto-detach XDP and remove its owned pins/directory, then removes only this lab's veth pair and namespace. If the loader is killed with `SIGKILL`, its pins demonstrate the persistence rule; remove only the unique `$PIN` directory before rerunning.
 
 Now you have a userspace-controlled, line-rate firewall. Every API call updates the trie atomically; no XDP restart needed.
 
@@ -481,7 +374,7 @@ Update the map definition's value type, parse CIDR with `inet_pton(AF_INET6, ...
 - **Always set `BPF_F_NO_PREALLOC`** — the kernel returns `-EINVAL` at create time without it (`lpm_trie.c:579`).
 - The trie stores **intermediate (IM) branch nodes** with no value to fork diverging prefixes; that's the real per-entry memory cost, and lookup *skips* them as match candidates (`lpm_trie.c:271-275`), returning the last non-IM node — that's longest-prefix-match.
 - Lookup is O(prefix_len) — fast enough for line-rate; reads are RCU-protected (Day 2), safe to update while XDP is running.
-- **Pinning + bpffs** is how two processes share one map: a BPF object is fd-refcounted and freed when the last fd closes (that's why Day 14's map vanished); a pin in `/sys/fs/bpf` adds a filesystem reference that survives the creator's death. The loader `bpf_map__pin`s; the CLI `bpf_obj_get`s its own fd to the same trie. **Remember to `rm` the pin** — killing the loader auto-detaches XDP but leaves the pinned map behind.
+- **Pinning + bpffs** is how two processes share one map: a BPF object is fd-refcounted and freed when the last fd closes (that's why Day 14's map vanished); a pin in `/sys/fs/bpf` adds a filesystem reference that survives the creator's death. The loader `bpf_map__pin`s; the CLI `bpf_obj_get`s its own fd to the same trie. This lab uses a unique owned directory and removes its pins on normal exit; a forced `SIGKILL` still demonstrates why stale pins must be removed explicitly.
 - Userspace CIDR parsing: `inet_aton` returns network byte order (don't double-convert) — required because the trie walks bits MSB-first.
 - Test on `veth` pairs before deploying on real interfaces.
 

@@ -217,44 +217,9 @@ sudo ip netns exec ns1 ip link set veth1 up
 
 ### `xdp_count.bpf.c`
 
-```c
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_endian.h>
+Included from the source the lab build and CI compile:
 
-char LICENSE[] SEC("license") = "GPL";
-
-struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __uint(max_entries, 256);   /* indexed by IP protocol number */
-    __type(key, __u32);
-    __type(value, __u64);
-} counts SEC(".maps");
-
-SEC("xdp")
-int xdp_count(struct xdp_md *ctx)
-{
-    void *data = (void *)(long)ctx->data;
-    void *end  = (void *)(long)ctx->data_end;
-
-    struct ethhdr *eth = data;
-    if (eth + 1 > end)
-        return XDP_PASS;
-
-    if (eth->h_proto != bpf_htons(ETH_P_IP))
-        return XDP_PASS;
-
-    struct iphdr *ip = (void *)(eth + 1);
-    if (ip + 1 > end)
-        return XDP_PASS;
-
-    __u32 key = ip->protocol;          /* TCP=6, UDP=17, ICMP=1 */
-    __u64 *c = bpf_map_lookup_elem(&counts, &key);
-    if (c) (*c)++;                     /* per-CPU; no atomic needed */
-
-    return XDP_PASS;
-}
-```
+{{#include ../labs/day14/xdp_count.bpf.c:book}}
 
 What's new — and you now have the background for every line:
 - **`SEC("xdp")`** — XDP attach. Userspace specifies the interface.
@@ -266,49 +231,9 @@ What's new — and you now have the background for every line:
 
 ### `xdp_count.c` — userspace
 
-```c
-#include <bpf/libbpf.h>
-#include <net/if.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <signal.h>
-#include "xdp_count.skel.h"
+Included from the loader the lab build and CI compile:
 
-static volatile sig_atomic_t exiting = 0;
-static void on_sigint(int sig) { exiting = 1; }
-
-int main(int argc, char **argv) {
-    if (argc < 2) { fprintf(stderr, "usage: %s <iface>\n", argv[0]); return 1; }
-    int ifindex = if_nametoindex(argv[1]);
-    if (!ifindex) { perror("if_nametoindex"); return 1; }
-
-    struct xdp_count_bpf *skel = xdp_count_bpf__open_and_load();
-    if (!skel) return 1;
-
-    struct bpf_link *link = bpf_program__attach_xdp(skel->progs.xdp_count, ifindex);
-    if (!link) { fprintf(stderr, "attach failed\n"); return 1; }
-
-    signal(SIGINT, on_sigint);
-
-    while (!exiting) {
-        sleep(2);
-        int fd = bpf_map__fd(skel->maps.counts);
-        int ncpu = libbpf_num_possible_cpus();
-        for (__u32 k = 0; k < 256; k++) {
-            __u64 vals[ncpu];
-            if (bpf_map_lookup_elem(fd, &k, vals) == 0) {
-                __u64 sum = 0;
-                for (int i = 0; i < ncpu; i++) sum += vals[i];
-                if (sum) printf("proto %3u: %llu\n", k, sum);
-            }
-        }
-        printf("---\n");
-    }
-    bpf_link__destroy(link);
-    xdp_count_bpf__destroy(skel);
-    return 0;
-}
-```
+{{#include ../labs/day14/xdp_count.c:book}}
 
 ### Run
 

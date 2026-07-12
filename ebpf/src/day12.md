@@ -160,48 +160,15 @@ On detach, the kernel waits out a tasks-trace grace period before freeing — `s
 
 ### `openat_path.bpf.c`
 
-```c
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_tracing.h>
+The producer and consumer share the event layout through one header:
 
-char LICENSE[] SEC("license") = "GPL";
+{{#include ../labs/day12/openat_path.h}}
 
-struct event {
-    __u32 pid;
-    char comm[16];
-    char path[256];
-};
+and the sleepable program is included from the source the lab build and CI
+compile (`__user` is defined away for the BPF target — it is a sparse
+annotation vmlinux.h does not carry):
 
-struct {
-    __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 256 * 1024);
-} rb SEC(".maps");
-
-/* Sleepable fentry — '.s/' suffix gives access to bpf_copy_from_user */
-SEC("fentry.s/__x64_sys_openat")
-int BPF_PROG(on_openat, struct pt_regs *regs)
-{
-    /* The syscall wrapper passes pt_regs; PARM2 is the path string */
-    const char __user *upath = (const char *)PT_REGS_PARM2_CORE_SYSCALL(regs);
-    if (!upath) return 0;
-
-    struct event *e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
-    if (!e) return 0;
-
-    e->pid = bpf_get_current_pid_tgid() >> 32;
-    bpf_get_current_comm(&e->comm, sizeof(e->comm));
-
-    /* This is the magic — only allowed in sleepable: */
-    long ret = bpf_copy_from_user(e->path, sizeof(e->path) - 1, upath);
-    if (ret < 0) {
-        e->path[0] = 0;   /* couldn't read; emit empty */
-    }
-
-    bpf_ringbuf_submit(e, 0);
-    return 0;
-}
-```
+{{#include ../labs/day12/openat_path.bpf.c:book}}
 
 ### Why the syscall hook takes a single `struct pt_regs *`
 

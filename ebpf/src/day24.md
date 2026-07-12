@@ -199,38 +199,7 @@ This block is real: `kernel/bpf/cpumask.c:477` opens `BTF_KFUNCS_START(cpumask_k
 ### Using them
 
 ```c
-/* cpumask_demo.bpf.c */
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_tracing.h>
-
-char LICENSE[] SEC("license") = "GPL";
-
-extern struct bpf_cpumask *bpf_cpumask_create(void) __ksym;
-extern void bpf_cpumask_release(struct bpf_cpumask *cpumask) __ksym;
-extern void bpf_cpumask_set_cpu(__u32 cpu, struct bpf_cpumask *cpumask) __ksym;
-extern bool bpf_cpumask_test_cpu(__u32 cpu, const struct cpumask *cpumask) __ksym;
-
-SEC("fentry/filename_unlinkat")
-int BPF_PROG(p)
-{
-    struct bpf_cpumask *m = bpf_cpumask_create();
-    if (!m) return 0;       /* KF_RET_NULL — must check */
-
-    /* Set bits for CPUs 0, 2, 4 */
-    bpf_cpumask_set_cpu(0, m);
-    bpf_cpumask_set_cpu(2, m);
-    bpf_cpumask_set_cpu(4, m);
-
-    /* Test some bits */
-    bool b0 = bpf_cpumask_test_cpu(0, (struct cpumask *)m);
-    bool b1 = bpf_cpumask_test_cpu(1, (struct cpumask *)m);
-
-    bpf_printk("cpu0=%d cpu1=%d", b0, b1);
-
-    bpf_cpumask_release(m);  /* KF_ACQUIRE → must release */
-    return 0;
-}
+{{#include ../labs/day24/cpumask_demo.bpf.c:book}}
 ```
 
 Note the cast `(struct cpumask *)m` — `bpf_cpumask_test_cpu` takes the *base* type (`struct cpumask`), not the BPF-specific wrapper (`bpf_cpumask`). The verifier accepts the cast because `bpf_cpumask` **embeds `cpumask` as its first field**, so a `bpf_cpumask *` and a `cpumask *` point at the same address. You can see it in the struct definition:
@@ -247,9 +216,15 @@ and `bpf_cpumask_test_cpu` really does take `const struct cpumask *` (`kernel/bp
 
 ### Run
 
+The userspace loader (`cpumask_demo.c`) is the standard skeleton open/load/attach pattern; it attaches the fentry and waits while the program writes to `trace_pipe`.
+
+```c
+{{#include ../labs/day24/cpumask_demo.c:book}}
+```
+
 ```bash
-make
-sudo ./cpumask_demo &
+make cpumask_demo
+sudo ./.output/day24/cpumask_demo &
 touch /tmp/x && rm /tmp/x
 sudo cat /sys/kernel/debug/tracing/trace_pipe
 ```

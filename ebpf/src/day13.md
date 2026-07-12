@@ -222,148 +222,24 @@ One detail that makes the failure path read correctly: when reserve fails, the h
 
 The program is the **Day 6 entry/exit latency pattern** — a `starts` hash keyed by TID, written at `fentry` and read at `fexit` to compute a duration — reused here only as a convenient way to generate a *high event rate*. (Recall from Day 6 the TID-keyed start-timestamp map and its recursion/collision caveats; we don't need them today.)
 
-```c
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_tracing.h>
+The producer and consumer share the event layout through one header:
 
-char LICENSE[] SEC("license") = "GPL";
+{{#include ../labs/day13/dropviz.h}}
 
-struct event {
-    __u32 pid;
-    __u64 dur;
-    char comm[16];
-};
+and the program is included from the compiled source:
 
-struct {
-    __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 64 * 1024);   /* deliberately small to demo drops */
-} rb SEC(".maps");
-
-struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __uint(max_entries, 1);
-    __type(key, __u32);
-    __type(value, __u64);
-} drops SEC(".maps");
-
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 4096);
-    __type(key, __u64);
-    __type(value, __u64);
-} starts SEC(".maps");
-
-static __always_inline void inc_drops(void)
-{
-    __u32 z = 0;
-    __u64 *c = bpf_map_lookup_elem(&drops, &z);
-    if (c) (*c)++;
-}
-
-SEC("fentry/vfs_read")
-int BPF_PROG(on_in, struct file *f, char *buf, size_t n, loff_t *pos)
-{
-    __u64 tid = bpf_get_current_pid_tgid() & 0xffffffff;
-    __u64 ts = bpf_ktime_get_ns();
-    bpf_map_update_elem(&starts, &tid, &ts, BPF_ANY);
-    return 0;
-}
-
-SEC("fexit/vfs_read")
-int BPF_PROG(on_out, struct file *f, char *buf, size_t n, loff_t *pos, ssize_t ret)
-{
-    __u64 id = bpf_get_current_pid_tgid();
-    __u64 tid = id & 0xffffffff;
-    __u64 *ts = bpf_map_lookup_elem(&starts, &tid);
-    if (!ts) return 0;
-    __u64 dur = bpf_ktime_get_ns() - *ts;
-    bpf_map_delete_elem(&starts, &tid);
-
-    /* Filter to keep rate sane */
-    if (dur < 5000) return 0;     /* skip < 5µs */
-
-    struct event *e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
-    if (!e) {
-        inc_drops();
-        return 0;
-    }
-    e->pid = id >> 32;
-    e->dur = dur;
-    bpf_get_current_comm(&e->comm, sizeof(e->comm));
-    bpf_ringbuf_submit(e, 0);
-    return 0;
-}
-```
+{{#include ../labs/day13/dropviz.bpf.c:book}}
 
 Notice `inc_drops()` increments without any atomic — that's the per-CPU array doing its Day 2 job: each CPU touches its own copy, so there's nothing to race over.
 
 ### `dropviz.c` — userspace + drop monitor
 
-Same build setup as Day 1: copy `~/libbpf-bootstrap/examples/c/Makefile` into this directory and set `APPS = dropviz`. The Makefile expects `dropviz.bpf.c` and `dropviz.c` and generates `dropviz.skel.h` (the typed accessors for `skel->maps.rb`, `skel->maps.drops`, etc.) for you on `make`. Regenerate `vmlinux.h` if you haven't already (`sudo bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h`).
+The loader lives in the repository's `ebpf/labs/day13` directory; the build
+generates `dropviz.skel.h` (the typed accessors for `skel->maps.rb`,
+`skel->maps.drops`, etc.) from `dropviz.bpf.o`. The listing below is included
+from the source compiled by `make dropviz` and CI:
 
-```c
-#include <stdio.h>
-#include <signal.h>
-#include <time.h>
-#include <bpf/libbpf.h>
-#include "dropviz.skel.h"
-
-struct event {
-    __u32 pid;
-    __u64 dur;
-    char comm[16];
-};
-
-static volatile sig_atomic_t exiting;
-static void sigh(int s) { exiting = 1; }
-
-static int handle_event(void *ctx, void *data, size_t sz) {
-    struct event *e = data;
-    printf("%-16s pid=%-7u dur=%llu ns\n", e->comm, e->pid, e->dur);
-    return 0;
-}
-
-/* Every 1s, sample the per-CPU drops counter and sum across CPUs */
-static void sample_drops(int fd) {
-    __u64 total = 0;
-    __u32 key = 0;
-    int ncpu = libbpf_num_possible_cpus();
-    __u64 vals[ncpu];
-    bpf_map_lookup_elem(fd, &key, vals);
-    for (int i = 0; i < ncpu; i++) total += vals[i];
-    fprintf(stderr, "[total drops: %llu]\n", total);
-}
-
-int main(int argc, char **argv)
-{
-    struct dropviz_bpf *skel;
-    struct ring_buffer *rb;
-    struct timespec last, now;
-
-    skel = dropviz_bpf__open_and_load();
-    if (!skel) return 1;
-    if (dropviz_bpf__attach(skel)) return 1;
-
-    rb = ring_buffer__new(bpf_map__fd(skel->maps.rb), handle_event, NULL, NULL);
-    int drops_fd = bpf_map__fd(skel->maps.drops);
-
-    signal(SIGINT, sigh);
-    clock_gettime(CLOCK_MONOTONIC, &last);
-    while (!exiting) {
-        ring_buffer__poll(rb, 100);   /* 100 ms timeout */
-        clock_gettime(CLOCK_MONOTONIC, &now);
-        if (now.tv_sec - last.tv_sec >= 1) {   /* ~1s tick */
-            sample_drops(drops_fd);
-            last = now;
-        }
-    }
-
-    ring_buffer__free(rb);
-    dropviz_bpf__destroy(skel);
-    return 0;
-}
-```
+{{#include ../labs/day13/dropviz.c:book}}
 
 The `sample_drops` reader is the per-CPU read-out from Day 2 in the flesh: `bpf_map_lookup_elem` on a per-CPU map copies out **one `__u64` per CPU** into `vals[]`, and the loop sums them into the logical total. `ring_buffer__poll` is the `epoll_wait` we dissected above — when the ring is empty this thread sleeps on the ring's `waitq` for up to 100 ms, burning no CPU, until a submit's `irq_work` wakes it.
 

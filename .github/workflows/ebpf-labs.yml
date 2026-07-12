@@ -7,26 +7,34 @@ on:
       - .github/workflows/ebpf-labs.yml
       - .gitmodules
       - ebpf/labs/**
-      - ebpf/src/day01.md
-      - ebpf/src/day02.md
-      - ebpf/src/day03.md
-      - ebpf/src/lab-environment.md
+      - ebpf/src/**
   pull_request:
     paths:
       - .github/workflows/ebpf-labs.yml
       - .gitmodules
       - ebpf/labs/**
-      - ebpf/src/day01.md
-      - ebpf/src/day02.md
-      - ebpf/src/day03.md
-      - ebpf/src/lab-environment.md
+      - ebpf/src/**
   workflow_dispatch:
 
 permissions:
   contents: read
 
+env:
+  DEBIAN_FRONTEND: noninteractive
+
 jobs:
-  compile:
+  coverage:
+    name: Curriculum coverage and source sync
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+
+      - name: Validate every published lab entry
+        run: make -C ebpf/labs check-coverage
+
+  standalone:
+    name: Standalone libbpf and libxdp labs
     runs-on: ubuntu-24.04
     steps:
       - name: Check out pinned dependencies
@@ -38,54 +46,117 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            clang \
-            llvm \
-            git \
-            make \
-            gcc \
-            libc6-dev \
-            libelf-dev \
-            zlib1g-dev \
-            pkg-config
+            clang llvm git make gcc libc6-dev libelf-dev zlib1g-dev \
+            pkg-config python3 m4 binutils libpcap-dev
 
-      - name: Check the host and dependency pins
+      - name: Check host and dependency pins
         run: ebpf/labs/scripts/preflight.sh
 
-      - name: Build objects, skeletons, and loaders
-        run: make -C ebpf/labs check
+      - name: Build and inspect every standalone app
+        run: make -C ebpf/labs check-standalone
 
-      - name: Inspect generated artifacts
+      - name: Inspect generated ELF, BTF, skeleton, and loader artifacts
         run: |
           set -euo pipefail
-          for object in \
-            ebpf/labs/.output/day01/hello.bpf.o \
-            ebpf/labs/.output/day02/count.bpf.o \
-            ebpf/labs/.output/day03/parent.bpf.o; do
+          for program in $(python3 ebpf/labs/scripts/manifest.py programs); do
+            object="ebpf/labs/.output/$program.bpf.o"
             readelf --sections --wide "$object" | grep -q '\.BTF'
             readelf --sections --wide "$object" | grep -q '\.BTF.ext'
             ebpf/labs/.output/bpftool/bootstrap/bpftool btf dump \
               file "$object" >/dev/null
           done
-
-          for skeleton in \
-            ebpf/labs/.output/day01/hello.skel.h \
-            ebpf/labs/.output/day02/count.skel.h \
-            ebpf/labs/.output/day03/parent.skel.h; do
-            test -s "$skeleton"
+          for app in $(python3 ebpf/labs/scripts/manifest.py apps); do
+            test -s "ebpf/labs/.output/$app.skel.h"
+            test -x "ebpf/labs/.output/$app"
+          done
+          for tool in $(python3 ebpf/labs/scripts/manifest.py tools); do
+            test -x "ebpf/labs/.output/$tool"
           done
 
-          for loader in \
-            ebpf/labs/.output/day01/hello \
-            ebpf/labs/.output/day02/count \
-            ebpf/labs/.output/day03/parent; do
-            test -x "$loader"
-          done
-
-      - name: Verify clean rebuild
+      - name: Verify clean standalone rebuild
         run: |
           make -C ebpf/labs clean
           test ! -e ebpf/labs/.output
-          make -C ebpf/labs check
+          make -C ebpf/labs check-standalone
 
-      # Runtime attachment is intentionally excluded. It needs a disposable,
-      # privileged kernel host and is covered only by the opt-in smoke script.
+  dctcp:
+    name: Linux v7.1 DCTCP labs
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out pinned dependencies
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install kernel and BPF build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang llvm git make gcc libc6-dev libelf-dev zlib1g-dev \
+            pkg-config python3 curl xz-utils m4 flex bison pahole bc rsync \
+            libssl-dev libcap-dev binutils libpcap-dev
+
+      - name: Restore locked Linux source cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ebpf/labs/.output/linux-7.1
+            ebpf/labs/.output/linux-7.1.tar.xz
+          key: ebpf-linux-dctcp-${{ runner.os }}-${{ hashFiles('ebpf/labs/linux-source.lock.json') }}
+
+      - name: Restore generated v7.1 TCP type cache
+        uses: actions/cache@v4
+        with:
+          path: ebpf/labs/.output/kernel-btf-*
+          key: ebpf-linux-tcp-types-${{ runner.os }}-${{ hashFiles('ebpf/labs/linux-source.lock.json', 'ebpf/labs/scripts/kernel-btf.sh') }}
+
+      - name: Fetch or verify Linux v7.1
+        run: ebpf/labs/scripts/linux-source.sh fetch
+
+      - name: Build the canonical DCTCP object and telemetry derivative
+        run: |
+          make -C ebpf/labs day22
+          make -C ebpf/labs day23
+
+  sched-ext:
+    name: Linux v7.1 sched_ext labs
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out pinned dependencies
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install kernel and sched_ext build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang llvm git make gcc libc6-dev libelf-dev zlib1g-dev \
+            pkg-config python3 curl xz-utils m4 flex bison pahole bc rsync \
+            libssl-dev libcap-dev libunwind-dev libdw-dev binutils libpcap-dev
+
+      - name: Restore locked Linux source cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ebpf/labs/.output/linux-7.1
+            ebpf/labs/.output/linux-7.1.tar.xz
+          key: ebpf-linux-sched-ext-${{ runner.os }}-${{ hashFiles('ebpf/labs/linux-source.lock.json') }}
+
+      - name: Restore generated v7.1 scheduler type cache
+        uses: actions/cache@v4
+        with:
+          path: ebpf/labs/.output/kernel-btf-*
+          key: ebpf-linux-sched-types-${{ runner.os }}-${{ hashFiles('ebpf/labs/linux-source.lock.json', 'ebpf/labs/scripts/kernel-btf.sh') }}
+
+      - name: Fetch or verify Linux v7.1
+        run: ebpf/labs/scripts/linux-source.sh fetch
+
+      - name: Build upstream and derivative sched_ext labs
+        run: |
+          make -C ebpf/labs day25
+          make -C ebpf/labs day26
+          make -C ebpf/labs day27
+
+  # Privileged attachment is intentionally excluded. It requires a disposable
+  # compatible kernel host and explicit acknowledgements in scripts/smoke.sh.

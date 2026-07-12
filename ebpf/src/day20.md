@@ -232,36 +232,25 @@ Day 24 covers BTF spelunking in detail.
 
 ## The lab
 
+Continue in the repository's `ebpf/labs` directory. `make kfunc_demo` compiles the exact anchored listing shown below.
+
+`kfunc_demo.bpf.c`:
+
 ```c
-/* kfunc_demo.bpf.c */
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_tracing.h>
+{{#include ../labs/day20/kfunc_demo.bpf.c:book}}
+```
 
-char LICENSE[] SEC("license") = "GPL";
+The userspace loader (`kfunc_demo.c`) is the same skeleton-driven open/load/attach pattern as earlier days; it attaches the fentry and then waits for Ctrl-C while the program writes to `trace_pipe`.
 
-extern struct task_struct *bpf_task_acquire(struct task_struct *p) __ksym;
-extern void bpf_task_release(struct task_struct *p) __ksym;
-
-SEC("fentry/filename_unlinkat")
-int BPF_PROG(on_unlink)
-{
-    struct task_struct *cur = bpf_get_current_task_btf();
-    struct task_struct *acq = bpf_task_acquire(cur);
-    if (!acq) return 0;
-
-    bpf_printk("acquired pid=%d", acq->pid);
-
-    bpf_task_release(acq);
-    return 0;
-}
+```c
+{{#include ../labs/day20/kfunc_demo.c:book}}
 ```
 
 Build, load, attach, observe:
 
 ```bash
-make
-sudo ./kfunc_demo &                              # loads + attaches the fentry
+make kfunc_demo
+sudo ./.output/day20/kfunc_demo &                # loads + attaches the fentry
 sudo cat /sys/kernel/debug/tracing/trace_pipe &  # stream events live
 for i in 1 2 3; do touch /tmp/x$i && rm /tmp/x$i; done
 ```

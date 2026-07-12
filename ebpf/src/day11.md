@@ -265,34 +265,9 @@ That single fact is *why* hooking `vfs_*` with one glob is the right aggregation
 
 ### `multi.bpf.c`
 
-```c
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_tracing.h>
+This listing is included from the file the lab build and CI compile:
 
-char LICENSE[] SEC("license") = "GPL";
-
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 4096);
-    __type(key, __u64);     /* function ip */
-    __type(value, __u64);   /* count */
-} hits SEC(".maps");
-
-SEC("kprobe.multi/vfs_*")
-int BPF_KPROBE(on_any_vfs)
-{
-    __u64 ip = bpf_get_func_ip(ctx);
-    __u64 *c = bpf_map_lookup_elem(&hits, &ip);
-    if (c) {
-        __sync_fetch_and_add(c, 1);
-    } else {
-        __u64 one = 1;
-        bpf_map_update_elem(&hits, &ip, &one, BPF_NOEXIST);
-    }
-    return 0;
-}
-```
+{{#include ../labs/day11/multi.bpf.c:book}}
 
 `SEC("kprobe.multi/vfs_*")` — the suffix after `kprobe.multi/` is a **glob**. libbpf expands it (via tracefs `available_filter_functions`, as we saw) into maybe 50 function names starting with `vfs_`, the kernel resolves those to addresses, and `bpf_get_func_ip(ctx)` returns the entry IP of whichever one fired — the key the hash map aggregates on.
 

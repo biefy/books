@@ -210,31 +210,9 @@ You don't need a working program today. You need a single source file you mutate
 
 Use any of yesterday's programs as the base. We'll mutate it in place.
 
-`reject.bpf.c`:
+`reject.bpf.c` — the base that loads clean, straight from the lab tree:
 ```c
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_tracing.h>
-
-char LICENSE[] SEC("license") = "GPL";
-
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 1024);
-    __type(key, __u32);
-    __type(value, __u64);
-} m SEC(".maps");
-
-SEC("fentry/filename_unlinkat")
-int BPF_PROG(rej)
-{
-    __u32 key = 0;
-    /* WE WILL EDIT THE BODY BELOW FIVE TIMES */
-    __u64 *v = bpf_map_lookup_elem(&m, &key);
-    if (!v) return 0;
-    *v += 1;
-    return 0;
-}
+{{#include ../labs/day04/reject.bpf.c:book}}
 ```
 
 Build it once. It loads. Now break it five ways and read the log each time.

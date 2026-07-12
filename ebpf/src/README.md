@@ -37,9 +37,9 @@ The most important step is **the deliberate breakage**. Don't skip it. Five minu
 
 ## Lab source and prerequisites
 
-Start with the [Lab environment](lab-environment.md) page. It defines the Linux toolchain, the pinned recursive dependencies, the privilege boundary, and the exact coverage of repository-owned labs.
+Start with the [Lab environment](lab-environment.md) page. It defines the Linux toolchain, pinned recursive dependencies, locked Linux v7.1 source, privilege boundary, and per-backend build commands.
 
-Days 1–3 use buildable source under `ebpf/labs/`; their chapter listings are included from the same files compiled in CI. Days 4–21 and Day 24 still contain copyable snippets, Days 22–23 use the Linux kernel's BPF selftests, and Days 25–30 use `tools/sched_ext`. A green lab build therefore proves Days 1–3 only.
+Every published entry has a lab record under `ebpf/labs/`. Days 1–21, Day 24, and the reference capstone use checked-in source whose primary chapter listings are included from the same files compiled in CI. Day 22 and Days 25/27 wrap exact upstream v7.1 targets; Days 23/26 carry complete repo-owned derivatives built against that locked tree. `make -C ebpf/labs check-coverage` prevents a chapter from silently falling out of this contract.
 
 ## Style notes
 
