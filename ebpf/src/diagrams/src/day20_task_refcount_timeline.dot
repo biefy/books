@@ -1,5 +1,5 @@
 digraph task_refcount_timeline {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="task_struct->rcu_users over one BPF program: runtime counter vs verifier ref id #1";
     fontname="Helvetica"; fontsize=14;

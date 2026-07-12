@@ -1,5 +1,5 @@
 digraph func_proto_split {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="A function lives in BTF as TWO entries linked by type_id";
     fontname="Helvetica"; fontsize=14;

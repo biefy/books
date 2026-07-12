@@ -1,5 +1,5 @@
 digraph ulp_vtable_swap {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="setsockopt(TCP_ULP,\"tls\") + TLS_TX swaps the socket's vtables (recall Day 13's two vtables)";
     fontname="Helvetica"; fontsize=14;

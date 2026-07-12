@@ -1,5 +1,5 @@
 digraph rtt_estimator {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="RTO = srtt + 4*rttvar: a smoothed mean plus a jitter cushion";
     fontname="Helvetica"; fontsize=14;

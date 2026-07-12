@@ -1,5 +1,5 @@
 digraph cwnd_staircase {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="cwnd vs time: slow-start ramp, ssthresh boundary, congestion avoidance, and an undo";
     fontname="Helvetica"; fontsize=14;

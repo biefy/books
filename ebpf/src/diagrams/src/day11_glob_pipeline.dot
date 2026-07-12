@@ -1,5 +1,5 @@
 digraph glob_pipeline {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="From glob to addresses: a glob is resolved to addresses in USERSPACE";
     fontname="Helvetica"; fontsize=14;

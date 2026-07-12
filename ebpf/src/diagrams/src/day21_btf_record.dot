@@ -1,5 +1,5 @@
 digraph btf_record {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="btf_record: parsed ONCE at map create, walked on EVERY free";
     fontname="Helvetica"; fontsize=14;

@@ -16,8 +16,8 @@ digraph tracepoint_lanes {
     subgraph cluster_a {
         label="Lane A — tracepoint  (kernel COPIES fields)";
         fontname="Helvetica"; fontsize=11; style="rounded"; color="#2563eb";
-        a_ctx [shape=record, style="filled", fillcolor="#dbeafe",
-               label="{ struct trace_event_raw_sched_switch * | { char prev_comm[16]  (readable) | int  prev_pid | char next_comm[16] | NO task_struct pointer } }"];
+        a_ctx [shape=box, style="filled", fillcolor="#dbeafe",
+               label="struct trace_event_raw_sched_switch *\nchar prev_comm[16] (readable)\nint prev_pid\nchar next_comm[16]\nNO task_struct pointer"];
         a_use [shape=box, style="filled,rounded", fillcolor="#fef3c7",
                label="ctx->prev_comm\ncopied bytes, read directly"];
         a_ctx -> a_use;
@@ -27,8 +27,8 @@ digraph tracepoint_lanes {
     subgraph cluster_b {
         label="Lane B — raw_tracepoint  (no copy)";
         fontname="Helvetica"; fontsize=11; style="rounded"; color="#d97706";
-        b_ctx [shape=record, style="filled", fillcolor="#fef3c7",
-               label="{ struct bpf_raw_tracepoint_args | { args[0] = preempt (u64) | args[1] = prev  (u64, cast by hand) | args[2] = next  (u64) } }"];
+        b_ctx [shape=box, style="filled", fillcolor="#fef3c7",
+               label="struct bpf_raw_tracepoint_args\nargs[0] = preempt (u64)\nargs[1] = prev (u64, cast by hand)\nargs[2] = next (u64)"];
         b_use [shape=box, style="filled,rounded", fillcolor="#fee2e2",
                label="(task_struct *)ctx->args[1]\nuntrusted: cast by position"];
         b_ctx -> b_use;
@@ -38,8 +38,8 @@ digraph tracepoint_lanes {
     subgraph cluster_c {
         label="Lane C — tp_btf  (same args[], BTF-typed)";
         fontname="Helvetica"; fontsize=11; style="rounded"; color="#16a34a";
-        c_ctx [shape=record, style="filled", fillcolor="#dcfce7",
-               label="{ same raw args[] but BTF-typed | { args[1] = struct task_struct * | marked PTR_TO_BTF_ID } }"];
+        c_ctx [shape=box, style="filled", fillcolor="#dcfce7",
+               label="same raw args[] but BTF-typed\nargs[1] = struct task_struct *\nmarked PTR_TO_BTF_ID"];
         c_use [shape=box, style="filled,rounded", fillcolor="#dbeafe",
                label="prev->comm\ndirect deref (trusted)"];
         c_ctx -> c_use;
@@ -50,4 +50,5 @@ digraph tracepoint_lanes {
     site -> c_ctx [label="raw + BTF", color="#16a34a", style=bold, fontname="Helvetica", fontsize=9];
 
     fmt -> a_ctx [label="schema", color="#7c3aed", style=dashed, fontname="Helvetica", fontsize=9];
+    a_use -> b_ctx -> c_ctx [style=invis, weight=100];
 }

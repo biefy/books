@@ -1,5 +1,5 @@
 digraph sockops_timeline {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="One sock_ops program, re-entered at every step of the TCP state machine, dispatched by op";
     fontname="Helvetica"; fontsize=14;

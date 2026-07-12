@@ -1,5 +1,5 @@
 digraph log2_histogram {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="Latency histogram: floor(log2) picks a slot, one atomic add per event";
     fontname="Helvetica"; fontsize=14;

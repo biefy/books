@@ -31,7 +31,7 @@ digraph kretprobe_return_swap {
             label="<i0>inst[0]: saved REAL caller|<i1>inst[1]: saved REAL caller|<i2>inst[2]: ... |<in>inst[N-1]: free?"];
     }
 
-    stack_before -> pool:i0 [label="copy REAL caller into a free slot",
+    stack_after -> pool:i0 [label="copy REAL caller into a free slot",
         color="#7c3aed", style=bold, fontname="Helvetica", fontsize=9,
         lhead=cluster_pool];
 
@@ -50,8 +50,8 @@ digraph kretprobe_return_swap {
         pop -> tramp -> back;
     }
 
-    stack_after -> pop [label="function does ret", color="#d97706",
-        style=bold, fontname="Helvetica", fontsize=9, ltail=cluster_entry];
+    pool -> pop [label="function does ret", color="#d97706",
+        style=bold, fontname="Helvetica", fontsize=9, ltail=cluster_pool];
     pool:in -> back [label="restore saved addr", color="#7c3aed",
         style=dashed, fontname="Helvetica", fontsize=9];
 

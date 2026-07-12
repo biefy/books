@@ -1,5 +1,5 @@
 digraph expr_vm_dataflow {
-    rankdir=LR;
+    rankdir=TB;
     labelloc=t;
     label="'tcp dport 22 accept' through the register VM (nft_do_chain)";
     fontname="Helvetica"; fontsize=14;
