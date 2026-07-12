@@ -186,9 +186,25 @@ The state machine is the canonical answer to "why does my first ping take 1ms lo
 
 ![lookup flow](diagrams/day07_neigh_lookup.png)
 
-When `ip_finish_output2` (`net/ipv4/ip_output.c:231`) needs the next-hop's MAC, it calls `ip_neigh_for_gw` → `ip_neigh_gw4` → **`__ipv4_neigh_lookup_noref`** (`include/net/route.h:400-425`) — a **lockless RCU** hash lookup, *not* the read-locked `neigh_lookup()` slow path. Only on a miss does it fall back to `__neigh_create` (`net/core/neighbour.c:646`). If the entry is INCOMPLETE, the skb is queued on `arp_queue` and the kernel sends an ARP request. When the reply arrives, the queue flushes and the queued skbs are sent.
+### The packet that triggers ARP: async resolution, a bounded queue, and two fast paths
 
-If the lookup hits FAILED, the skb is dropped and the kernel may send an ICMP "Destination Host Unreachable" back to the source.
+![ARP queue and output fast path](diagrams/day07_arp_queue.png)
+
+`ip_finish_output2` does not call ARP directly. It reaches the inline **`neigh_output(neigh, skb, skip_cache)`** helper, which makes two decisions: can it use a cached L2 header immediately, and if not, which function does `neigh->output` currently name? Follow the states rather than treating the pointer as the whole fast path:
+
+1. **First packet, no usable address.** A new NUD_NONE entry has `neigh->output = neigh->ops->output`, which for ordinary ARP is `neigh_resolve_output`. `neigh_event_send` → `__neigh_event_send` changes NONE to INCOMPLETE, arms the timer, sends a solicitation, queues the supplied skb, and returns `1`. `neigh_resolve_output` therefore does not transmit that skb; TX unwinds instead of blocking for an ARP round-trip.
+
+2. **Only unresolved packets queue.** While the state is INCOMPLETE, skbs are parked on the per-neighbour `arp_queue`. Its `arp_queue_len_bytes` is bounded by `QUEUE_LEN_BYTES`; when adding a new skb would exceed the limit, the loop dequeues and drops the **oldest** entries with `SKB_DROP_REASON_NEIGH_QUEUEFULL` until the new skb fits. One unreachable neighbour therefore has a fixed memory budget.
+
+3. **The reply lands.** `arp_rcv` → `neigh_update` stores the MAC and changes the state to REACHABLE. `neigh_connect` writes `neigh->output = neigh->ops->connected_output`, and `neigh_update_process_arp_queue` drains the unresolved queue. It relooks up the top-level neighbour for each skb before reinjecting it because qdiscs such as shapers can lead to a different neighbour object.
+
+4. **Connected output has two forms.** On the ordinary call path, `neigh_output()` first checks `NUD_CONNECTED` and `hh.hh_len`. If both hold, **`neigh_hh_output()`** copies the cached L2 header under its sequence lock, pushes it, and calls `dev_queue_xmit` without calling `neigh->output` at all. If no header cache is usable, the helper falls through to the function pointer; generic **`neigh_connected_output()`** rebuilds the header with `dev_hard_header` and transmits it. `hh_cache` and `neigh_connected_output` are alternatives, not one combined fast path.
+
+5. **STALE is usable, not unresolved.** When reachability ages, `neigh_suspect` restores the resolving output function. The next packet reaches `neigh_resolve_output`; `__neigh_event_send` changes STALE to DELAY but returns success, so that packet is sent immediately with the known MAC. If upper-layer confirmation does not arrive during `delay_first_probe_time`, the timer advances to PROBE and sends solicitations. A STALE packet does **not** enter `arp_queue`.
+
+If INCOMPLETE probing exhausts its budget, `neigh_timer_handler` sets FAILED and `neigh_invalidate` removes queued skbs through `ops->error_report` before purging the remainder. For IPv4, `arp_error_report` calls `dst_link_failure` and frees the skb with `SKB_DROP_REASON_NEIGH_FAILED`; the exact user-visible error depends on the route/socket context.
+
+This connects forward: routing chooses the next hop that the neighbour subsystem resolves, and the bounded oldest-first eviction pattern reappears in the queueing discussion on Day 23.
 
 > ### Which IPs actually get ARP'd? on-link vs via-gateway
 >

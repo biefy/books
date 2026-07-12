@@ -147,6 +147,26 @@ static bool tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle, .
 
 > **Forward reference:** the *mechanics* of how cwnd grows and collapses (slow start, congestion avoidance, the CUBIC/BBR algorithms) are Phase 3, Days 13–19. Today you only need: queue is cheap, transmit is gated, and ACKs are what reopen the gate.
 
+## What stops one flow from drowning the qdisc: TCP Small Queues
+
+Here's a tension the staging above quietly creates. One `send()` can charge a megabyte of TCP write memory, while `tcp_write_xmit` may have a large congestion window available. Why doesn't one bulk flow push that entire window into the qdisc and device queues at once? **TCP Small Queues (TSQ)** applies per-socket backpressure before each new transmit.
+
+![TCP Small Queues backpressure loop](diagrams/day03_tsq.png)
+
+First separate two lifetimes that are easy to collapse into one "send queue":
+
+- A newly built data skb starts on **`sk_write_queue`** and is charged to `sk_wmem_queued`.
+- After its first successful transmission, `tcp_event_new_data_sent()` unlinks that original skb from `sk_write_queue` and inserts it into **`tcp_rtx_queue`**, where TCP retains it until ACK/free for possible retransmission. Its `sk_wmem_queued` charge persists across that move; `tcp_wmem_free_skb()` removes the charge only when TCP releases the skb.
+- `tcp_transmit_skb()` normally sends a **clone** of that retained TCP skb down through IP. The downstream clone is charged to `sk_wmem_alloc` and gets `tcp_wfree` as its destructor. This second counter represents memory still held by qdisc/device-side references, not the bytes TCP retains in its write and retransmit queues.
+
+TSQ uses the downstream counter as its gate:
+
+1. **Before sending another skb**, `tcp_small_queue_check()` computes `min(max(2 * skb->truesize, sk_pacing_rate >> sk_pacing_shift), tcp_limit_output_bytes)`. With the usual shift of 10, the pacing term is about one millisecond of bytes, while the two-skb floor prevents tiny limits. Retransmit paths can multiply the limit. There is also an escape for an empty or single-entry retransmit tree so delayed completions cannot deadlock progress.
+2. If `sk_wmem_alloc` remains above the limit, TSQ sets `TSQ_THROTTLED` and `tcp_write_xmit` stops. Unsent originals stay on `sk_write_queue`; already-sent originals remain in `tcp_rtx_queue`. Neither queue is the qdisc backlog.
+3. When a downstream skb is freed, `tcp_wfree()` removes its charge. If the socket was throttled, it queues the socket on a per-CPU BH workqueue so TCP can try `tcp_write_xmit` again outside the qdisc-locking context.
+
+The payoff is bounded **per-flow** occupancy below TCP: one socket cannot dump an arbitrary congestion window into qdisc and driver queues. That usually keeps latency much lower, but it is not a promise that the whole qdisc is empty — many flows can still build aggregate backlog, and some devices (notably Wi-Fi aggregation) need enough queued bytes for throughput. BBR's deliberate pacing rate feeds the TSQ limit, while a pacing qdisc such as `fq` separately schedules when packets leave.
+
 ## Stage 3: TCP header and the IP layer
 
 `tcp_transmit_skb` builds the TCP header (sequence number, ACK, flags, window, checksum if not offloaded) on the skb being sent. (`tcp_transmit_skb` is a thin wrapper inlined into `__tcp_transmit_skb`, so that's the name you'll actually see in ftrace output.) Then it calls into IP via the L3 vtable slot we met in Stage 0:

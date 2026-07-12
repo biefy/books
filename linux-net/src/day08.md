@@ -239,6 +239,48 @@ On real internet tables, the dense regions get flattened (fewer levels via level
 
 Finally, tie it back to LPM (Background 1): the walk **descends to a leaf** following the address bits, then checks the leaf's `fib_alias` list to find the most specific prefix whose bits actually match the key. The trie *narrows* the candidates; the leaf check *confirms* the match length. Read `net/ipv4/fib_trie.c` (`fib_table_lookup`, line 1420) and `Documentation/networking/fib_trie.rst` for the gory details — both are well-commented.
 
+### How the walk actually works: each tnode owns a branching window
+
+A plain binary trie examines one address bit per level. An LC-trie compresses both paths and levels: every internal `key_vector` (tnode) stores `pos` and `bits`, selecting a multi-bit window of the 32-bit host-order key and a child array of size `1 << bits`.
+
+![LC-trie walk](diagrams/day08_lctrie_walk.png)
+
+`fib_table_lookup` begins with `key = ntohl(flp->daddr)` and uses:
+
+```c
+struct key_vector {
+    t_key key;
+    unsigned char pos;   /* low-order suffix bits below this window */
+    unsigned char bits;  /* width of this node's child index        */
+    unsigned char slen;  /* longest suffix length below this node   */
+    /* leaf hlist, or a (1 << bits)-entry child array                */
+};
+```
+
+The hot expression is `index = get_cindex(key, n) = (key ^ n->key) >> n->pos`. The shift discards the low `pos` suffix bits, which are **below** this node's branching window; it does not discard bits already examined on the way down. If all more-significant prefix and path-compressed bits agree with `n->key`, the remaining value fits in `n->bits` and directly indexes one child. A tnode with `bits = 4` therefore selects among 16 children in one dereference. If `index >= 1 << n->bits`, some differing bit lies above the window, so this subtree cannot contain the key and lookup enters prefix backtracking.
+
+The first descent aims at the most specific candidate. When `index` fits and `bits == 0`, it has reached a leaf whose key passed that step's comparison. A leaf holds a sorted hlist of `fib_alias` routes; `fa_slen` is the number of low-order suffix bits excluded from that alias's prefix, so `prefixlen = 32 - fa_slen`. The semantic scan also checks DSCP, route liveness/type/scope, output-interface constraints, and usable nexthops before filling `fib_result`.
+
+### Backtracking enumerates valid shorter-prefix candidates
+
+If descent finds a missing child, a prefix mismatch, or no usable alias/nexthop, lookup does not restart at the root. It keeps a parent `pn` and child index `cindex` only where `slen > pos` says a shorter prefix may exist below that point.
+
+At `backtrace`, a nonzero `cindex` is changed with `cindex &= cindex - 1`, clearing its least-significant set bit and selecting the next prefix-aligned predecessor branch in that child array. If `cindex` is already zero, the code ascends until an ancestor has another candidate, recomputes that ancestor's child index with `get_index`, and continues. Prefix-matching mode then follows the first non-NULL child of a candidate subtree, while `prefix_mismatch(key, n)` and `n->slen == n->pos` prune branches that cannot contain a shorter match.
+
+At a candidate leaf, `index = key ^ n->key`; an alias is eligible only when every differing bit fits inside its ignored suffix (`index < 1 << fa_slen`, with the 32-bit guard in the source). Thus longest-prefix behavior comes from the combination of deepest-first descent, aliases ordered by prefix length, and this structured backtrace toward shorter candidates — not from "the first leaf always wins" and not from blindly climbing one trie level per prefix bit.
+
+Route insertion keeps the structure efficient by resizing tnodes: `inflate` widens dense branching windows and `halve` narrows sparse ones. Those operations change `bits` and child placement without changing the lookup contract.
+
+You can see the resulting shape directly:
+
+```bash
+cat /proc/net/fib_trie
+```
+
+Each `+--` line is an internal tnode printed as `prefix/len bits full_children empty_children`; each `|--` line is a leaf with its routes. Watch a `bits` value of 2 or 3 on a busy line — that's level compression fanning a node out to 4 or 8 children so the walk skips whole levels.
+
+Read `net/ipv4/fib_trie.c` if you want the resize math; the lookup loop itself (lines 1420–1545) is the part worth reading top-to-bottom.
+
 ## Multiple tables
 
 Linux supports multiple routing tables. The defaults:

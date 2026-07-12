@@ -1,0 +1,106 @@
+direction: down
+
+title: |md
+  ### A common RX path: DMA page → skb view → release/recycle
+| {near: top-center; shape: text}
+
+ring: "NIC RX descriptor ring" {
+  style.fill: "#dbeafe"
+  r_body: |md
+    Fixed-size circular array.
+
+    Each descriptor names a DMA-capable
+    buffer supplied by the driver.
+
+    In this example the driver obtains
+    pages from a page pool, then lends
+    them to the NIC for receive DMA.
+  |
+}
+
+page: "Driver-owned DMA page" {
+  style.fill: "#fef3c7"
+  p_body: |md
+    NIC writes the frame here by DMA.
+
+    [ headroom ][ frame bytes ][ shinfo ]
+
+    The driver chooses the exact layout
+    and must leave aligned tailroom for
+    `skb_shared_info` when using build_skb.
+  |
+}
+
+xdp: "Optional native XDP" {
+  style.fill: "#ede9fe"
+  x_body: |md
+    Runs on the raw receive buffer before
+    an skb exists, when driver-supported.
+
+    DROP / TX / REDIRECT may consume it.
+    PASS continues to skb construction.
+  |
+}
+
+skb: "struct sk_buff view" {
+  style.fill: "#dcfce7"
+  s_body: |md
+    build_skb / napi_build_skb:
+
+    - allocate an skb descriptor
+    - point head/data at caller storage
+    - set `head_frag` for page-backed head
+
+    A page-pool driver separately calls
+    `skb_mark_for_recycle()` → `pp_recycle`.
+    No payload copy occurs on this branch.
+  |
+}
+
+alternate: "Other valid driver paths" {
+  style.fill: "#fff7ed"
+  a_body: |md
+    - allocate skb + copy (copybreak)
+    - use another RX buffer manager
+    - run generic XDP after skb creation
+
+    build_skb/page-pool is common,
+    not the universal RX contract.
+  |
+}
+
+stack: "Protocol stack" {
+  style.fill: "#ede9fe"
+  st_body: |md
+    ip_rcv → routing → TCP
+
+    The skb pointers describe bytes in the
+    wrapped buffer until the last data
+    reference is released.
+  |
+}
+
+release: "Last-reference release" {
+  style.fill: "#fee2e2"
+  rc_body: |md
+    `head_frag` → page-fragment free path
+
+    `pp_recycle` set and page eligible
+      → return it to the page pool
+
+    otherwise
+      → release through the normal page path
+
+    The ring is replenished with an
+    eligible buffer; live bytes are never reused.
+  |
+}
+
+ring -> page: "NIC fills descriptor buffer"
+page -> xdp: "poll completion"
+xdp -> skb: "XDP_PASS"
+page -> alternate: "driver chooses another path" {style.stroke-dash: 4}
+skb -> stack: "wrapped bytes travel up"
+alternate -> stack: "normal skb path"
+stack -> release: "dataref reaches zero"
+release -> ring: "eligible page may be reused"

@@ -1,0 +1,101 @@
+direction: down
+
+title: |md
+  ### LC-trie lookup: branching window → semantic leaf → structured backtrace
+| {near: top-center; shape: text}
+
+key: "Lookup key" {
+  style.fill: "#dbeafe"
+  k_body: |md
+    `key = ntohl(flp->daddr)`
+
+    fib_table_lookup starts at the trie root
+    and seeks the most-specific usable route.
+  |
+}
+
+tnode: "tnode: key + pos + bits + slen" {
+  style.fill: "#fef3c7"
+  t_body: |md
+    `index = (key ^ n->key) >> n->pos`
+
+    Low `pos` suffix bits are below this
+    node's branching window.
+
+    If index fits in `bits`:
+      choose child[index] from 1 << bits slots
+
+    If index >= 1 << bits:
+      a more-significant prefix/skipped bit
+      mismatched → enter backtrace
+  |
+}
+
+descent: "Deepest-first descent" {
+  style.fill: "#ede9fe"
+  d_body: |md
+    Follow the selected child.
+
+    Save parent + cindex only when
+    `n->slen > n->pos` says a shorter
+    prefix candidate can exist there.
+
+    Stop at a leaf, a NULL child,
+    or a compressed-prefix mismatch.
+  |
+}
+
+leaf: "Leaf: prefix and semantic checks" {
+  style.fill: "#dcfce7"
+  l_body: |md
+    `index = key ^ leaf->key`
+
+    For each ordered fib_alias:
+      differing bits must fit in `fa_slen`
+      prefixlen = 32 - fa_slen
+      check DSCP, scope/type, route liveness,
+      requested OIF, and usable nexthop
+
+    First usable alias fills fib_result.
+  |
+}
+
+backtrace: "No usable match: backtrace" {
+  style.fill: "#fee2e2"
+  b_body: |md
+    If saved cindex != 0:
+      cindex &= cindex - 1
+      try that predecessor child branch
+
+    If cindex == 0:
+      ascend until an ancestor has a candidate,
+      recompute its child index, then clear a bit
+
+    Prefix mode follows non-NULL children;
+    `prefix_mismatch` and `slen == pos`
+    prune impossible shorter matches.
+  |
+}
+
+result: "fib_result" {
+  style.fill: "#fff7ed"
+  r_body: |md
+    prefix + prefixlen + route type/scope
+    selected fib_info + nexthop + table
+
+    Caller builds/attaches the rtable.
+
+    LPM comes from deepest-first descent,
+    ordered aliases, and shorter-candidate
+    backtrace working together.
+  |
+}
+
+key -> tnode: "start"
+tnode -> descent: "index fits"
+descent -> leaf: "candidate leaf"
+leaf -> result: "semantic match"
+tnode -> backtrace: "window/prefix mismatch" {style.stroke-dash: 4}
+descent -> backtrace: "NULL child" {style.stroke-dash: 4}
+leaf -> backtrace: "no usable alias/nexthop" {style.stroke-dash: 4}
+backtrace -> descent: "next shorter candidate"

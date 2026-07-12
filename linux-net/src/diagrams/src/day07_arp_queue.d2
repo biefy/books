@@ -1,0 +1,114 @@
+direction: down
+
+title: |md
+  ### Neighbour output: unresolved queue, stale validation, and two fast paths
+| {near: top-center; shape: text}
+
+tx: "TX has a next-hop neighbour" {
+  style.fill: "#dbeafe"
+  t_body: |md
+    ip_finish_output2 reaches:
+
+    `neigh_output(neigh, skb, skip_cache)`
+
+    It first tests connected state + hh cache.
+    Otherwise it calls the current
+    `neigh->output` function pointer.
+  |
+}
+
+unresolved: "NONE / INCOMPLETE: resolve" {
+  style.fill: "#fef3c7"
+  u_body: |md
+    `neigh_resolve_output()` calls
+    `__neigh_event_send()`.
+
+    NONE → INCOMPLETE
+    arm timer + send ARP solicitation
+
+    Return 1: this skb is not transmitted now.
+  |
+}
+
+queue: "Bounded arp_queue" {
+  style.fill: "#ede9fe"
+  q_body: |md
+    Only INCOMPLETE traffic is parked here.
+
+    Limit is bytes (`QUEUE_LEN_BYTES`).
+    If the new skb would overflow it,
+    dequeue/drop oldest entries until it fits:
+    `SKB_DROP_REASON_NEIGH_QUEUEFULL`.
+  |
+}
+
+reply: "ARP reply: neighbour becomes REACHABLE" {
+  style.fill: "#dcfce7"
+  r_body: |md
+    neigh_update stores the MAC.
+    neigh_connect selects connected output.
+
+    Queue drain relooks up the top-level
+    neighbour for each skb, then reinjects it.
+  |
+}
+
+hh: "Fast path A: neigh_hh_output" {
+  style.fill: "#dcfce7"
+  h_body: |md
+    If state is NUD_CONNECTED and `hh_len` exists,
+    the inline helper bypasses `neigh->output`:
+
+    copy cached L2 header under seqlock
+    push header → dev_queue_xmit
+  |
+}
+
+connected: "Fast path B: connected_output" {
+  style.fill: "#fff7ed"
+  c_body: |md
+    Without a usable header cache, fall through
+    to the function pointer.
+
+    Generic `neigh_connected_output()` calls
+    dev_hard_header for this skb, then transmits.
+
+    This is an alternative to the hh-cache path.
+  |
+}
+
+stale: "STALE: send now, validate later" {
+  style.fill: "#fef3c7"
+  s_body: |md
+    neigh_suspect selects resolving output.
+
+    Next packet changes STALE → DELAY but
+    `__neigh_event_send()` returns success;
+    the known MAC is used immediately.
+
+    No upper-layer confirmation by timer expiry?
+    DELAY → PROBE and solicitations begin.
+    STALE traffic is not queued.
+  |
+}
+
+fail: "Resolution failure" {
+  style.fill: "#fee2e2"
+  f_body: |md
+    Probe budget exhausted while INCOMPLETE:
+    state → FAILED
+
+    queued skbs pass through error_report;
+    IPv4 calls dst_link_failure and frees them
+    with NEIGH_FAILED accounting.
+  |
+}
+
+tx -> unresolved: "address not usable"
+unresolved -> queue: "INCOMPLETE: park skb"
+queue -> reply: "reply before probe budget expires"
+queue -> fail: "no reply"
+reply -> hh: "connected + cached header"
+reply -> connected: "connected, no usable hh cache"
+tx -> stale: "known MAC, stale reachability"
+stale -> connected: "send current packet"

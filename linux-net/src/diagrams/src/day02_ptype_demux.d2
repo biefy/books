@@ -1,0 +1,103 @@
+direction: down
+
+title: |md
+  ### L2 → L3 demux: scoped ptype lists, pt_prev, and list delivery
+| {near: top-center; shape: text}
+
+reg: "Registration: dev_add_pack" {
+  style.fill: "#ede9fe"
+  reg_body: |md
+    `ptype_head()` selects a list:
+
+    Built-in L3 handler (ETH_P_IP)
+      → `ptype_base[type & 0xF]`
+
+    AF_PACKET ETH_P_ALL tap
+      → netns/device `ptype_all`
+
+    Scoped protocol-bound socket
+      → netns/device `ptype_specific`
+
+    IPv4 registers:
+    `.func = ip_rcv`
+    `.list_func = ip_list_rcv`
+  |
+}
+
+classify: "__netif_receive_skb_core" {
+  style.fill: "#dbeafe"
+  c_body: |md
+    `skb->protocol` came from eth_type_trans.
+
+    1. Visit netns/device `ptype_all` taps.
+    2. Run ingress, VLAN, RX-handler logic;
+       `skb->dev` may change.
+    3. Walk global ethertype bucket.
+    4. Walk applicable netns/original/current-
+       device `ptype_specific` lists.
+
+    Exact list selection is scope-aware;
+    it is not one global three-list sequence.
+  |
+}
+
+defer: "pt_prev defers the final consumer" {
+  style.fill: "#fef3c7"
+  d_body: |md
+    Each matching list entry becomes `pt_prev`.
+
+    If another match appears, flush the earlier
+    one via `deliver_skb`:
+      increment `skb->users`
+      call earlier `.func`
+
+    One final handler needs no extra reference.
+    For scalar input, `INDIRECT_CALL_INET`
+    promotes ip_rcv / ipv6_rcv.
+  |
+}
+
+listpath: "Batched receive keeps a list" {
+  style.fill: "#dcfce7"
+  l_body: |md
+    `__netif_receive_skb_list_core` classifies
+    each skb with the same core, then groups
+    adjacent packets by final `packet_type`
+    and original device.
+
+    Handler has `.list_func`?
+      → one batched call (IPv4: ip_list_rcv)
+
+    Otherwise
+      → fall back to per-skb `.func` calls
+  |
+}
+
+fanout: "What a capture tap changes" {
+  style.fill: "#fff7ed"
+  f_body: |md
+    Without a tap: ip_rcv can remain the final
+    consumer and take the original reference.
+
+    With an ETH_P_ALL capture tap: that earlier
+    consumer must be flushed before the later
+    L3 handler. No deep payload copy is required,
+    but fan-out and refcount work are real.
+  |
+}
+
+drop: "No matching handler" {
+  style.fill: "#fee2e2"
+  drop_body: |md
+    `pt_prev == NULL`
+
+    increment RX dropped for unhandled protocol
+    release skb with a drop reason
+  |
+}
+
+reg -> classify: "lists are ready before traffic"
+classify -> defer: "matches share one deferred pointer"
+defer -> listpath: "list input groups final matches"
+defer -> fanout: "second consumer flushes first"
+classify -> drop: "no match" {style.stroke-dash: 4}

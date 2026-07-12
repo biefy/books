@@ -1,0 +1,89 @@
+direction: down
+
+title: |md
+  ### TIME_WAIT: a minisock replaces the full socket
+| {near: top-center; shape: text}
+
+full: "ESTABLISHED full socket (struct tcp_sock)" {
+  style.fill: "#dbeafe"
+  f_body: |md
+    Holds everything:
+    - send + receive queues (skbs)
+    - congestion state, RTT, SACK
+    - timers, socket buffers
+    - full struct sock + tcp_sock
+
+    Active closer finishes the
+    FIN/ACK dance → ready for TIME_WAIT.
+  |
+}
+
+carve: "tcp_time_wait() — carve a minisock" {
+  style.fill: "#fef3c7"
+  c_body: |md
+    net/ipv4/tcp_minisocks.c:326
+
+    tw = inet_twsk_alloc(...)
+      (inet_timewait_sock.c:168)
+
+    Copies ONLY what's needed to police
+    late segments on the 4-tuple:
+    - tw_rcv_nxt / tw_snd_nxt (seq)
+    - tw_ts_recent (PAWS)
+    - tw_rcv_wnd, tw_rcv_wscale
+
+    No data queues or congestion-control
+    state: much smaller than a full tcp_sock.
+  |
+}
+
+minisock: "inet_timewait_sock in ehash" {
+  style.fill: "#dcfce7"
+  m_body: |md
+    inet_twsk_hashdance_schedule():
+    - adds minisock bind ownership
+    - atomically replaces the full socket's
+      ehash node on the SAME 4-tuple
+    - arms tw_timer for TCP_TIMEWAIT_LEN
+      (60*HZ for true TIME_WAIT)
+
+    tcp_v4_rcv sees TCP_TIME_WAIT and calls
+    tcp_timewait_state_process(): ACK, RST,
+    success/drop, or a SYN eligible for a
+    listener after the old minisock is removed.
+  |
+}
+
+closed: "Original full socket → TCP_CLOSE, then released" {
+  style.fill: "#fee2e2"
+  cl_body: |md
+    Same tcp_time_wait() then calls
+    tcp_done(sk):
+      tcp_set_state(sk, TCP_CLOSE)
+      → retire the full socket; final freeing
+        waits for its remaining references.
+
+    THIS is why fentry:tcp_set_state shows
+    ... -> 5 -> 7 (FIN_WAIT2 -> CLOSE),
+    never -> 6. State 6 lives on the minisock,
+    which tcp_set_state never touches.
+  |
+}
+
+gone: "2*MSL timer fires" {
+  style.fill: "#ede9fe"
+  g_body: |md
+    tw_timer expires → minisock unhashed
+    and freed. 4-tuple is finally reusable.
+
+    If inet_twsk_alloc hits the namespace cap
+    (tcp_max_tw_buckets), it returns NULL:
+    no minisock; TCPTimeWaitOverflow increments
+    and the full socket still closes.
+  |
+}
+
+full -> carve: "close handshake done"
+carve -> minisock: "lightweight stand-in inserted"
+carve -> closed: "tcp_done() retires the heavy socket"
+minisock -> gone: "timer expiry"
