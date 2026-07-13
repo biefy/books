@@ -187,8 +187,8 @@ If you key by TGID, four threads of the same process all hit the same map slot, 
 >
 > Why doesn't the kernel just give you a single "thread identifier" without ambiguity? Why does `bpf_get_current_pid_tgid` pack two fields into one return value?
 >
-> .  
-> .  
+> .\
+> .\
 > .
 >
 > **Answer:** because one helper call is cheaper than two. The kernel only ever exposed the combined helper `bpf_get_current_pid_tgid` (helper id 14) — there was never a separate `bpf_get_current_pid` or `bpf_get_current_tgid` in the UAPI. The single call returns both fields packed together, mirroring what `task_struct` itself carries: both `pid` (kernel meaning) and `tgid`. The body is literally `return (u64) task->tgid << 32 | task->pid;` (`kernel/bpf/helpers.c:225-233`). The naming confusion is historical — userspace called processes "PIDs" before threads existed.

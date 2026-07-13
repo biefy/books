@@ -183,8 +183,8 @@ Five constants you can return:
 >
 > You write an XDP program that counts packets and returns `XDP_PASS`. Compared to the same logic written as a tc-bpf ingress program, which is faster?
 >
-> .  
-> .  
+> .\
+> .\
 > .
 >
 > **Answer:** XDP, by roughly the skb-build cost (hundreds of ns) per packet. The tc-bpf path runs *after* skb allocation; XDP runs before. For pure observability that doesn't modify the packet, XDP wins. For complex forwarding decisions that benefit from skb metadata, tc may be the right choice — Day 17.

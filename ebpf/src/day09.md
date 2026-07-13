@@ -108,8 +108,8 @@ This is why every sample shares a wide common base in the flame graph: *every* `
 >
 > You write a tracer that captures kernel + user stacks for every `vfs_read`. Your test workload is `cat /etc/passwd` from bash. Roughly how many unique `stackid` values do you expect?
 >
-> .  
-> .  
+> .\
+> .\
 > .
 >
 > **Answer:** A small handful. `cat`'s call to `read()` always traverses roughly the same userspace path (libc `read` wrapper → syscall instruction). Bash's `cat` invocation similarly goes through the same path. The kernel side is also stable: `entry_SYSCALL_64` → `do_syscall_64` → `__x64_sys_read` → `ksys_read` → `vfs_read`. Maybe 1–3 unique stacks total. Now run on a complex workload (Firefox loading a page) and you'll see hundreds — that's the dedup paying off.

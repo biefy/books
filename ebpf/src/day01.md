@@ -77,8 +77,8 @@ The trampoline isn't per-program, either: there's **one trampoline per attach ta
 >
 > On x86_64, the compiler often reserves a **5-byte NOP slot** at the start of a traceable function. Why 5? What instruction size is that designed to fit?
 >
-> .  
-> .  
+> .\
+> .\
 > .
 >
 > **Answer:** a near relative `call` or `jmp` on x86_64 is 5 bytes — 1 opcode byte plus a 4-byte signed offset. The reservation is sized so ftrace can patch the site without moving the function body. Other architectures use their own patch-site shape.

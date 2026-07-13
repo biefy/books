@@ -257,8 +257,8 @@ This is the modern typed interface to the same tracepoint event. The kernel hand
 >
 > Which works? Which is preferred?
 >
-> .  
-> .  
+> .\
+> .\
 > .
 >
 > **Answers:** All three load. (1) and (2) work cleanly because `f` is `PTR_TO_BTF_ID` and the Verifier proves the chain. (1) is fastest: it's a *direct verified load* — the Verifier permits the deref as a plain BPF load (LDX) and records it in the kernel exception table for fault handling, so there's no helper call and nothing lowers to `bpf_probe_read_kernel`. (2) is safe-by-default (returns 0 on bad pointer) and is what (3) is the explicit form of — `BPF_CORE_READ` lowers to `bpf_probe_read_kernel`. **Prefer (1) for trusted chains, (2) for chains where any hop could be NULL.** (3) is rarely written by hand anymore.
