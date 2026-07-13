@@ -1,0 +1,19 @@
+direction: down
+
+title: |md
+  ## 套接字上的 epoll 与 io_uring 对比
+| {near: top-center; shape: text}
+
+epoll: "epoll（传统、广为人知）\n\nepoll_create1(0) → epfd\nepoll_ctl(epfd, EPOLL_CTL_ADD, sock_fd, ...)\nepoll_wait(epfd, events, max, timeout)\n\n边沿触发或水平触发。\nO(1) 注册；O(events) 等待。\n\nEPOLLEXCLUSIVE — 多个工作线程，\n每个事件只唤醒一个线程（无惊群）。" {
+  style.fill: "#fef3c7"
+}
+
+iouring: "io_uring（现代）\n\n以 SQE 提交 recv/send 操作。\n内核通过 CQE 报告完成事件。\n\n网络专用操作（自 5.x 起）：\n- IORING_OP_RECV / SEND\n- IORING_OP_RECVMSG / SENDMSG\n- IORING_OP_ACCEPT\n- IORING_OP_CONNECT\n- IORING_OP_RECVMSG_MULTISHOT (5.18+)\n\n零拷贝变体：\n- IORING_OP_SEND_ZC\n- IORING_OP_SENDMSG_ZC\n\n吞吐量更高，也更复杂。" {
+  style.fill: "#dcfce7"
+}
+
+verdict: "如何选择\n\nepoll：适合 80% 的场景。成熟、简单、性能好。\nio_uring：追求最高吞吐量、采用批处理式工作负载，\n并且能够承担复杂性成本时使用。" {
+  style.fill: "#fef3c7"
+}
+
+epoll -> iouring -> verdict

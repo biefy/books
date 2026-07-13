@@ -1,0 +1,37 @@
+digraph checksum_partial {
+    rankdir=TB;
+    labelloc=t;
+    label="CHECKSUM_PARTIAL：协议栈写入伪头部和；拆分时完成每个报文段";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // The single TX skb
+    skb [shape=record, style="filled", fillcolor="#dbeafe",
+         label="{一个 TX skb|ip_summed = CHECKSUM_PARTIAL|TCP check = 仅伪头部和\n（尚未计算载荷和）}"];
+
+    promise [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+             label="PARTIAL 承诺：\l\"校验和只完成了一半；无论谁拆分\l此 skb，都要完成每个报文段的校验和\l（针对各自载荷）。\"\l"];
+    skb -> promise [style=invis];
+
+    fork [shape=diamond, style="filled", fillcolor="#e9d5ff",
+          label="谁来完成\n拆分？"];
+    skb -> fork [style=bold];
+
+    // TSO branch
+    tso [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+         label="NIC (TSO)\n硬件完成每个\n报文段的校验和"];
+
+    // GSO branch
+    gso [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+         label="软件（GSO）\n__skb_gso_segment → skb_cow_head\n为每个报文段重新初始化 ->check"];
+
+    fork -> tso [label="硬件", color="#2563eb", style=bold];
+    fork -> gso [label="软件", color="#dc2626", style=bold];
+
+    // N finished segments
+    segs [shape=record, style="filled", fillcolor="#fef3c7",
+          label="{报文段 1\ncheck ✓|报文段 2\ncheck ✓|报文段 3\ncheck ✓| … |报文段 N\ncheck ✓}"];
+
+    tso -> segs [label="N 个线路数据包，每个校验和均已完成"];
+    gso -> segs;
+}

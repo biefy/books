@@ -1,0 +1,43 @@
+digraph ipv6_vs_ipv4_header {
+    rankdir=TB;
+    labelloc=t;
+    label="IPv4 标头与 IPv6 基础标头：移除了什么，以及 nexthdr 链";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    // 左侧：IPv4 标头
+    subgraph cluster_v4 {
+        label="IPv4 标头（长度可变：IHL 个标头字 + 选项）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        v4 [shape=record, style="filled", fillcolor="#dbeafe",
+            label="{ ver | IHL（已移除） | TOS | tot_len = 标头 + 载荷 }|{ id | flags/frag-off }|{ TTL | proto | 标头校验和（已移除） }|{ 4 字节源地址 }|{ 4 字节目的地址 }|{ 选项……（可变） }"];
+        v4note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9, fontname="Noto Sans CJK SC",
+                label="IPv6 中已移除 IHL + 标头校验和\l选项移至 exthdr 链\l完整性现在由 L4 处理（pseudo-hdr）\ltot_len 包含 20 字节标头\l"];
+    }
+
+    // 右侧：IPv6 基础标头
+    subgraph cluster_v6 {
+        label="IPv6 基础标头（始终恰好为 40 字节，内部没有选项）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        v6 [shape=record, style="filled", fillcolor="#dbeafe",
+            label="{ version=6 | traffic class | 20 位 flow label }|{ payload_len }|{ <nh> nexthdr | hop_limit (= TTL) }|{ 16 字节源地址 (saddr) }|{ 16 字节目的地址 (daddr) }"];
+        v6note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9, fontname="Noto Sans CJK SC",
+                label="payload_len = 40 字节之后的长度\l（不包含标头）\l没有 IHL，也没有校验和\l"];
+    }
+
+    // nexthdr 指向的扩展标头链
+    ext0 [shape=record, style="filled", fillcolor="#fef3c7",
+          label="<h> 扩展标头（例如 Hop-by-Hop=0）| <nh> nexthdr"];
+    ext1 [shape=record, style="filled", fillcolor="#fef3c7",
+          label="<h> 扩展标头（例如 Routing=43）| <nh> nexthdr"];
+    l4 [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+        label="L4 载荷\n(nexthdr=6 TCP, 17 UDP,\n58 ICMPv6, or NEXTHDR_NONE=59)"];
+
+    v6:nh -> ext0:h [style=bold, color="#d97706", label="nexthdr 指定\n第一个扩展标头"];
+    ext0:nh -> ext1:h [style=bold, color="#d97706"];
+    ext1:nh -> l4 [style=bold, color="#16a34a", label="终止于 L4"];
+
+    // 布局连接
+    v4 -> v6 [style=invis];
+}

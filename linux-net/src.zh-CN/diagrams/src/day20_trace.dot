@@ -1,0 +1,31 @@
+digraph trace {
+    rankdir=LR;
+    labelloc=t;
+    label="一个被转发的 SYN：四个 NF_HOOK 触发点，以及每站按优先级排列的钩子";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.5;
+
+    pre [shape=box, style="filled", fillcolor="#dbeafe",
+         label="1. PREROUTING\n(ip_rcv)\nconntrack -200: NEW\nDNAT -100: dst -> 10.0.0.5:8080\nfilter 0"];
+    route [shape=diamond, style="filled", fillcolor="#fef3c7",
+           label="2. 路由\n查找\n-> eth1"];
+    fwd [shape=box, style="filled", fillcolor="#dbeafe",
+         label="3. FORWARD\n(ip_forward)\nfilter 0: ACCEPT"];
+    post [shape=box, style="filled", fillcolor="#dbeafe",
+          label="4. POSTROUTING\n(ip_output)\nSNAT 100: src -> WAN_IP\n-> 从 eth1 离开"];
+
+    pre -> route [color="#94a3b8"];
+    route -> fwd [color="#94a3b8"];
+    fwd -> post [color="#94a3b8"];
+
+    ct [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+        label="第 1 步写入 conntrack 记录\l将转换映射到第 4 步，\l使 SNAT 反转 DNAT\l"];
+
+    pre -> ct [style=dashed, color="#16a34a", label="写入记录", constraint=false];
+    ct -> post [style=dashed, color="#16a34a", label="驱动 SNAT", constraint=false];
+
+    // 镜像弧线
+    pre -> post [style=dashed, color="#dc2626", constraint=false,
+                 label="conntrack 对称映射\nDNAT <-> SNAT"];
+}

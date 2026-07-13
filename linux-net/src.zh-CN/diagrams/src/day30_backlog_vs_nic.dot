@@ -1,0 +1,52 @@
+digraph backlog_vs_nic {
+    rankdir=TB;
+    labelloc=t;
+    label="两条 RX 入口：硬件 NIC NAPI 与 loopback backlog";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC", fontsize=10];
+
+    // LEFT: hardware NIC path
+    subgraph cluster_nic {
+        label="硬件 NIC（真实驱动、真实 NAPI）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        node [shape=box, style="filled", fillcolor="#dbeafe"];
+        irq    [label="硬件 IRQ"];
+        sched  [label="napi_schedule()"];
+        poll   [label="驱动 ->poll\n（例如 e1000_clean，\n排空 RX 环）"];
+        gro    [label="napi_gro_receive()"];
+        nrs_e  [shape=box, style="filled", fillcolor="#dcfce7",
+                label="gro_normal_list() ->\nnetif_receive_skb_list_internal()\n（批量列表路径）->\n__netif_receive_skb_core()"];
+        irq -> sched -> poll -> gro -> nrs_e;
+    }
+
+    // RIGHT: loopback backlog path
+    subgraph cluster_lo {
+        label="loopback / 任何非 NAPI 路径（软件 backlog）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#d97706";
+        node [shape=box, style="filled", fillcolor="#fef3c7"];
+        lxmit  [label="loopback_xmit()\n（无驱动、无 IRQ）"];
+        nrx    [label="__netif_rx()"];
+        enq    [label="enqueue_to_backlog()"];
+        q      [shape=box, style="filled", fillcolor="#fde68a",
+                label="sd->input_pkt_queue\n（每 CPU backlog 队列）"];
+        pbl    [label="process_backlog()\n（软件 NAPI poll）"];
+        nrs_i  [shape=box, style="filled", fillcolor="#dcfce7",
+                label="__netif_receive_skb()\n（内部符号，两个下划线）"];
+        lxmit -> nrx -> enq -> q -> pbl -> nrs_i;
+    }
+
+    // The skipped exported symbol: legacy scalar entry, on neither GRO path
+    skip [shape=box, style="filled", fillcolor="#fee2e2",
+          label="netif_receive_skb()\n导出的标量入口（旧式）\n由非 GRO 调用方使用\n（例如软件桥），\nbacklog 或 NIC GRO 均不使用\n=> -g netif_receive_skb 无输出"];
+    pbl -> skip [style=dashed, color="#dc2626", arrowhead=none,
+                 label="X  不是这里", fontcolor="#dc2626"];
+    nrs_e -> skip [style=dashed, color="#dc2626", arrowhead=none,
+                 label="X  不是这里", fontcolor="#dc2626"];
+
+    // Both converge note
+    conv [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="两者都会到达 tcp_v4_rcv\l=> graph -g tcp_v4_rcv\l在两条路径上都有效\l"];
+    nrs_e -> conv [style=dashed, color="#16a34a"];
+    nrs_i -> conv [style=dashed, color="#16a34a"];
+}

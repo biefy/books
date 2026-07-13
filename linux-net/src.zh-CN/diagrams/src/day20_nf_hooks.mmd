@@ -1,0 +1,21 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, PingFang SC, sans-serif"}}}%%
+flowchart TD
+    PreRouting["PRE_ROUTING<br/><b>作用：</b>首部验证后的第一个 IP 策略点<br/><b>为何进入下一步：</b>路由必须看到所有 DNAT 结果<br/><b>典型工作：</b>conntrack、分片重组、DNAT"]
+    Routing{"路由查找<br/><b>作用：</b>决定本地交付还是转发<br/><b>状态：</b>已选择 dst->input"}
+    LocalIn["LOCAL_IN / INPUT<br/><b>作用：</b>对发往本机的数据包执行最终策略<br/><b>为何进入下一步：</b>接受的数据包可以到达套接字"]
+    Forward["FORWARD<br/><b>作用：</b>路由查找后仅对转发流量进行过滤<br/><b>为何进入下一步：</b>接受的数据包继续进入输出路径"]
+    LocalOut["LOCAL_OUT / OUTPUT<br/><b>作用：</b>对本地生成的数据包执行策略<br/><b>为何进入下一步：</b>数据包仍需最终的输出路由/NAT"]
+    PostRouting["POST_ROUTING<br/><b>作用：</b>TX 前最后一个策略/NAT 点<br/><b>为何进入下一步：</b>接受的数据包已可进入 qdisc/dev 队列<br/><b>典型工作：</b>SNAT/masquerade"]
+
+    Stack["交付到本地套接字<br/><b>状态：</b>传输层收到 skb"]
+    Tx["设备输出路径<br/><b>状态：</b>skb 离开 IP 协议栈"]
+
+    PreRouting --> Routing
+    Routing -->|目的地是本机| LocalIn --> Stack
+    Routing -->|目的地在其他位置| Forward --> PostRouting --> Tx
+    LocalOut --> PostRouting
+
+    classDef nf fill:#fef3c7,stroke:#d97706
+    classDef path fill:#dcfce7,stroke:#16a34a
+    class PreRouting,LocalIn,Forward,LocalOut,PostRouting nf
+    class Stack,Tx,Routing path

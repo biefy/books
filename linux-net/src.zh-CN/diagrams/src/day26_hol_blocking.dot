@@ -1,0 +1,52 @@
+digraph hol_blocking {
+    rankdir=TB;
+    labelloc=t;
+    label="队头阻塞发生在 msk 重组红黑树中——缓冲区需求为 BDP x N";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC", fontsize=10];
+
+    // The two subflows feeding the receiver
+    subgraph cluster_paths {
+        label="向同一个 msk 接收端提供数据的两条子流";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        slow [shape=box, style="filled", fillcolor="#fee2e2",
+              label="慢速子流（高 RTT）\n低 DSN 字节 100..199\n仍在传输途中"];
+        fast [shape=box, style="filled", fillcolor="#dbeafe",
+              label="快速子流（低 RTT）\n高 DSN 字节 200..499\n已经到达"];
+    }
+
+    // The msk out-of-order reassembly rbtree
+    subgraph cluster_ooo {
+        label="msk 级 out_of_order_queue——按 DSN 排序的红黑树（位于所有子流之上）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#7c3aed";
+        node [shape=record, style="filled", fillcolor="#fef3c7"];
+        s2 [label="{skb|map_seq=200|end_seq=299}"];
+        s3 [label="{skb|map_seq=300|end_seq=399}"];
+        s4 [label="{skb|map_seq=400|end_seq=499}"];
+        s2 -> s3 -> s4 [color="#7c3aed", arrowhead=none, label="按 DSN 的红黑树顺序"];
+        last [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+              label="ooo_last_skb -> 快速路径合并\l当新数据紧随最后排队的 skb 时使用\l（跳过 O(log N) 查找）。\l"];
+        s4 -> last [style=dashed, color="#16a34a"];
+    }
+
+    fast -> s2 [label="存入高 DSN skb", color="#2563eb", style=bold];
+
+    // The delivery cursor blocked at the gap
+    cursor [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+            label="DSN 交付游标\n下一个所需位置 = DSN 100\n缺口：应用程序必须按 DSN 顺序获得字节"];
+    slow -> cursor [label="游标等待这些字节", color="#dc2626", style=bold];
+
+    hol [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+         label="队头阻塞（跨子流）：\l在慢速路径的低 DSN 字节 100..199 填补缺口前，\l队列中的高 DSN skb 无法交付。\l"];
+    cursor -> hol [style=dashed, color="#dc2626", constraint=false];
+
+    // Receive buffer filling toward limit
+    rmem [shape=record, style="filled", fillcolor="#fef3c7",
+          label="{接收缓冲区（tcp_rmem max）|<f> 持续填充：每条子流最多可容纳其自身 BDP 的在途数据}"];
+    s4 -> rmem [label="等待期间占用 rcvbuf", color="#d97706"];
+
+    note_n [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+            label="普通 TCP：一个 out_of_order_queue，容量按一条路径的 BDP 设置。\lMPTCP：队列位于 N 条子流之上的 msk 层，因此\l需求成倍增加 -> 接收缓冲区 >= BDP x N。\l过小 -> 停顿/丢包，浪费路径多样性。\l"];
+    rmem:f -> note_n [style=dashed, color="#7c3aed", constraint=false];
+}

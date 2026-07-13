@@ -1,0 +1,66 @@
+digraph lctrie {
+    rankdir=TB;
+    labelloc=t;
+    label="LC-trie：两种压缩将 32 层二叉 trie 缩短到约 5-10 跳";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=9];
+    edge [fontname="Noto Sans CJK SC"];
+
+    // 面板 1：朴素二叉 trie
+    subgraph cluster_naive {
+        label="1. 朴素二叉 trie\n每层一位，最多 32 跳";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#dc2626";
+        n0 [shape=circle, style="filled", fillcolor="#dbeafe", width=0.35, fixedsize=true, label="b0"];
+        n1 [shape=circle, style="filled", fillcolor="#dbeafe", width=0.35, fixedsize=true, label="b1"];
+        n2 [shape=circle, style="filled", fillcolor="#dbeafe", width=0.35, fixedsize=true, label="b2"];
+        ndots [shape=plaintext, label="..."];
+        n31 [shape=circle, style="filled", fillcolor="#fef3c7", width=0.45, fixedsize=true, label="b31"];
+        n0 -> n1 [label="0/1", fontsize=8, color="#94a3b8"];
+        n1 -> n2 [color="#94a3b8"];
+        n2 -> ndots [color="#94a3b8"];
+        ndots -> n31 [color="#94a3b8"];
+        warn1 [shape=note, style="filled", fillcolor="#fee2e2", fontsize=8, fontname="Noto Sans CJK SC",
+               label="/32 主机路由位于第 32 层深处\l= 32 次解引用\l"];
+        n31 -> warn1 [style=invis];
+    }
+
+    // 面板 2：路径压缩
+    subgraph cluster_path {
+        label="2. 路径压缩\n折叠单子节点链";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#d97706";
+        pa [shape=circle, style="filled", fillcolor="#dbeafe", width=0.35, fixedsize=true, label="b0"];
+        skip [shape=box, style="filled", fillcolor="#dcfce7",
+              label="skip-node\npos 向前跳转\n（跳过 12 位）"];
+        pb [shape=circle, style="filled", fillcolor="#fef3c7", width=0.5, fixedsize=true, label="叶节点"];
+        pa -> skip [color="#16a34a"];
+        skip -> pb [color="#16a34a"];
+        note2 [shape=note, style="filled", fillcolor="#dcfce7", fontsize=8, fontname="Noto Sans CJK SC",
+               label="key_vector.pos 记录\l要跳过的位数\l"];
+        skip -> note2 [style=invis];
+    }
+
+    // 面板 3：层级压缩
+    subgraph cluster_level {
+        label="3. 层级压缩\n多位扇出，约 5-10 跳";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+        wide [shape=box, style="filled", fillcolor="#e9d5ff",
+              label="一个 4 位 tnode\nbits = 4：最多 16 个子节点\n一次访问解析 4 位"];
+        c0 [shape=circle, style="filled", fillcolor="#fef3c7", width=0.35, fixedsize=true, label="c0"];
+        c1 [shape=circle, style="filled", fillcolor="#fef3c7", width=0.35, fixedsize=true, label="c1"];
+        c2 [shape=circle, style="filled", fillcolor="#fef3c7", width=0.35, fixedsize=true, label="..."];
+        c15 [shape=circle, style="filled", fillcolor="#fef3c7", width=0.4, fixedsize=true, label="c15"];
+        wide -> c0; wide -> c1; wide -> c2 [style=dashed, color="#94a3b8"]; wide -> c15;
+        note3 [shape=note, style="filled", fillcolor="#dcfce7", fontsize=8, fontname="Noto Sans CJK SC",
+               label="key_vector.bits = 4\l包含 16 个子节点指针的\lDECLARE_FLEX_ARRAY\l"];
+        wide -> note3 [style=invis];
+    }
+
+    // 节点结构图例（保留在底部）
+    legend [shape=box, style="filled", fillcolor="#dbeafe", fontsize=9,
+            label="struct key_vector\npos = 接受检测的位（路径压缩）\nbits = 每步消耗的位数（层级压缩）\nbits == 0：叶节点；bits > 0：tnode"];
+
+    // 面板从左到右排列，图例位于下方
+    warn1 -> pa [style=invis, weight=100];
+    note2 -> wide [style=invis, weight=100];
+    note3 -> legend [style=invis, weight=100];
+}

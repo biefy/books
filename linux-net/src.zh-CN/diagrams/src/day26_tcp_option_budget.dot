@@ -1,0 +1,35 @@
+digraph tcp_option_budget {
+    rankdir=TB;
+    labelloc=t;
+    label="TCP 报文段的选项区只有 40 字节的硬性共享预算——MPTCP 也要占用其中空间";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC", fontsize=10];
+
+    // The full segment laid out top to bottom
+    header [shape=record, style="filled", fillcolor="#dbeafe",
+            label="{20 字节固定 TCP 头部|{ports|seq|ack_seq|<doff> doff:4（以 32 位字为单位的头部长度）|flags / window / checksum}}"];
+
+    note_doff [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+               label="doff 仅有 4 位 -> 最大 15 个字 = 60 字节头部。\l60 - 20 = 40 字节选项空间，不能更多。\l"];
+    header:doff -> note_doff [style=dashed, color="#dc2626", constraint=false];
+
+    // The 40-byte budget bar: competing options as one record
+    budget [shape=record, style="filled", fillcolor="#fef3c7",
+            label="{40 字节选项区（MAX_TCP_OPTION_SPACE = 40）|{<mptcp> mptcp DSS\nKind=30 | Len | sub=DSS | data_seq/subseq/len|<ts> Timestamp\n（10 字节）|<sack> SACK 块\n（最多约 34 字节）|<pad> NOP / EOL\n填充}}"];
+
+    payload [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+             label="有效载荷字节\n（doff 告诉接收端其起始位置）"];
+
+    header -> budget [label="选项紧随固定头部", color="#2563eb"];
+    budget -> payload [label="有效载荷紧随选项", color="#16a34a"];
+
+    // Highlight the competition
+    note_budget [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+                 label="DSS 每占用一个字节，Timestamp 或 SACK 就少一个可用字节。\l这种稀缺性正是 DSS 被紧凑编码为\l{data_seq, subflow_seq, data_len} 的原因。\l"];
+    budget:mptcp -> note_budget [style=dashed, color="#7c3aed", constraint=false];
+
+    note_kind [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+               label="所有 MPTCP 共用一个 Kind：TCPOPT_MPTCP = 30。\l4 位 subtype 半字节选择 MP_CAPABLE / MP_JOIN / DSS / ADD_ADDR。\l"];
+    budget:mptcp -> note_kind [style=invis];
+}

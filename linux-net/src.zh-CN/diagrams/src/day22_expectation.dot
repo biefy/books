@@ -1,0 +1,44 @@
+digraph expectation {
+    rankdir=TB;
+    labelloc=t;
+    label="通过 expectation 识别 RELATED：如何识别 FTP 主动模式的数据连接";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // Step 1: the master control connection
+    master [shape=box, style="filled", fillcolor="#dbeafe",
+            label="1. FTP 控制连接（master nf_conn）\nclient:rand -> server:21\n已被跟踪且为 ESTABLISHED"];
+
+    // Step 2: helper parses control stream
+    helper [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="2. nf_conntrack_ftp 辅助模块\n解析 PASV 应答，\n预测数据元组"];
+
+    // Step 3: expectation registered into expect hash
+    expect [shape=record, style="filled", fillcolor="#fef3c7",
+            label="{ 3. struct nf_conntrack_expect | tuple = client 到 server:dataport | master = 控制连接 }"];
+
+    expecthash [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+                label="expectation 哈希\n（待处理元组）"];
+
+    // Step 4: data SYN arrives and matches
+    datasyn [shape=box, style="filled", fillcolor="#fef3c7",
+             label="4. 数据 SYN 到达\nclient -> server:dataport\n元组与 expectation 匹配"];
+
+    // Step 5: new conn born RELATED with master set
+    newconn [shape=box, style="filled", fillcolor="#dbeafe",
+             label="5. 创建新的数据 nf_conn\n->master = 控制连接\n数据包标记为 IP_CT_RELATED"];
+
+    master -> helper [color="#7c3aed", style=bold, label="读取 L7 载荷"];
+    helper -> expect [color="#7c3aed", label="注册"];
+    expect -> expecthash [color="#d97706"];
+    datasyn -> expecthash [style=bold, color="#16a34a", label="查找"];
+    expecthash -> newconn [style=bold, color="#16a34a", label="匹配 -> 创建"];
+
+    // the master backlink
+    newconn -> master [style=dashed, color="#2563eb", constraint=false,
+                       label="->master 链接\n= “相关”"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="数据流的元组与控制流不同，因此在无状态视角下，\l它看起来像一个未经请求的入站 NEW 流。正是 expectation\l让 'ct state related accept' 能够放行它。\l从 v7.1 起，辅助模块需显式启用（nft ct helper）。\l"];
+    newconn -> note [style=invis];
+}

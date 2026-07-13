@@ -1,0 +1,47 @@
+digraph waitqueue_mechanism {
+    rankdir=TB;
+    labelloc=t;
+    label="一个套接字等待队列，两类等待者——通过 .func 间接调用";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // 唤醒路径（顶部一行，从左到右）
+    skb [shape=box, style="filled", fillcolor="#fef3c7",
+         label="skb 入队到\nsk->sk_receive_queue"];
+    ready [shape=box, style="filled", fillcolor="#e9d5ff",
+           label="sk->sk_data_ready(sk)\n= sock_def_readable()"];
+    wakeup [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="wake_up_interruptible_sync_poll(\n  &wq->wait, EPOLLIN | ...)\n遍历链表，调用每个 .func"];
+
+    skb -> ready [style=bold, color="#7c3aed", label="协议层"];
+    ready -> wakeup [style=bold, color="#7c3aed"];
+
+    // 等待队列头及其条目
+    subgraph cluster_wq {
+        label="套接字等待队列（sk_sleep(sk)）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        head [shape=box, style="filled", fillcolor="#dbeafe",
+              label="wait_queue_head_t\n（等待者链表）"];
+        e1 [shape=record, style="filled", fillcolor="#dbeafe",
+            label="{wait_queue_entry|private = task|.func = woken_wake_function}"];
+        e2 [shape=record, style="filled", fillcolor="#dcfce7",
+            label="{wait_queue_entry|base = epitem|.func = ep_poll_callback}"];
+        head -> e1 [arrowhead=none, color="#94a3b8"];
+        head -> e2 [arrowhead=none, color="#94a3b8"];
+    }
+
+    wakeup -> head [style=bold, color="#7c3aed", label="对每个条目：\n调用 .func(key=EPOLLIN)"];
+
+    // 每个 .func 的结果
+    o1 [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+        label="阻塞式 recv()：\n唤醒停驻的任务 →\nrecv() 返回数据"];
+    o2 [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+        label="epoll：\n将 epitem 追加到 rdllist，\n唤醒 epoll_wait 休眠者"];
+
+    e1 -> o1 [label="普通休眠者"];
+    e2 -> o2 [style=bold, color="#16a34a", label="epoll 的自定义 .func"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="相同的队列，相同的唤醒遍历。\lepoll 带来的唯一差异：\l注册了哪个 .func。\l"];
+    o2 -> note [style=invis];
+}

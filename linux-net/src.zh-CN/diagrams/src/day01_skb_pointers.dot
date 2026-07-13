@@ -1,0 +1,16 @@
+digraph G {
+    rankdir=TB;
+    node [shape=box, style="rounded,filled", fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    skb [label="skb（描述符）\n\nhead\ndata  ->\ntail  ->\nend   ->", fillcolor="#dbeafe"];
+
+    buf [label="线性缓冲区\n\n[ 头部空间 | 数据区 | 尾部空间 ]\nhead ... data ... tail ... end", fillcolor="#fef3c7"];
+
+    shinfo [label="skb_shared_info（位于末尾）\n\nnr_frags\nfrags[].(page, off, sz)\nfrag_list（链）", fillcolor="#dcfce7"];
+
+    skb -> buf [label="head, data, tail, end\n指向缓冲区内"];
+    buf -> shinfo [label="end -> shinfo"];
+
+    note [shape=note, label="不变量：\nhead <= data <= tail <= end\nlen = (tail - data) + sum(frags)\ndata_len = sum(frags)\ndata_len == 0 时仅含线性区", fillcolor="#fef3c7"];
+    skb -> note [style=dashed];
+}

@@ -1,0 +1,58 @@
+digraph three_rings {
+    rankdir=TB;
+    labelloc=t;
+    label="io_uring：跨用户/内核边界共享的三个 mmap 区域";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC", fontsize=10];
+    compound=true;
+
+    // ---- USERSPACE side ----
+    subgraph cluster_user {
+        label="用户空间";
+        fontname="Noto Sans CJK SC"; fontsize=12; style="rounded"; color="#2563eb";
+        u_prod [shape=box, style="filled", fillcolor="#e9d5ff",
+                label="生产者：填充 SQE，\n递增 SQ tail"];
+        u_cons [shape=box, style="filled", fillcolor="#e9d5ff",
+                label="消费者：读取 CQE，\n递增 CQ head"];
+    }
+
+    // ---- SHARED memory regions ----
+    subgraph cluster_shared {
+        label="共享内存（在固定偏移处 mmap——双方均可见）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+
+        sqring [shape=record, style="filled", fillcolor="#dbeafe",
+                label="{SQ 环（OFF_SQ_RING 0x0）|{tail（用户）|head（内核）}|索引数组 → SQE}"];
+        sqes   [shape=record, style="filled", fillcolor="#fef3c7",
+                label="{SQE 数组（OFF_SQES 0x10000000）|opcode|fd|buf|len}"];
+        cqring [shape=record, style="filled", fillcolor="#dcfce7",
+                label="{CQ 环（OFF_CQ_RING 0x8000000）|{tail（内核）|head（用户）}|CQE 数组：res、flags}"];
+
+        sqring:e -> sqes [color="#94a3b8", label="索引"];
+    }
+
+    // ---- KERNEL side ----
+    subgraph cluster_kernel {
+        label="内核";
+        fontname="Noto Sans CJK SC"; fontsize=12; style="rounded"; color="#16a34a";
+        k_cons [shape=box, style="filled", fillcolor="#dcfce7",
+                label="消费者：读取 SQE，\n递增 SQ head"];
+        k_prod [shape=box, style="filled", fillcolor="#dcfce7",
+                label="生产者：写入 CQE，\n递增 CQ tail"];
+    }
+
+    // SQ flow: user produces, kernel consumes
+    u_prod -> sqring [color="#2563eb", style=bold, label="存储 SQE\n+ tail++"];
+    sqes  -> k_cons [color="#16a34a", style=bold, label="读取操作"];
+
+    // CQ flow: kernel produces, user consumes
+    k_prod -> cqring [color="#16a34a", style=bold, label="提交 CQE\n+ tail++"];
+    cqring -> u_cons [color="#2563eb", style=bold, label="读取结果\n+ head++"];
+
+    // doorbell syscall (optional under SQPOLL)
+    doorbell [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+              label="io_uring_enter(2)\n“门铃”系统调用：\n通知有新 SQE\n每批一次"];
+    u_prod -> doorbell [style=dashed, color="#dc2626", arrowhead=none];
+    doorbell -> k_cons [style=dashed, color="#dc2626", label="（使用 IORING_SETUP_SQPOLL 时跳过——\n内核线程轮询 tail）"];
+}

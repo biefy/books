@@ -1,0 +1,68 @@
+direction: down
+
+title: |md
+  ## ECMP 与多路径
+| {near: top-center; shape: text}
+
+setup: "路由有多个下一跳" {
+  style.fill: "#dbeafe"
+  s_body: |md
+    ```
+    ip route add default \
+     nexthop via 192.168.1.1 weight 1 \
+     nexthop via 192.168.2.1 weight 1
+    ```
+
+    **作用：**一个 FIB 结果
+    携带多个可用的
+    下一跳候选项。
+  |
+}
+
+hash: "计算多路径哈希" {
+  style.fill: "#fef3c7"
+  h_body: |md
+    **原因：**为每个流选择一个下一跳，
+    避免数据包在不同路径间
+    发生乱序。
+
+    默认策略 **0**：
+    对源 IP + 目的 IP 进行哈希。
+
+    策略 **1**：加入 L4
+    端口/proto，使同一
+    端点对之间的分布更均匀。
+  |
+}
+
+select: "选择下一跳" {
+  style.fill: "#fef3c7"
+  sel_body: |md
+    **作用：**将哈希映射到
+    加权下一跳集合。
+
+    **下一步原因：**选中的
+    下一跳提供输出设备、
+    网关、MTU 以及
+    邻居查找键。
+
+    **状态：**skb/rtable
+    已有一条选定路径。
+  |
+}
+
+resilient: "弹性哈希" {
+  style.fill: "#dcfce7"
+  rh_body: |md
+    **问题：**添加/移除下一跳时，
+    普通取模结果会改变，
+    因而大量流会迁移。
+
+    **修复：**桶表会
+    记住分配关系；
+    移除一个下一跳只会
+    重新映射它的桶。
+  |
+}
+
+setup -> hash -> select -> resilient

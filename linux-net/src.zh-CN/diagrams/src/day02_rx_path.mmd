@@ -1,0 +1,29 @@
+%%{init: {'themeVariables': {'fontFamily': 'Noto Sans CJK SC, sans-serif'}}}%%
+flowchart TD
+    HW["<b>1. NIC + NAPI 批处理</b><br/>DMA 填充 RX 描述符，IRQ 调度 NAPI<br/><b>交接：</b> 轮询预算将工作移出硬 IRQ<br/><b>状态：</b> 驱动拥有数据包缓冲区"]
+
+    XDP["<b>2. 驱动轮询 + 原生 XDP</b><br/>驱动回收描述符，并在分配 skb 前运行 XDP<br/><b>交接：</b> 只有 XDP_PASS 进入普通协议栈<br/><b>状态：</b> 数据包可能被丢弃、重定向、发送或放行"]
+
+    SKB["<b>3. skb + 协议设置</b><br/>build_skb/napi_build_skb、eth_type_trans、可选 GRO<br/><b>交接：</b> 通用协议栈需要 skb 元数据和协议键<br/><b>状态：</b> skb 包含 L2/L3 偏移、协议及可能的 GRO 聚合包"]
+
+    CORE["<b>4. RX 核心策略</b><br/>抓包点、VLAN 处理、tc 入站、packet_type 分派<br/><b>交接：</b> IPv4/IPv6 处理函数接管 L3 解析<br/><b>状态：</b> skb 由协议栈拥有，处理函数已选定"]
+
+    IP["<b>5. IP + Netfilter</b><br/>头部验证、PREROUTING、路由查找<br/><b>交接：</b> ACCEPT 与 dst 共同决定本地交付或转发<br/><b>状态：</b> skb 可能被改写、丢弃、排队或路由"]
+
+    OUT["<b>6. 本地或转发路径</b><br/>传输层套接字查找或转发输出路径<br/><b>交接：</b> L4 接管本地载荷，TX 路径接管转发 skb<br/><b>状态：</b> 字节到达 TCP/UDP 或离开 RX 路径"]
+
+    DONE["<b>XDP 非 PASS</b><br/>普通 skb 路径终止"]
+
+    HW --> XDP --> SKB --> CORE --> IP --> OUT
+    XDP -. DROP / TX / REDIRECT .-> DONE
+
+    classDef hw fill:#fee2e2,stroke:#dc2626,stroke-width:2px
+    classDef napi fill:#fef3c7,stroke:#d97706,stroke-width:2px
+    classDef stack fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+    classDef ip fill:#dcfce7,stroke:#16a34a,stroke-width:2px
+    classDef exit fill:#f3f4f6,stroke:#6b7280,stroke-width:2px
+    class HW hw
+    class XDP,SKB napi
+    class CORE stack
+    class IP,OUT ip
+    class DONE exit

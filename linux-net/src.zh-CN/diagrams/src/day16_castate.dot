@@ -1,0 +1,30 @@
+digraph castate {
+    rankdir=LR;
+    labelloc=t;
+    label="ca_state 状态机（丢包/恢复）——与连接状态正交";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    node [shape=box, style="filled", fillcolor="#dbeafe"];
+
+    open [label="TCP_CA_Open (0)\n正常：无丢包，\n无 ECN 标记", fillcolor="#dcfce7"];
+
+    disorder [label="TCP_CA_Disorder (1)\n少量 dup-ACK / SACK\n情况似乎异常"];
+    cwr      [label="TCP_CA_CWR (2)\n平缓减小 cwnd\n（例如 ECN 标记）", fillcolor="#fef3c7"];
+    recovery [label="TCP_CA_Recovery (3)\n快速重传\n（根据 dup-ACK\n推断丢包）", fillcolor="#fef3c7"];
+    loss     [label="TCP_CA_Loss (4)\nRTO 触发：\n完整重传", fillcolor="#fee2e2"];
+
+    open -> disorder [label="dup-ACK\nset_state()"];
+    open -> cwr      [label="ECN 标记\nset_state()"];
+    open -> recovery [label="快速重传\nset_state()+ssthresh()", color="#dc2626"];
+    open -> loss     [label="RTO 触发\nset_state()+ssthresh()", color="#dc2626"];
+
+    disorder -> open [style=dashed, label="恢复正常"];
+    cwr      -> open [style=dashed, label="CWR 完成"];
+    recovery -> open [style=dashed, label="恢复完成"];
+    loss     -> open [style=dashed, label="已恢复"];
+
+    note [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+          label="与第 15 天的连接状态机正交。\l套接字会保持 ESTABLISHED 数小时，而 ca_state\l在 Open / Recovery / Loss 之间循环。进入 Recovery/Loss\l时会调用 ssthresh()——正是在此时削减 cwnd。\l"];
+    loss -> note [style=invis];
+}

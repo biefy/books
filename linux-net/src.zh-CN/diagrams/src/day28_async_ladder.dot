@@ -1,0 +1,51 @@
+digraph async_ladder {
+    rankdir=TB;
+    labelloc=t;
+    label="一个 recv SQE 的三级异步阶梯";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC", fontsize=10];
+
+    sqe [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+         label="已发出 recv SQE"];
+
+    // Tier 1
+    t1 [shape=box, style="filled", fillcolor="#dbeafe",
+        label="第 1 级——内联尝试\n使用 MSG_DONTWAIT 执行 recv\n(io_send/recv, net.c:667)"];
+    ready [shape=diamond, style="filled", fillcolor="#fef3c7",
+           label="数据就绪？"];
+    cqe1 [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+          label="内联提交 CQE\n（无后台工作——\n开销较低的常见情况）"];
+
+    // Tier 2
+    t2 [shape=box, style="filled", fillcolor="#dbeafe",
+        label="第 2 级——挂载 poll 等待者\nio_arm_poll_handler()\n(poll.c:705)"];
+    wq [shape=box, style="filled", fillcolor="#dcfce7",
+        label="将等待者挂到\nsk_sleep(sk) 等待队列\n（与第 19 天阻塞式 recv / epoll\n使用同一队列）"];
+    wake [shape=diamond, style="filled", fillcolor="#fef3c7",
+          label="套接字\n可读？"];
+    cqe2 [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+          label="poll 回调通过 task work\n重新发起操作 → 提交 CQE"];
+
+    // Tier 3
+    t3 [shape=box, style="filled", fillcolor="#fee2e2",
+        label="第 3 级——转交 io-wq\n（IO_APOLL_ABORTED：\n文件没有 ->poll()）"];
+    worker [shape=box, style="filled", fillcolor="#fee2e2",
+            label="io_wq_enqueue (io_uring.c:432)\n真正的工作线程代表你阻塞\n→ 提交 CQE\n（高开销层级）"];
+
+    sqe -> t1;
+    t1 -> ready;
+    ready -> cqe1 [label="是", color="#16a34a", style=bold];
+    ready -> t2  [label="否（-EAGAIN）", color="#d97706"];
+
+    t2 -> wq;
+    wq -> wake;
+    wake -> cqe2 [label="是", color="#16a34a", style=bold];
+    t2 -> t3 [label="无法 poll", color="#dc2626"];
+
+    t3 -> worker;
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="multishot recv 永久驻留在第 2 级：\lpoll 等待者保持挂载，每次数据到达时都会\l再次触发带 F_MORE 标记的 CQE。\l"];
+    wq -> note [style=dashed, color="#16a34a", arrowhead=none, constraint=false];
+}

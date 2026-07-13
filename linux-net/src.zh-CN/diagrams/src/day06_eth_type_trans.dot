@@ -1,0 +1,29 @@
+digraph eth_type_trans {
+  rankdir=TB;
+  bgcolor="white";
+  labelloc="t";
+  label="RX 路径中的以太网";
+  fontname="Noto Sans CJK SC";
+  fontsize=18;
+  node [shape=box, style=filled, fontname="Noto Sans Mono CJK SC", fontsize=11];
+  edge [fontname="Noto Sans CJK SC"];
+
+  driver [label="驱动程序接收字节，\n将 skb->len 设置为线路长度", fillcolor="#dbeafe"];
+
+  ett [fillcolor="#fef3c7", fontsize=10, label="\
+eth_type_trans(skb, dev)   net/ethernet/eth.c:155\l\
+\l\
+1. skb_reset_mac_header(skb) — 记录 mac_header 偏移量\l\
+2. eth_skb_pull_mac(skb)：读取 eth = (struct ethhdr *)skb->data\l\
+   并执行 skb_pull(skb, ETH_HLEN) — 一个辅助函数完成读取并前移 14 字节\l\
+3. eth_skb_pkt_type(skb, dev) — 设置 pkt_type（使用 eth_hdr/mac_header）：\l\
+   - PACKET_BROADCAST（目的地址为 FF:FF:FF:FF:FF:FF）\l\
+   - PACKET_MULTICAST（组播 MAC）\l\
+   - PACKET_HOST（与 dev_addr 匹配）\l\
+   - PACKET_OTHERHOST（其他主机的 MAC）\l\
+4. 若 eth_proto_is_802_3 成立则返回 eth->h_proto；否则进入 DSA/802.3 回退路径\l"];
+
+  after [label="skb->data 现在位于 L3 标头。\n驱动程序将返回值赋给 skb->protocol\n(ETH_P_IP / ETH_P_IPV6 / ETH_P_8021Q / ...)", fillcolor="#dcfce7"];
+
+  driver -> ett -> after;
+}

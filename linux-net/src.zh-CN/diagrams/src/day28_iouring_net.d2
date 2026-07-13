@@ -1,0 +1,54 @@
+direction: down
+
+title: |md
+  ## io_uring 套接字操作
+| {near: top-center; shape: text}
+
+basic: "基本操作" {
+  style.fill: "#dbeafe"
+  b_body: |md
+    SQE（提交队列条目）→ 内核
+    CQE（完成队列条目）→ 用户空间
+
+    IORING_OP_ 操作：
+    - RECV / SEND
+    - RECVMSG / SENDMSG
+    - ACCEPT
+    - CONNECT
+    - CLOSE
+  |
+}
+
+advanced: "现代功能" {
+  style.fill: "#dcfce7"
+  a_body: |md
+    RECVMSG_MULTISHOT（5.18+）
+    一次提交，多个 CQE
+
+    SEND_ZC / SENDMSG_ZC（6.0+）
+    零拷贝（ZC）发送
+
+    Provided buffers（5.19+）
+    内核在 recv 时选择 buf
+
+    Registered buffers（5.0+）
+    预先固定，零拷贝
+  |
+}
+
+vs: "与 epoll 对比" {
+  style.fill: "#fef3c7"
+  v_body: |md
+    epoll：“就绪时告诉我，
+    我来执行系统调用”
+
+    io_uring：“替我执行此操作，
+    完成时告诉我”
+
+    io_uring 更擅长批处理；
+    高 QPS 下系统调用率更低。
+    epoll 更简单。
+  |
+}
+
+basic -> advanced -> vs

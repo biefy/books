@@ -1,0 +1,75 @@
+direction: down
+
+title: |md
+  ## struct sock
+  套接字描述符
+| {near: top-center; shape: text}
+
+sock: "struct sock" {
+  style.fill: "#dbeafe"
+  s_body: |md
+    include/net/sock.h
+
+    所有套接字的基类型。
+
+    公共字段：
+    - sk_family
+      - AF_INET, AF_INET6
+      - AF_UNIX, ...
+    - sk_type
+      - SOCK_STREAM
+      - SOCK_DGRAM, ...
+    - sk_protocol
+      - IPPROTO_TCP, ...
+    - sk_state
+      - TCP_ESTABLISHED, ...
+    - sk_buffer 队列
+      - sk_receive_queue
+      - sk_write_queue
+    - sk_rcvbuf, sk_sndbuf
+      - 每套接字限制
+    - sk_filter（BPF 过滤器）
+    - sk_lock（每套接字锁）
+    - sk_prot
+      - 每个协议的操作表
+  |
+}
+
+protos: "特化类型" {
+  style.fill: "#fef3c7"
+  p_body: |md
+    每个协议都将 struct sock
+    嵌入为第一个字段：
+    - struct inet_sock
+      - IPv4 / IPv6 映射
+    - struct
+      inet_connection_sock
+      - request_sock
+      - icsk_ack, icsk_rto
+    - struct tcp_sock
+      - snd_cwnd, snd_wnd
+      - srtt_us, rcv_nxt
+      - write_seq, ...
+    - struct udp_sock
+      - 更小、更简单
+
+    转换：tp = tcp_sk(sk);
+  |
+}
+
+ops: "sk_prot 操作" {
+  style.fill: "#dcfce7"
+  o_body: |md
+    每个协议一张函数指针表：
+    - sendmsg, recvmsg
+    - bind, listen, accept
+    - connect, disconnect
+    - close, shutdown
+    - get_port, hash, unhash
+
+    为套接字 API 提供多态。
+  |
+}
+
+sock -> protos: "嵌入"
+protos -> ops: "sk->sk_prot"

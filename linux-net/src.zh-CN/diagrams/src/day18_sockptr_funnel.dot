@@ -1,0 +1,53 @@
+digraph sockptr_funnel {
+    rankdir=TB;
+    labelloc=t;
+    label="sockptr_t：一个函数体，两类调用者";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // 两类调用者
+    subgraph cluster_user {
+        label="用户空间系统调用路径";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        usercall [shape=box, style="filled", fillcolor="#dbeafe",
+                  label="setsockopt(fd, ...)\n__sys_setsockopt"];
+        userwrap [shape=box, style="filled", fillcolor="#fef3c7",
+                  label="USER_SOCKPTR(user_optval)\nis_kernel = 0\n(net/socket.c:2396)"];
+        usercall -> userwrap;
+    }
+
+    subgraph cluster_bpf {
+        label="BPF 内核侧路径";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#7c3aed";
+        bpfcall [shape=box, style="filled", fillcolor="#e9d5ff",
+                 label="sock_ops BPF 程序\nbpf_setsockopt(...)"];
+        bpfwrap [shape=box, style="filled", fillcolor="#fef3c7",
+                 label="KERNEL_SOCKPTR(ptr)\nis_kernel = 1\n(net/core/filter.c:5349)"];
+        bpfcall -> bpfwrap;
+    }
+
+    // 共享函数
+    sk [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+        label="sk_setsockopt(... sockptr_t optval ...)\nnet/core/sock.c:1195"];
+
+    userwrap -> sk [style=bold, color="#2563eb", label="汇合"];
+    bpfwrap  -> sk [style=bold, color="#7c3aed", label="汇合"];
+
+    // 联合体 + is_kernel 位
+    un [shape=record, style="filled", fillcolor="#dbeafe",
+        label="{ sockptr_t（带标签的指针） | { <u> void *user | <k> void *kernel } | is_kernel : 1 }"];
+    sk -> un [label="读取该位"];
+
+    // 分支
+    fromuser [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+              label="copy_from_user()\n必须跨越用户/内核边界"];
+    fromkern [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+              label="memcpy()\n普通的内核内复制"];
+
+    un:u -> fromuser [label="is_kernel = 0", color="#2563eb"];
+    un:k -> fromkern [label="is_kernel = 1", color="#7c3aed"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="is_kernel 位决定读取联合体的哪个成员，\l以及使用哪个复制例程。同一个函数体，两个入口点。\l"];
+    fromkern -> note [style=invis];
+}

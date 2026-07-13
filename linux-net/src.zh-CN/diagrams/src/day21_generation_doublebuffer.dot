@@ -1,0 +1,52 @@
+digraph generation_doublebuffer {
+    rankdir=TB;
+    labelloc=t;
+    label="原子更新：nftables 代际双缓冲与 iptables 整体重新分配";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // nftables panel
+    subgraph cluster_nft {
+        label="nftables：每条链两个 blob，并在 RCU 保护下翻转游标";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+
+        cursor [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+                label="net->nft.gencursor\n（genbit：当前生效的代际）"];
+
+        gen0 [shape=box, style="filled", fillcolor="#dbeafe",
+              label="chain->blob_gen_0\nACTIVE（生效）\n旧规则集"];
+        gen1 [shape=box, style="filled", fillcolor="#fef3c7",
+              label="chain->blob_gen_1\nINACTIVE（离线）\n正在构建的新规则集"];
+
+        cursor -> gen0 [label="genbit=0 -> 生效", color="#16a34a", style=bold];
+        cursor -> gen1 [label="2. 翻转游标", color="#7c3aed", style=dashed];
+
+        update [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+                label="更新（netlink 批次）：\n1. 在 gen_1 中构建新规则\n2. 翻转 gencursor\n3. 在途数据包处理完毕后，\n   RCU 释放 gen_0"];
+        update -> gen1 [label="1. 离线写入", color="#2563eb"];
+
+        pktnew [shape=box, style="filled", fillcolor="#dcfce7",
+                label="新数据包\n读取新 blob"];
+        pktold [shape=box, style="filled", fillcolor="#fee2e2",
+                label="在途数据包\n仍通过 RCU 读取 gen_0\n（安全）"];
+        pktnew -> gen1 [label="翻转后", color="#16a34a", style=dashed];
+        pktold -> gen0 [label="先前已取得", color="#dc2626"];
+    }
+
+    // iptables panel
+    subgraph cluster_ipt {
+        label="iptables：一个整表缓冲区，每次整体重新分配";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#dc2626";
+
+        priv [shape=box, style="filled", fillcolor="#dbeafe",
+              label="table->private\n（xt_table_info）\n整个规则集，共用一个缓冲区"];
+        newbuf [shape=box, style="filled", fillcolor="#fef3c7",
+                label="新的 xt_table_info\n复制整个规则集\n（任何改动都会 realloc）"];
+        swap [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+              label="xt_replace_table：\n分配完整的新缓冲区，\n复制全部规则，再交换指针"];
+        priv -> swap [label="添加 1 条规则", color="#dc2626"];
+        swap -> newbuf [label="复制全部内容", color="#dc2626", style=bold];
+    }
+
+    cursor -> priv [style=invis];
+}

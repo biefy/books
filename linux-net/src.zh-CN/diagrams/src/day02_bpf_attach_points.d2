@@ -1,0 +1,23 @@
+direction: down
+
+title: "RX 路径上的 BPF 挂载位置" {near: top-center; shape: text; style.font-size: 20}
+
+p1: "1. 驱动 / 分配 skb 之前\n钩子： XDP (driver-mode,\n  generic, offloaded)\n可见内容： 原始 DMA 缓冲区\n开销： ~10ns + 你的逻辑\n动作： PASS / DROP\n  / TX / REDIRECT" {
+  style.fill: "#fee2e2"
+}
+
+p2: "2. GRO 之后、协议栈之前\n钩子： tc-bpf ingress,\n  tcx ingress\n可见内容： __sk_buff\n  （完整元数据）\n开销： ~50ns + 你的逻辑\n动作： TC_ACT_OK\n  / SHOT / REDIRECT" {
+  style.fill: "#fef3c7"
+}
+
+p3: "3. ip_rcv / netfilter 内部\n钩子： netfilter\n  (PRE_ROUTING),\n  fentry/fexit on ip_rcv*\n可见内容： IP 层的 skb\n开销： ~50-100ns\n动作： 过滤、\n  修改、观测" {
+  style.fill: "#dcfce7"
+}
+
+p4: "4. 每套接字 / cgroup\n钩子： cgroup_skb/ingress,\n  sk_filter (sk_buff filter)\n可见内容： 套接字查找后的 skb\n开销： 不固定\n动作： 丢弃或允许" {
+  style.fill: "#dbeafe"
+}
+
+p1 -> p2: "如果为 XDP_PASS" {style.stroke-dash: 4}
+p2 -> p3 {style.stroke-dash: 4}
+p3 -> p4 {style.stroke-dash: 4}

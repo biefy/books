@@ -1,0 +1,41 @@
+digraph tcp_states {
+    rankdir=TB;
+    labelloc=t;
+    label="TCP 状态机——十一个规范状态";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [shape=box, style="filled,rounded", fontname="Noto Sans Mono CJK SC", fontsize=10,
+          fillcolor="#dbeafe"];
+    edge [fontname="Noto Sans CJK SC", fontsize=9];
+
+    CLOSED       [fillcolor="#fee2e2"];
+    LISTEN       [fillcolor="#dcfce7"];
+    SYN_SENT;
+    SYN_RECV;
+    ESTABLISHED  [fillcolor="#fef3c7"];
+    FIN_WAIT_1;
+    FIN_WAIT_2;
+    CLOSING      [fillcolor="#e9d5ff"];
+    TIME_WAIT    [fillcolor="#e9d5ff"];
+    CLOSE_WAIT;
+    LAST_ACK;
+
+    // 打开
+    CLOSED      -> LISTEN       [label="listen()"];
+    CLOSED      -> SYN_SENT     [label="connect()\n（发送 SYN）"];
+    LISTEN      -> SYN_RECV     [label="SYN\n（发送 SYN-ACK）"];
+    SYN_RECV    -> ESTABLISHED  [label="ACK"];
+    SYN_SENT    -> ESTABLISHED  [label="SYN-ACK\n（发送 ACK）"];
+
+    // 关闭——主动关闭方
+    ESTABLISHED -> FIN_WAIT_1   [label="close()\n（发送 FIN）"];
+    FIN_WAIT_1  -> FIN_WAIT_2   [label="ACK"];
+    FIN_WAIT_1  -> CLOSING      [label="FIN\n（发送 ACK）"];
+    FIN_WAIT_2  -> TIME_WAIT    [label="FIN\n（发送 ACK）"];
+    CLOSING     -> TIME_WAIT    [label="ACK"];
+    TIME_WAIT   -> CLOSED       [label="2*MSL 定时器"];
+
+    // 关闭——被动关闭方
+    ESTABLISHED -> CLOSE_WAIT   [label="FIN\n（发送 ACK）"];
+    CLOSE_WAIT  -> LAST_ACK     [label="close()\n（发送 FIN）"];
+    LAST_ACK    -> CLOSED       [label="ACK"];
+}

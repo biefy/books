@@ -1,0 +1,43 @@
+digraph gro_merge {
+    rankdir=TB;
+    labelloc=t;
+    label="GRO：将同一流的报文段合并为一个 skb（页片段链）";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // Three same-flow segments
+    subgraph cluster_flow {
+        label="一个流：相同源/目的 IP + 端口，连续 seq，兼容 flags";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+        node [shape=box, style="filled", fillcolor="#fef3c7"];
+        s0 [label="报文段 0\nseq 1000..2459"];
+        s1 [label="报文段 1\nseq 2460..3919"];
+        s2 [label="报文段 2\nseq 3920..5379"];
+        s0 -> s1 -> s2 [color="#16a34a", arrowhead=none, label="按 seq 排列的下一个"];
+    }
+
+    // The merged superpacket
+    merged [shape=record, style="filled", fillcolor="#dbeafe",
+            label="{合并后的 skb（仅向上传递一次）|<h>小型线性头部\n(IP+TCP headers)|<f0>frags[0]\n报文段 0 载荷|<f1>frags[1]\n报文段 1 载荷|<f2>frags[2]\n报文段 2 载荷}"];
+
+    s0 -> merged:h [style=bold, color="#16a34a"];
+    s0 -> merged:f0 [style=dashed, color="#16a34a", label="追加为页片段"];
+    s1 -> merged:f1 [style=dashed, color="#16a34a"];
+    s2 -> merged:f2 [style=dashed, color="#16a34a"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="无需分配 64KB：超级数据包由小型\l线性头部 + 页片段链组成\l（与第 1 天相同的 MAX_SKB_FRAGS 设计）。\l"];
+    merged -> note [style=invis];
+
+    // The non-mergeable packet
+    other [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+           label="不同流，\n或带 PSH/FIN flag，\n或序列号存在间隙"];
+    flush [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+           label="不合并：\n刷新暂存的 skb，\n重新开始——单独\n向上传递一次"];
+    other -> flush [style=bold, color="#dc2626"];
+
+    merged -> stack [label="刷新 → netif_receive_skb"];
+    flush -> stack;
+    stack [shape=box, style="filled", fillcolor="#e9d5ff",
+           label="向上传入协议栈\n（路由、netfilter、套接字）"];
+}

@@ -1,0 +1,88 @@
+direction: down
+
+title: |md
+  ## 常见 qdisc
+| {near: top-center; shape: text}
+
+pfifo: "pfifo_fast" {
+  style.fill: "#fef3c7"
+  p_body: |md
+    旧版内核中的默认项。
+
+    三个优先级带
+    （交互、批量、低优先级）。
+
+    每个带使用简单的尾丢弃 FIFO。
+  |
+}
+
+fq_codel: "fq_codel" {
+  style.fill: "#dcfce7"
+  f_body: |md
+    从 4.12 起成为默认项。
+    结合：
+    - 随机公平队列
+      （每流）
+    - CoDel（受控延迟）AQM
+
+    可解决大多数情况下的缓冲区膨胀。
+    源码：sch_fq_codel.c
+  |
+}
+
+fq: "fq" {
+  style.fill: "#dbeafe"
+  fq_body: |md
+    带节奏控制的公平队列。
+
+    BBR 的必需项
+    （按估算带宽控制发送节奏）。
+
+    源码：sch_fq.c
+  |
+}
+
+htb: "htb / hfsc / cake" {
+  style.fill: "#fef3c7"
+  h_body: |md
+    分层令牌桶 /
+    公平共享。
+
+    可按类配置速率限制。
+
+    cake：提供开箱即用的
+    “良好默认值”QoS。
+  |
+}
+
+clsact: "clsact" {
+  style.fill: "#dbeafe"
+  c_body: |md
+    仅提供钩子的 qdisc；
+    不含排队逻辑。
+
+    提供入站/出站位置，
+    用于挂载 tc-bpf / tcx。
+
+    源码：sch_ingress.c
+  |
+}
+
+ctrl: "使用 tc qdisc 管理" {
+  style.fill: "#fef3c7"
+  ctrl_body: |md
+    ```
+    tc qdisc show dev eth0
+    tc qdisc replace \
+      dev eth0 root fq
+    tc qdisc add \
+      dev eth0 ingress
+    ```
+    （以 root 身份运行或使用 sudo）
+
+    多队列 NIC 上会自动创建
+    每 CPU qdisc（'mq'）。
+  |
+}
+
+pfifo -> fq_codel -> fq -> htb -> clsact -> ctrl

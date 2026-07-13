@@ -1,0 +1,44 @@
+digraph nsproxy_fanout {
+    rankdir=LR;
+    labelloc=t;
+    label="task_struct → nsproxy → net_ns：该指针就是命名空间";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // Two tasks
+    taskA [shape=box, style="filled", fillcolor="#dbeafe",
+           label="task_struct A\n（位于 netns red）"];
+    taskB [shape=box, style="filled", fillcolor="#dbeafe",
+           label="task_struct B\n（位于 init_net）"];
+
+    // Two nsproxies
+    nsA [shape=record, style="filled", fillcolor="#e9d5ff",
+         label="nsproxy A|count|uts_ns|ipc_ns|mnt_ns|pid_ns|<net>net_ns|time_ns|cgroup_ns"];
+    nsB [shape=record, style="filled", fillcolor="#e9d5ff",
+         label="nsproxy B|count|uts_ns|ipc_ns|mnt_ns|pid_ns|<net>net_ns|time_ns|cgroup_ns"];
+
+    taskA -> nsA [label="nsproxy"];
+    taskB -> nsB [label="nsproxy"];
+
+    // Two struct net
+    netRed [shape=record, style="filled", fillcolor="#fef3c7",
+            label="struct net （red）|{ns_common.inum|4026532243}"];
+    netInit [shape=record, style="filled", fillcolor="#fef3c7",
+             label="struct net （init_net）|{ns_common.inum|4026531833}"];
+
+    nsA:net -> netRed [style=bold, color="#d97706", label="net_ns"];
+    nsB:net -> netInit [style=bold, color="#d97706", label="net_ns"];
+
+    // nsfs magic symlinks
+    linkRed [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+             label="/proc/<pidA>/ns/net\l（nsfs 魔术符号链接）\lreadlink → net:[4026532243]\l"];
+    linkInit [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+              label="/proc/<pidB>/ns/net\l（nsfs 魔术符号链接）\lreadlink → net:[4026531833]\l"];
+
+    linkRed -> netRed [style=dashed, color="#16a34a", label="解析为\n匹配的 inum"];
+    linkInit -> netInit [style=dashed, color="#16a34a", label="解析为\n匹配的 inum"];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="同一 netns 中的每个任务共享\l完全相同的 struct net *。\linum 相同 ⇒ 协议栈相同。\l"];
+    netRed -> note [style=invis];
+}

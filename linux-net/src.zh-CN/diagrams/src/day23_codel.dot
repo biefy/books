@@ -1,0 +1,47 @@
+digraph codel {
+    rankdir=TB;
+    labelloc=t;
+    label="CoDel：仅当驻留时间持续一个 interval 高于 target 后才丢包，随后逐步加速";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // Top: the sojourn-time timeline
+    subgraph cluster_timeline {
+        label="每包驻留时间与 target（5 ms）的对比";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        rankdir=LR;
+
+        spike [shape=box, style="filled", fillcolor="#dcfce7",
+               label="短暂尖峰\n> target 但\n< 一个 interval\n=> 不采取动作"];
+        below [shape=box, style="filled", fillcolor="#dcfce7",
+               label="回落到\ntarget 以下\n（重置\nfirst_above_time）"];
+        sustained [shape=box, style="filled", fillcolor="#fee2e2",
+                   label="持续 > target\n达到完整的\ninterval（100 ms）\n=> 准备进入丢包状态"];
+
+        target [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+                label="target = 5 ms 基线"];
+
+        spike -> below -> sustained [color="#94a3b8", arrowhead=none, style=bold];
+        target -> spike [style=invis];
+    }
+
+    // Bottom: drop schedule
+    subgraph cluster_drops {
+        label="丢包计划：next = now + interval / sqrt(count)，每次丢包后 count++";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#dc2626";
+        node [shape=circle, style="filled", fillcolor="#fee2e2", fontsize=9];
+        dr1 [label="丢包\ncount=1"];
+        dr2 [label="丢包\ncount=2"];
+        dr3 [label="丢包\ncount=3"];
+        dr4 [label="丢包\ncount=4"];
+        dr1 -> dr2 [label="interval/1", color="#dc2626"];
+        dr2 -> dr3 [label="/sqrt2", color="#dc2626"];
+        dr3 -> dr4 [label="/sqrt3（间隔更短）", color="#dc2626", style=bold];
+    }
+
+    sustained -> dr1 [label="进入丢包状态", color="#dc2626", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="驻留时间在 DEQUEUE 时测量，并非队列长度\linterval ~ 一个 RTT：按 TCP 节奏安排丢包\l自调节：无需按链路配置\l"];
+    dr4 -> note [style=invis];
+}

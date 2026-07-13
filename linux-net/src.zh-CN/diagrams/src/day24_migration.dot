@@ -1,0 +1,45 @@
+digraph migration {
+    rankdir=TB;
+    labelloc=t;
+    label="工作进程退出：在途连接会怎样（tcp_migrate_req）";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    closeA [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="监听器 A 关闭"];
+
+    inflight [shape=record, style="filled", fillcolor="#fef3c7",
+              label="A 的在途工作|半开 request sock（握手进行中）|A 的 accept 队列中已建立连接的子套接字"];
+
+    closeA -> inflight [label="失去归属"];
+
+    // Default path
+    subgraph cluster_default {
+        label="默认：tcp_migrate_req = 0";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#dc2626";
+        rst [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+             label="中止——发送 RST\n客户端看到连接被重置\n（不会静默重新归属）"];
+    }
+
+    // Migration path
+    subgraph cluster_migrate {
+        label="迁移：tcp_migrate_req = 1";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+        migfn [shape=box, style="filled", fillcolor="#dbeafe",
+               label="reuseport_migrate_sock()\n复用哈希 + 数组机制"];
+        prog [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+              label="可选的 BPF_SK_REUSEPORT_SELECT_OR_MIGRATE\n运行时已设置 migrating_sk\n（返回存活监听器，或以 SK_DROP 取消）"];
+        listB [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+               label="重新归属到存活的监听器 B\n（随机选择存活者，或由程序决定）"];
+        migfn -> prog [style=dashed, label="策略"];
+        migfn -> listB [color="#16a34a", style=bold];
+        prog -> listB [style=dashed, color="#16a34a"];
+    }
+
+    inflight -> rst [label="=0", color="#dc2626", style=bold];
+    inflight -> migfn [label="=1", color="#16a34a", style=bold];
+
+    newsyn [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+            label="关闭后到达的新 SYN：\l两种情况下都会哈希到存活的工作进程（不受影响）。\lnum_socks 减少，数组移动，reciprocal_scale 会落到存活套接字。\l"];
+    closeA -> newsyn [style=invis];
+}

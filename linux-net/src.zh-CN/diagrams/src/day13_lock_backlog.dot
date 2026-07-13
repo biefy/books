@@ -1,0 +1,51 @@
+digraph lock_backlog {
+    rankdir=TB;
+    labelloc=t;
+    label="套接字锁、backlog 与接收唤醒";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+    nodesep=0.5; ranksep=0.8;
+
+    subgraph cluster_proc {
+        label="进程上下文（系统调用：recv/send）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        lock [shape=box, style="filled", fillcolor="#dbeafe",
+              label="lock_sock(sk)\n持有可睡眠的所有者锁"];
+        rel [shape=box, style="filled", fillcolor="#dbeafe",
+             label="release_sock(sk)\n→ __release_sock()\n排空 sk_backlog"];
+        lock -> rel [style=dashed, label="系统调用结束"];
+    }
+
+    subgraph cluster_softirq {
+        label="softirq 上下文 (NET_RX)——不得睡眠";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#d97706";
+        arrive [shape=box, style="filled", fillcolor="#fef3c7",
+                label="发往此 sock 的\nskb 到达"];
+        branch [shape=diamond, style="filled", fillcolor="#e9d5ff",
+                label="套接字\n已锁定？"];
+        arrive -> branch;
+    }
+
+    backlog [shape=box, style="filled", fillcolor="#fee2e2",
+             label="sk_backlog\n（struct sock 内的第二个队列）\n停放到锁释放为止"];
+    rxq [shape=box, style="filled", fillcolor="#dcfce7",
+         label="sk_receive_queue\n__skb_queue_tail(list, skb)"];
+
+    branch -> backlog [label="是", color="#dc2626", style=bold];
+    branch -> rxq [label="否", color="#16a34a", style=bold];
+
+    rel -> rxq [color="#16a34a", style=bold, label="通过真实接收路径\n排空"];
+
+    ready [shape=box, style="filled", fillcolor="#dcfce7",
+           label="sk->sk_data_ready(sk)\n= sock_def_readable"];
+    wake [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+          label="唤醒 socket_wq 上的睡眠者\n（阻塞的 recv / connect / accept）"];
+
+    rxq -> ready [label="随后"];
+    ready -> wake [color="#7c3aed", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+          label="poll()/epoll() 也会在同一个等待队列上\l注册就绪通知（第 19 天）。\l"];
+    wake -> note [style=invis];
+}

@@ -1,0 +1,28 @@
+digraph delayed_ack {
+    rankdir=TB;
+    labelloc=t;
+    label="延迟 ACK：稍作等待，然后捎带或发送纯 ACK";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    start [shape=box, style="filled", fillcolor="#fef3c7",
+           label="数据报文段到达"];
+    timer [shape=box, style="filled", fillcolor="#dbeafe",
+           label="启动延迟 ACK 定时器\n通常约 40 ms (TCP_DELACK_MIN)\n上限为 200 ms (TCP_DELACK_MAX)\n在乒乓式交互中受 RTT 限制"];
+
+    piggy [shape=box, style="filled", fillcolor="#dcfce7",
+           label="定时器触发前出现应答载荷\n或第 2 个报文段\n-> ACK 随数据捎带发送\n不产生额外数据包"];
+    pure  [shape=box, style="filled", fillcolor="#dbeafe",
+           label="定时器触发，没有数据可捎带\n-> 发送纯 ACK\n（最长 40ms 的空等时间）"];
+    quick [shape=box, style="filled", fillcolor="#e9d5ff",
+           label="TCP_QUICKACK / quickack 模式\n-> 立即发送 ACK，不等待"];
+
+    start -> timer;
+    timer -> piggy [label="有数据要发送", fontname="Noto Sans CJK SC", fontsize=9, color="#16a34a"];
+    timer -> pure  [label="定时器到期", fontname="Noto Sans CJK SC", fontsize=9, color="#2563eb"];
+    timer -> quick [label="已设置 quickack", fontname="Noto Sans CJK SC", fontsize=9, color="#7c3aed", style=dashed];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="在严格的请求/响应（乒乓式）交互中，通常既没有\l返回载荷，也没有第 2 个报文段——因此这段等待\l完全是关键路径上的空耗。QUICKACK 会消除等待；\l批量传输则继续启用延迟 ACK。\l"];
+    pure -> note [style=invis];
+}

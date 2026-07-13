@@ -1,0 +1,47 @@
+direction: down
+
+title: |md
+  ## kTLS——内核中的 TLS
+| {near: top-center; shape: text}
+
+setup: "设置阶段（用户空间）" {
+  style.fill: "#dbeafe"
+  s_body: |md
+    - 应用打开 TCP 连接
+    - 应用在用户空间完成 TLS 握手
+    - （OpenSSL、GnuTLS、BoringSSL 等）
+    - 应用调用 setsockopt(TLS_TX/TLS_RX,
+    - crypto_info)——将密钥传给内核
+    - 内核接管加密/解密
+  |
+}
+
+datapath: "数据路径（内核）" {
+  style.fill: "#dcfce7"
+  d_body: |md
+    - 发送：应用写入明文；
+    - 内核原地加密并发送
+    - 接收：内核解密；
+    - 应用读取明文
+
+    优点：
+    - TLS 上的 sendfile()（零拷贝：
+    - 文件 → 加密 → 线路）
+    - 与 splice() / vmsplice() 兼容
+    - 无需用户空间加密往返
+  |
+}
+
+hw: "硬件卸载" {
+  style.fill: "#fef3c7"
+  h_body: |md
+    - 部分 NIC（Mellanox、Chelsio）
+    - 可以卸载 AES-GCM 加密
+    - 使用 kTLS 时，内核将密钥传给 NIC
+    - NIC 在线加密/解密
+    - CPU 只接触明文
+    - NIC 支持：NETIF_F_HW_TLS_TX / RX
+  |
+}
+
+setup -> datapath -> hw

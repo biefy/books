@@ -1,0 +1,103 @@
+direction: down
+
+title: |md
+  ### L2 → L3 分用：作用域 ptype 列表、pt_prev 与列表交付
+| {near: top-center; shape: text}
+
+reg: "注册：dev_add_pack" {
+  style.fill: "#ede9fe"
+  reg_body: |md
+    `ptype_head()` 选择一个列表：
+
+    内置 L3 处理函数（ETH_P_IP）
+      → `ptype_base[type & 0xF]`
+
+    AF_PACKET ETH_P_ALL 抓包点
+      → netns/device `ptype_all`
+
+    限定作用域的协议绑定套接字
+      → netns/device `ptype_specific`
+
+    IPv4 注册：
+    `.func = ip_rcv`
+    `.list_func = ip_list_rcv`
+  |
+}
+
+classify: "__netif_receive_skb_core" {
+  style.fill: "#dbeafe"
+  c_body: |md
+    `skb->protocol` 来自 eth_type_trans。
+
+    1. 访问 netns/设备的 `ptype_all` 抓包点。
+    2. 运行入站、VLAN、RX-handler 逻辑；
+       `skb->dev` 可能改变。
+    3. 遍历全局 EtherType 桶。
+    4. 遍历适用的 netns/原始/当前
+       设备 `ptype_specific` 列表。
+
+    具体列表选择会考虑作用域；
+    并非单一的全局三列表序列。
+  |
+}
+
+defer: "pt_prev 延迟最终消费者" {
+  style.fill: "#fef3c7"
+  d_body: |md
+    每个匹配的列表项都会成为 `pt_prev`。
+
+    如果出现另一个匹配项，就通过
+    `deliver_skb` 交付较早的匹配项：
+      递增 `skb->users`
+      调用较早的 `.func`
+
+    最后一个处理函数无需额外引用。
+    对单个输入，`INDIRECT_CALL_INET`
+    会优先调用 ip_rcv / ipv6_rcv。
+  |
+}
+
+listpath: "批量接收保持列表形式" {
+  style.fill: "#dcfce7"
+  l_body: |md
+    `__netif_receive_skb_list_core` 使用相同
+    核心对每个 skb 分类，然后按最终
+    `packet_type` 和原始设备对相邻
+    数据包分组。
+
+    处理函数有 `.list_func`？
+      → 一次批量调用（IPv4：ip_list_rcv）
+
+    否则
+      → 回退到每个 skb 调用一次 `.func`
+  |
+}
+
+fanout: "抓包点带来的变化" {
+  style.fill: "#fff7ed"
+  f_body: |md
+    没有抓包点：ip_rcv 可保持为最终
+    消费者并取得原始引用。
+
+    存在 ETH_P_ALL 抓包点：必须先交付
+    较早的消费者，再调用后续的
+    L3 处理函数。无需深拷贝载荷，
+    但扇出和引用计数操作确实存在。
+  |
+}
+
+drop: "没有匹配的处理函数" {
+  style.fill: "#fee2e2"
+  drop_body: |md
+    `pt_prev == NULL`
+
+    对未处理协议递增 RX dropped
+    带丢弃原因释放 skb
+  |
+}
+
+reg -> classify: "流量到来前列表已就绪"
+classify -> defer: "匹配项共享一个延迟指针"
+defer -> listpath: "列表输入对最终匹配项分组"
+defer -> fanout: "第二个消费者触发交付第一个"
+classify -> drop: "无匹配项" {style.stroke-dash: 4}

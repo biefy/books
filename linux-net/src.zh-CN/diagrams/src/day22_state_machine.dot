@@ -1,0 +1,36 @@
+digraph state_machine {
+    rankdir=TB;
+    labelloc=t;
+    label="Conntrack 状态机：NEW -> ESTABLISHED / RELATED，以及 unconfirmed -> confirmed 两阶段提交";
+    fontname="Noto Sans CJK SC"; fontsize=13;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    start [shape=box, style="filled", fillcolor="#fef3c7",
+           label="首个数据包到达\n元组未命中哈希"];
+
+    unconfirmed [shape=box, style="filled", fillcolor="#e9d5ff",
+                 label="UNCONFIRMED 条目\ninfo = NEW\n不在哈希中，也不在列表中；\n仅由 skb->_nfct 持有"];
+
+    drop [shape=box, style="filled", fillcolor="#fee2e2",
+          label="规则 DROP / 无效\n释放 skb -> refcount 0\n条目消失"];
+
+    confirmed [shape=box, style="filled", fillcolor="#dbeafe",
+               label="NF_ACCEPT -> __nf_conntrack_confirm\n插入全局哈希\n设置 IPS_CONFIRMED，哈希引用 +1\ninfo 仍为 NEW"];
+
+    established [shape=box, style="filled", fillcolor="#dcfce7",
+                label="ESTABLISHED\n应答元组匹配\n设置 IPS_SEEN_REPLY\ninfo >= IP_CT_IS_REPLY"];
+
+    related [shape=box, style="filled", fillcolor="#dcfce7",
+             label="RELATED\nexpectation 匹配\n设置 ->master\ninfo = IP_CT_RELATED"];
+
+    start -> unconfirmed [color="#d97706"];
+    unconfirmed -> drop [color="#dc2626", style=bold, label="DROP"];
+    unconfirmed -> confirmed [color="#16a34a", style=bold, label="ACCEPT"];
+    confirmed -> established [color="#2563eb", style=bold, label="应答到达\n（命中应答元组）"];
+    confirmed -> related [color="#7c3aed", label="符合 expectation（辅助模块）\n流的首个数据包"];
+    established -> established [color="#2563eb", label="后续数据包\n刷新 ct->timeout"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="正向（ORIGINAL 方向）命中并不总是 ESTABLISHED：\lresolve_normal_ct 根据条目状态选择 info——仅在设置 IPS_SEEN_REPLY 后\l才为 ESTABLISHED；符合 expectation 的流为 RELATED；否则仍为 NEW\l（例如重传的 SYN）。\l"];
+    established -> note [style=invis];
+}

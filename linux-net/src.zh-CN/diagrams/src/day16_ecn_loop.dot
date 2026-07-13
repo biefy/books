@@ -1,0 +1,31 @@
+digraph ecn_loop {
+    rankdir=LR;
+    labelloc=t;
+    label="ECN 信令环路：无需丢包即可发出拥塞信号";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    sender   [shape=box, style="filled", fillcolor="#dbeafe", label="发送方"];
+    swtch    [shape=box, style="filled", fillcolor="#e9d5ff", label="拥塞的\n交换机/路由器\n（队列正在增长）"];
+    receiver [shape=box, style="filled", fillcolor="#dbeafe", label="接收方"];
+
+    // 前向路径（IP 首部位）
+    sender -> swtch [color="#d97706", style=bold,
+        label="1. IP 数据包标记为 ECT\n（支持 ECN 的传输）\nTOS 的低 2 位 = 2"];
+    swtch -> receiver [color="#dc2626", style=bold,
+        label="2. 交换机将 ECT 改写为 CE\nINET_ECN_CE = 3\n（不丢包！）"];
+
+    // 返回路径（TCP 首部标志）
+    receiver -> sender [color="#16a34a", style=bold, constraint=false,
+        label="3. ACK 设置 ECE 标志\n（TCP 首部，TCPHDR_ECE）"];
+    sender -> receiver [color="#2563eb", style=dashed, constraint=false,
+        label="4. 发送方削减 cwnd，\n以 CWR 标志应答\n（TCP 首部，TCPHDR_CWR）"];
+
+    ip_note [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+        label="IP 首部携带该标记：\lECT / CE = TOS/DSCP 字节的低 2 位\l（参见 inet_ecn.h：ECT_0=2，CE=3）。\l"];
+    tcp_note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+        label="TCP 首部携带回显与确认：\lECE（接收方 -> 发送方）闭合环路；\lCWR（发送方 -> 接收方）确认已削减。\l"];
+
+    swtch -> ip_note [style=invis];
+    receiver -> tcp_note [style=invis];
+}

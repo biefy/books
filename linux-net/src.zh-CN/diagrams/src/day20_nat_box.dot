@@ -1,0 +1,48 @@
+digraph nat_box {
+    rankdir=LR;
+    labelloc=t;
+    label="NAT 网关：DNAT@PREROUTING 与 SNAT@POSTROUTING，由同一条 conntrack 记录配对";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // LAN 侧
+    lan [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+         label="LAN 主机\n192.168.1.10"];
+
+    // WAN 侧
+    wan [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+         label="WAN 对端\n1.2.3.4"];
+
+    // NAT 网关内部
+    subgraph cluster_box {
+        label="NAT 网关（WAN_IP）";
+        fontname="Noto Sans CJK SC"; fontsize=12; style="rounded"; color="#2563eb";
+
+        pre [shape=box, style="filled", fillcolor="#dbeafe",
+             label="PREROUTING\nDNAT (NF_IP_PRI_NAT_DST=-100)\nconntrack -200（首次出现）"];
+        route [shape=diamond, style="filled", fillcolor="#fef3c7",
+               label="路由\n决策"];
+        post [shape=box, style="filled", fillcolor="#dbeafe",
+              label="POSTROUTING\nSNAT/MASQUERADE\n(NF_IP_PRI_NAT_SRC=100)"];
+
+        ct [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+            label="conntrack 表记录（首次出现时状态为 NEW）\lorig:  192.168.1.10 -> 1.2.3.4\lreply: 1.2.3.4 -> WAN_IP（反向改写）\l"];
+
+        pre -> route [color="#94a3b8"];
+        route -> post [color="#94a3b8"];
+        pre -> ct [style=dashed, color="#16a34a", label="写入记录", constraint=false];
+        ct -> post [style=dashed, color="#16a34a", label="驱动 SNAT", constraint=false];
+    }
+
+    // 出站路径（LAN -> WAN），改写 src
+    lan -> pre [style=bold, color="#7c3aed",
+                label="出站：src=192.168.1.10\ndst=1.2.3.4"];
+    post -> wan [style=bold, color="#7c3aed",
+                 label="出站：src=WAN_IP\n（已应用 SNAT）"];
+
+    // 入站应答（WAN -> LAN），将 dst 改写回来
+    wan -> pre [style=bold, color="#dc2626", constraint=false,
+                label="应答：dst=WAN_IP\nsrc=1.2.3.4"];
+    post -> lan [style=bold, color="#dc2626", constraint=false,
+                 label="应答：dst=192.168.1.10\n（反向改写）"];
+}

@@ -1,0 +1,23 @@
+%%{init: {'themeVariables': {'fontFamily': 'Noto Sans CJK SC, Noto Sans SC, sans-serif'}}}%%
+flowchart TD
+    Socket["<b>1. socket()</b><br/>分配 struct socket<br/>以及 TCP struct sock<br/><b>移交：</b>应用选择被动<br/>监听或主动连接<br/><b>状态：</b>已初始化、<br/>未绑定的 TCP 套接字"]
+
+    Passive["<b>2a. 被动打开</b><br/>bind 保留本地端口，<br/>listen 插入监听器，<br/>SYN 创建 request_sock<br/><b>移交：</b>完成握手后<br/>子套接字进入 accept 队列<br/><b>状态：</b>监听器和<br/>半开请求已建立索引"]
+
+    Active["<b>2b. 主动打开</b><br/>connect 选择源端口、<br/>路由并发送 SYN<br/><b>移交：</b>SYN-ACK 完成<br/>四元组<br/><b>状态：</b>客户端套接字从<br/>SYN_SENT 转入已建立连接哈希"]
+
+    Established["<b>3. 已建立的流</b><br/>RX 时通过四元组查找<br/>找到所属套接字<br/><b>移交：</b>应用 I/O<br/>可使用 TCP 队列<br/><b>状态：</b>具有 cwnd/rwnd 状态的<br/>全双工流"]
+
+    IO["<b>4. sendmsg / recvmsg</b><br/>在用户缓冲区与<br/>TCP 队列之间移动字节<br/><b>移交：</b>继续 I/O 还是关闭<br/>取决于流状态<br/><b>状态：</b>写队列、接收队列、<br/>定时器和 ACK 状态持续演变"]
+
+    Close["<b>5. close</b><br/>驱动 FIN/RST/TIME_WAIT，<br/>并在安全时移出哈希<br/><b>状态：</b>fd 已消失，<br/>协议状态可能比它存活更久"]
+
+    Socket --> Passive --> Established --> IO --> Close
+    Socket --> Active --> Established
+
+    classDef api fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+    classDef table fill:#fef3c7,stroke:#d97706,stroke-width:2px
+    classDef state fill:#dcfce7,stroke:#16a34a,stroke-width:2px
+    class Socket,IO,Close api
+    class Passive,Active table
+    class Established state

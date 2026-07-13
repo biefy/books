@@ -1,0 +1,62 @@
+digraph aead_record {
+    rankdir=TB;
+    labelloc=t;
+    label="线路上的 TLS 记录 = [header | ciphertext | tag]，以及 AES-GCM 如何构建它";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // ---------- the record strip ----------
+    subgraph cluster_record {
+        label="一条 TLS 记录（在线路上）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        rec [shape=record, style="filled",
+             label="{<h>header 5B\ntype(1)|ver(2)|len(2)|<c>ciphertext\nAES-GCM-CTR（plaintext）|<t>tag 16B\nGHASH 完整性}"];
+    }
+    // color cells via separate nodes is hard in one record; annotate with notes instead
+    hnote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+           label="线路上的 5B header：明文 + 经过认证\l（TLS_HEADER_SIZE = 5）\lTLS 1.2 AAD 还会在前面加上 8B rec_seq\l（经过认证，但不传输）\l"];
+    cnote [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+           label="加密后的载荷\l"];
+    tnote [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+           label="tag_size = 16（AES-GCM）\l不匹配时拒绝该记录\l"];
+    rec:h -> hnote [style=dashed, color="#16a34a", arrowhead=none];
+    rec:c -> cnote [style=dashed, color="#d97706", arrowhead=none];
+    rec:t -> tnote [style=dashed, color="#dc2626", arrowhead=none];
+
+    // ---------- the crypto inputs ----------
+    subgraph cluster_struct {
+        label="struct tls12_crypto_info_aes_gcm_128（推送的四个字段）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        node [shape=box, style="filled", fillcolor="#dbeafe"];
+        f_key  [label="key[16]\nAES-128 会话密钥"];
+        f_salt [label="salt[4]\n固定 nonce 前缀"];
+        f_iv   [label="iv[8]\n显式 nonce\n在线路上传输，每条记录 ++"];
+        f_seq  [label="rec_seq[8]\n序列号 -> AAD"];
+    }
+
+    nonce [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+           label="12 字节 GCM nonce\n= salt(4B) || iv(8B)\n绝不能重复"];
+    f_salt -> nonce [color="#7c3aed"];
+    f_iv   -> nonce [color="#7c3aed", label="每条记录\n递增"];
+
+    aad [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+         label="AAD（TLS 1.2）\n= rec_seq(8B) || header(5B)\n经过认证，不加密"];
+    f_seq -> aad [color="#16a34a"];
+
+    gcm [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+         label="AES-GCM\n加密 + 认证"];
+    f_key -> gcm [color="#dc2626", style=bold, label="加密密钥"];
+    nonce -> gcm [color="#7c3aed"];
+
+    plain [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+           label="明文载荷\n（你的 write()）"];
+    plain -> gcm [label="加密 ->"];
+
+    // AAD (rec_seq + header) feeds GCM as associated data
+    aad -> gcm [style=bold, color="#16a34a", constraint=false,
+                label="作为 AAD 输入\n（经过认证）"];
+    rec:h -> aad [style=dashed, color="#16a34a", arrowhead=none, constraint=false];
+
+    gcm -> rec:c [color="#d97706", style=bold, label="ciphertext"];
+    gcm -> rec:t [color="#dc2626", style=bold, label="tag"];
+}

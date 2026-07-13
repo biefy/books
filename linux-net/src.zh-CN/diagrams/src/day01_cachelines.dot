@@ -1,0 +1,32 @@
+digraph cachelines {
+    rankdir=TB;
+    labelloc=t;
+    label="CPU 以 64 字节缓存行为单位读取内存 → sk_buff 字段排列";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // sk_buff drawn as a stack of cache lines
+    skb [shape=record, style="filled", fontsize=9, fillcolor="#ffffff",
+         label="{ \
+{ 缓存行 0  (64B) | <l0> RX 热点：next, prev, dev, sk, tstamp\n（RX 路径最先访问链表/设备字段） } | \
+{ 缓存行 1  (64B) | cb[48] 每协议控制块 + len/data_len } | \
+{ 缓存行 2  (64B) | TX 热点：queue_mapping、头部、flags 位域 } | \
+{ 缓存行 3+ (64B) | 冷字段：很少访问的字段、填充空洞 } }"];
+
+    // color the hot line
+    hot [shape=box, style="filled", fillcolor="#fecaca", fontsize=9,
+         label="RX 热点字段集中在\n缓存行 0 → RX 路径仅将\n少量缓存行带入 L1"];
+    skb:l0 -> hot [color="#dc2626"];
+
+    // shared_info on its own line
+    shinfo [shape=box, style="filled", fillcolor="#dcfce7", fontsize=9,
+            label="数据缓冲区末尾：\nskb_shared_info 独占一个\n缓存行（kmalloc 对齐），因此\nskb->head（RX）与 dataref（克隆）\n不会共享缓存行 → 避免跨 CPU\n缓存行抖动"];
+
+    // pahole footer
+    pahole [shape=note, style="filled", fillcolor="#fef9c3", fontsize=9,
+            label="pahole -C sk_buff vmlinux 显示：\l字段偏移、填充空洞，以及\l/* size: N, cachelines: M, members: K */\lSLAB_HWCACHE_ALIGN ⇒ 每个描述符\l都从缓存行边界开始。\l"];
+
+    skb -> shinfo [style=invis];
+    skb -> pahole [style=invis];
+    { rank=same; hot; pahole; }
+}

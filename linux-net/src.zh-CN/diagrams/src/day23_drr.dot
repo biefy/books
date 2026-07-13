@@ -1,0 +1,36 @@
+digraph drr {
+    rankdir=LR;
+    labelloc=t;
+    label="差额轮询：优先服务 new_flows，按字节扣减 deficit";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // new_flows list
+    subgraph cluster_new {
+        label="new_flows（刚刚活跃）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+        node [shape=box, style="filled", fillcolor="#dcfce7"];
+        intr [label="交互式流\n1-2 个数据包（DNS/SYN）\ndeficit = quantum"];
+    }
+
+    // old_flows list
+    subgraph cluster_old {
+        label="old_flows（deficit 已耗尽，轮询）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", fillcolor="#dbeafe"];
+        bulk [label="批量流\ndeficit 逐步递减：\n每次 dequeue 减去 pkt_len\n降到 0 时加上 quantum，\n继续留在 old_flows"];
+    }
+
+    deq [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+         label="dequeue 点\n（送出一个数据包）"];
+
+    intr -> deq [label="立即获得服务\n（插到前面）", color="#16a34a", style=bold];
+    bulk -> deq [label="当 deficit > 0 时\n参与轮询", color="#2563eb"];
+
+    // demotion edge
+    intr -> bulk [xlabel="  降级", color="#d97706", style=dashed, constraint=false];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="quantum ~= 每轮 MTU 字节数\l按每个数据包的长度扣减，而不是每轮扣 1\l流的 deficit <= 0 => list_move_tail 到 old_flows\l=> 无论数据包大小如何，都获得相等带宽\l"];
+    deq -> note [style=invis];
+}

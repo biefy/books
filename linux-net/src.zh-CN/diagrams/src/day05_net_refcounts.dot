@@ -1,0 +1,53 @@
+digraph net_refcounts {
+    rankdir=TB;
+    labelloc=t;
+    label="struct net：两个引用计数——持有者决定协议栈何时销毁，passive 决定内存何时释放";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // The struct net
+    net [shape=record, style="filled", fillcolor="#dbeafe",
+         label="struct net|<h>ns_common.__ns_ref（持有者）|<p>passive（内存保护）"];
+
+    // Holders feeding in
+    subgraph cluster_holders {
+        label="持有者取得 get_net() 引用";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        node [shape=box, style="filled", fillcolor="#fef3c7"];
+        sock [label="netns 中的非内核套接字"];
+        nsproxy [label="任务的 nsproxy->net_ns"];
+    }
+    sock -> net:h [label="get_net", fontsize=9, color="#d97706"];
+    nsproxy -> net:h [label="get_net", fontsize=9, color="#d97706"];
+
+    // A netdev does NOT hold a reference — nd_net is a plain pointer
+    netdev [shape=box, style="filled", fillcolor="#fef3c7", label="netns 中的 netdev"];
+    netdev -> net:h [style=dashed, color="#94a3b8", fontsize=9,
+                     label="dev_net_set()：普通指针，并非持有者"];
+
+    // Holder path to zero
+    putnet [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="put_net()：递减计数\n归零 → __put_net()"];
+    queue [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+           label="queue_work(netns_wq)\n（进程上下文，可以睡眠）"];
+    cleanup [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+             label="cleanup_net()\n运行每网络命名空间 ops->exit\n（刷新 conntrack，关闭套接字）"];
+
+    net:h -> putnet [style=bold, color="#16a34a", label="持有者 → 0"];
+    putnet -> queue [style=bold, color="#16a34a"];
+    queue -> cleanup [style=bold, color="#16a34a"];
+
+    // Passive path
+    passive [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+             label="net_passive_dec()\n归零 → kfree(net->gen)\nkmem_cache_free(struct net)"];
+    net:p -> passive [style=bold, color="#7c3aed", label="passive → 0\n（协议栈拆除后）"];
+
+    // ip netns delete
+    delete [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+            label="ip netns delete red：\l仅取消链接 nsfs 名称\l（/var/run/netns/red 绑定挂载）。\l不会影响持有者箭头——\l只要仍有持有者，计数就不会\l归零，cleanup_net 不会触发，\lstruct net 会不可见地继续存在。\l"];
+
+    nsfs [shape=box, style="filled", fillcolor="#fee2e2",
+          label="/var/run/netns/red\n（nsfs 名称链接）"];
+    nsfs -> net:h [style=dashed, color="#94a3b8", label="命名（并非持有者）", fontsize=9];
+    delete -> nsfs [label="切断 X", color="#dc2626", style=bold, fontsize=9];
+}

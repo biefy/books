@@ -1,0 +1,89 @@
+direction: down
+
+title: |md
+  ### TIME_WAIT：minisock 替换完整套接字
+| {near: top-center; shape: text}
+
+full: "ESTABLISHED 完整套接字 (struct tcp_sock)" {
+  style.fill: "#dbeafe"
+  f_body: |md
+    保存全部内容：
+    - 发送 + 接收队列 (skbs)
+    - 拥塞状态、RTT、SACK
+    - 定时器、套接字缓冲区
+    - 完整的 struct sock + tcp_sock
+
+    主动关闭方完成 FIN/ACK 交互
+    → 准备进入 TIME_WAIT。
+  |
+}
+
+carve: "tcp_time_wait()——构造一个 minisock" {
+  style.fill: "#fef3c7"
+  c_body: |md
+    net/ipv4/tcp_minisocks.c:326
+
+    tw = inet_twsk_alloc(...)
+      (inet_timewait_sock.c:168)
+
+    仅复制管控四元组上迟到报文段
+    所需的内容：
+    - tw_rcv_nxt / tw_snd_nxt (seq)
+    - tw_ts_recent (PAWS)
+    - tw_rcv_wnd, tw_rcv_wscale
+
+    没有数据队列或拥塞控制状态：
+    比完整 tcp_sock 小得多。
+  |
+}
+
+minisock: "ehash 中的 inet_timewait_sock" {
+  style.fill: "#dcfce7"
+  m_body: |md
+    inet_twsk_hashdance_schedule()：
+    - 添加 minisock 绑定所有权
+    - 在同一四元组上原子替换
+      完整套接字的 ehash 节点
+    - 为 TCP_TIMEWAIT_LEN 启动 tw_timer
+      （真正 TIME_WAIT 为 60*HZ）
+
+    tcp_v4_rcv 看到 TCP_TIME_WAIT 后调用
+    tcp_timewait_state_process()：ACK、RST、
+    成功/丢弃，或在旧 minisock 被移除后
+    可交给监听器的 SYN。
+  |
+}
+
+closed: "原始完整套接字 → TCP_CLOSE，随后释放" {
+  style.fill: "#fee2e2"
+  cl_body: |md
+    同一个 tcp_time_wait() 随后调用
+    tcp_done(sk)：
+      tcp_set_state(sk, TCP_CLOSE)
+      → 淘汰完整套接字；最终释放
+        要等待其余引用消失。
+
+    这就是 fentry:tcp_set_state 显示
+    ... -> 5 -> 7 (FIN_WAIT2 -> CLOSE)，
+    而从不显示 -> 6 的原因。状态 6 位于 minisock，
+    tcp_set_state 从不触碰它。
+  |
+}
+
+gone: "2*MSL 定时器触发" {
+  style.fill: "#ede9fe"
+  g_body: |md
+    tw_timer 到期 → minisock 移出哈希
+    并释放。四元组终于可以复用。
+
+    如果 inet_twsk_alloc 达到命名空间上限
+    (tcp_max_tw_buckets)，它会返回 NULL：
+    不创建 minisock；TCPTimeWaitOverflow 递增，
+    而完整套接字仍会关闭。
+  |
+}
+
+full -> carve: "关闭握手完成"
+carve -> minisock: "插入轻量替代项"
+carve -> closed: "tcp_done() 淘汰重量级套接字"
+minisock -> gone: "定时器到期"

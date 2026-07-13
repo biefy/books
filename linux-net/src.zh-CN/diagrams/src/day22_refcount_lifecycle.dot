@@ -1,0 +1,36 @@
+digraph refcount_lifecycle {
+    rankdir=TB;
+    labelloc=t;
+    label="nf_conn 引用计数生命周期：无泄漏的两阶段提交";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // Birth
+    born [shape=box, style="filled", fillcolor="#fef3c7",
+          label="首个数据包（如 SYN）未命中哈希\ninit_conntrack -> 新建 UNCONFIRMED nf_conn\nrefcount = 1（仅由 skb 持有）\n位于每 CPU 的未确认列表中，不在哈希内"];
+
+    decide [shape=diamond, style="filled", fillcolor="#e9d5ff",
+            label="netfilter\n流水线\n裁决？"];
+
+    born -> decide;
+
+    // Branch A: DROP
+    drop [shape=box, style="filled", fillcolor="#fee2e2",
+          label="A. 规则丢弃数据包\n释放 skb -> nf_conntrack_put(skb_nfct)\nrefcount 1 -> 0"];
+    freed [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+           label="释放条目\n不会污染全局表"];
+    decide -> drop [color="#dc2626", style=bold, label="DROP"];
+    drop -> freed [color="#dc2626", style=bold];
+
+    // Branch B: ACCEPT
+    confirm [shape=box, style="filled", fillcolor="#dbeafe",
+             label="B. NF_ACCEPT\n__nf_conntrack_confirm 将其插入\nnf_conntrack_hash，并设置 IPS_CONFIRMED\n哈希持有 +1 -> refcount = 2（hash + skb）"];
+    persist [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+             label="释放 skb -> refcount = 1（hash）\n条目一直保留到 ct->timeout 截止时间\n（timeout - now < 0 时由 GC worker 回收）"];
+    decide -> confirm [color="#16a34a", style=bold, label="ACCEPT"];
+    confirm -> persist [color="#16a34a", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="引用计数规则（struct nf_conn 注释）：\l  位于哈希表中时 +1\l  每个引用它的在途 skb 各 +1\l  它作为 master 的每个连接各 +1\lUNCONFIRMED 没有哈希引用，因此一次 DROP\l就会让引用计数降为零。\l"];
+    persist -> note [style=invis];
+}

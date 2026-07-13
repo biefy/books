@@ -1,0 +1,53 @@
+digraph sendfile_zerocopy {
+    rankdir=TB;
+    labelloc=t;
+    label="HTTPS 上的 sendfile()：传统三次拷贝路径与 kTLS 零拷贝（skb frags 指向页缓存）";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // ---------- CLASSIC ----------
+    subgraph cluster_classic {
+        label="传统用户空间 TLS——3 次拷贝、2 次系统调用、用户空间加密";
+        fontname="Noto Sans CJK SC"; fontsize=12; style="rounded"; color="#dc2626";
+
+        c_pc [shape=box, style="filled", fillcolor="#fef3c7", label="页缓存\n（文件页）"];
+        c_ub1 [shape=box, style="filled", fillcolor="#e9d5ff", label="用户缓冲区\n（明文）"];
+        c_ssl [shape=box, style="filled,rounded", fillcolor="#fee2e2", label="SSL_write\n（在用户空间加密）"];
+        c_ub2 [shape=box, style="filled", fillcolor="#e9d5ff", label="用户缓冲区\n（密文）"];
+        c_skb [shape=box, style="filled", fillcolor="#dbeafe", label="skb\n（线性拷贝）"];
+        c_wire [shape=box, style="filled,rounded", fillcolor="#fef3c7", label="线路"];
+
+        c_pc -> c_ub1 [color="#dc2626", style=bold, label="拷贝 1\nread()"];
+        c_ub1 -> c_ssl;
+        c_ssl -> c_ub2 [color="#dc2626", style=bold, label="拷贝 2"];
+        c_ub2 -> c_skb [color="#dc2626", style=bold, label="拷贝 3\nsend()"];
+        c_skb -> c_wire [color="#d97706"];
+    }
+
+    // ---------- KTLS ----------
+    subgraph cluster_ktls {
+        label="kTLS sendfile()——1 次加密拷贝、1 次系统调用，明文始终不离开内核";
+        fontname="Noto Sans CJK SC"; fontsize=12; style="rounded"; color="#16a34a";
+
+        k_pc [shape=box, style="filled", fillcolor="#fef3c7", label="页缓存\n（文件页）"];
+        k_skb [shape=record, style="filled", fillcolor="#dbeafe",
+               label="{记录 skb|skb_shinfo-\>frags[]\n(page,offset,len)}"];
+        k_aead [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+                label="kTLS AES-GCM\n加密到记录 skb 中"];
+        k_wire [shape=box, style="filled,rounded", fillcolor="#fef3c7", label="线路\n（密文）"];
+        k_nic [shape=box, style="filled", fillcolor="#e9d5ff",
+               label="NIC HW-TLS\n（可选卸载）"];
+
+        k_pc -> k_skb [color="#16a34a", style=bold, label="frags 引用页面\n（不拷贝，refcount++）"];
+        k_skb -> k_aead [color="#dc2626", style=bold, label="拷贝 1\n（唯一一次拷贝）"];
+        k_aead -> k_wire [color="#d97706"];
+        k_skb -> k_nic [style=dashed, color="#7c3aed", label="硬件路径：\n明文 skb + 每流密钥"];
+        k_nic -> k_wire [style=dashed, color="#7c3aed", label="在线加密\nCPU 接触明文 0 次"];
+    }
+
+    c_wire -> k_pc [style=invis];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="复用第 1 天的 frags[] 图形符号。\lTLS_TX_ZEROCOPY_RO 启用无拷贝 frag 路径。\l对静态文件 / CDN / 视频 sendfile() 的收益最大。\l"];
+    k_wire -> note [style=invis];
+}

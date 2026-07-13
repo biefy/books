@@ -1,0 +1,66 @@
+direction: down
+
+title: |md
+  ### struct sk_buff——通用数据包
+| {near: top-center; shape: text}
+
+skb: "struct sk_buff（描述符）" {
+  style.fill: "#dbeafe"
+  s_body: |md
+    位于 slab 缓存
+    `skbuff_head_cache`.
+
+    关键字段
+    (include/linux/skbuff.h:885):
+    - next, prev——队列链接
+    - 还包括 rb_node, list, llist_node
+    - dev——net_device
+    - sk——所属套接字（RX 时为 NULL）
+    - tstamp——skb_mstamp_ns（EDT）
+    - cb[48]——每协议控制块
+    - _skb_refdst——带引用计数的 dst_entry
+    - _nfct——netfilter conntrack
+    - len, data_len——总长度、分页长度
+    - mac_len, hdr_len——头部长度
+    - queue_mapping——TX 队列
+    - head, data, tail, end——缓冲区
+    - mac_header, network_header,
+    - transport_header
+    - （以上为相对 head 的偏移）
+  |
+}
+
+linear: "线性数据区" {
+  style.fill: "#fef3c7"
+  l_body: |md
+    一次分配：
+
+    [head][预留区][数据区][tail][end]
+
+    - headroom = data - head
+    - tailroom = end - tail
+    - used = tail - data
+  |
+}
+
+frags: "页片段" {
+  style.fill: "#dcfce7"
+  f_body: |md
+    skb_shared_info，用于大数据包
+
+    （例如 GRO 超级数据包）：
+
+    - shinfo 指向 skb_shared_info（位于 end 之后）
+
+    - shinfo->frags[]：（page, offset, size）元组
+
+    - shinfo->frag_list：skb 链（TSO 报文段）
+
+    - 总载荷 = (tail - data) + sum(frags) = len
+
+    - data_len = sum(frags)
+  |
+}
+
+skb -> linear: "head/data/tail/end"
+linear -> frags: "shinfo 位于末尾"

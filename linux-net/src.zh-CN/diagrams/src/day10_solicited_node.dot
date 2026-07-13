@@ -1,0 +1,49 @@
+digraph solicited_node {
+    rankdir=TB;
+    labelloc=t;
+    label="ARP 广播与 IPv6 NDP 请求节点组播：目标相同，中断少得多";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    // 左侧面板：ARP 广播
+    subgraph cluster_arp {
+        label="ARP（第 7 天）：L2 广播";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#dc2626";
+        arpsrc [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+                label="发送方\nARP 请求\n发往 ff:ff:ff:ff:ff:ff"];
+        a1 [shape=box, style="filled", fillcolor="#fee2e2", label="主机 A 的 NIC+CPU\n被唤醒，随后丢弃"];
+        a2 [shape=box, style="filled", fillcolor="#fee2e2", label="主机 B 的 NIC+CPU\n被唤醒，随后丢弃"];
+        a3 [shape=box, style="filled", fillcolor="#dcfce7", label="主机 C（目标）\n被唤醒并回复"];
+        arpsrc -> a1 [color="#dc2626"];
+        arpsrc -> a2 [color="#dc2626"];
+        arpsrc -> a3 [color="#dc2626"];
+    }
+
+    // 右侧面板：NDP 请求节点组播
+    subgraph cluster_ndp {
+        label="IPv6 NDP：请求节点组播";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+
+        build [shape=record, style="filled", fillcolor="#fef3c7",
+               label="{ 目标单播地址 | 低 24 位 }|{ 前缀 ff02::1:ff00:0/104 | + 低 24 位 }|{ <out> = ff02::1:ffXX:XXXX }"];
+
+        ndpsrc [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+                label="发送方\nNeighbor Solicitation\n发往 ff02::1:ffXX:XXXX"];
+
+        n1 [shape=box, style="filled", fillcolor="#dbeafe", label="主机 A 的 NIC\n不在组中：\n硬件过滤器丢弃，\nCPU 不会被唤醒"];
+        n2 [shape=box, style="filled", fillcolor="#dbeafe", label="主机 B 的 NIC\n不在组中：\n硬件过滤器丢弃，\nCPU 不会被唤醒"];
+        n3 [shape=box, style="filled", fillcolor="#dcfce7", label="主机 C（目标）\n已为自己的地址\n加入此组：\n仅其 NIC 被唤醒并回复"];
+
+        build:out -> ndpsrc [style=bold, color="#16a34a", label="目的地址"];
+        ndpsrc -> n1 [color="#94a3b8", style=dashed];
+        ndpsrc -> n2 [color="#94a3b8", style=dashed];
+        ndpsrc -> n3 [color="#16a34a", style=bold];
+    }
+
+    caption [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9, fontname="Noto Sans CJK SC",
+             label="目标相同（解析下一跳 L2 地址 / DAD 探测），\l中断少得多：只有目标订阅该组。\lL2 交换机也可以侦听这些组。\l"];
+
+    arpsrc -> ndpsrc [style=invis];
+    a3 -> caption [style=invis];
+}

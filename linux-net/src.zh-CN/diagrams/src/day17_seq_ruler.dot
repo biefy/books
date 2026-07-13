@@ -1,0 +1,50 @@
+digraph seq_ruler {
+    rankdir=TB;
+    labelloc=t;
+    label="字节流标尺：snd_una、snd_nxt、write_seq 与恢复点";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // 标尺：一排首尾相接的彩色水平单元格。
+    subgraph cluster_ruler {
+        label="字节流（低序列号 --------------------------------> 高序列号）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", height=0.9, width=1.5];
+
+        c_ack  [fillcolor="#dcfce7", label="已确认\n（snd_una 已\n滑过）"];
+        c_hole [fillcolor="#fee2e2", label="6000-6999\nSACK 空洞\n（已丢失）"];
+        c_inf  [fillcolor="#dbeafe", label="传输中\n[snd_una, snd_nxt)\n（阴影部分）"];
+        c_buf  [fillcolor="#fef3c7", label="已缓冲、未发送\n（在发送缓冲区中）"];
+
+        c_ack -> c_hole -> c_inf -> c_buf [arrowhead=none, color="#475569", penwidth=2];
+    }
+
+    // 标尺上方的边界标记
+    una  [shape=box, style="filled,rounded", fillcolor="#dbeafe", fontsize=10,
+          label="snd_una\n左边界：\n最早的未确认字节"];
+    nxt  [shape=box, style="filled,rounded", fillcolor="#dbeafe", fontsize=10,
+          label="snd_nxt\n右边界：\n尚未发送的第一个字节"];
+    wseq [shape=box, style="filled,rounded", fillcolor="#fef3c7", fontsize=10,
+          label="write_seq\n应用已交给套接字的\n数据尾部"];
+
+    una  -> c_hole [color="#2563eb", arrowhead=vee, label="左边界"];
+    nxt  -> c_buf  [color="#2563eb", arrowhead=vee, label="右边界"];
+    wseq -> c_buf  [color="#d97706", arrowhead=vee];
+
+    // 恢复点 = high_seq
+    hseq [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=10,
+          label="high_seq（恢复点）\n= 丢包开始时的 snd_nxt。\n当 snd_una 越过它时，\n恢复结束。"];
+    hseq -> c_inf [color="#7c3aed", style=dashed, arrowhead=vee];
+
+    // 接收方累计 ACK + 重复 ACK 过程（位于标尺下方）
+    rcv  [shape=box, style="filled,rounded", fillcolor="#dcfce7", fontsize=10,
+          label="接收方：累计 ACK\n始终再次通告\n第一个空洞 = ACK 6000"];
+    c_hole -> rcv [color="#16a34a", style=bold, arrowhead=vee, label="ACK 6000"];
+
+    later [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+           label="7000-7999、8000-8999 已到达但停留在\l空洞之后，因此每次都会再次触发相同的\lACK 6000 = 重复 ACK 信号。\l"];
+    rcv -> later [color="#dc2626", style=dashed, arrowhead=vee, label="受阻于\n停滞的序号"];
+
+    { rank=same; una; nxt; wseq; }
+    { rank=same; rcv; later; }
+}

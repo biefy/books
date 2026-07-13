@@ -1,0 +1,31 @@
+digraph nat_reply_tuple {
+    rankdir=TB;
+    labelloc=t;
+    label="NAT 复用双元组机制：重写应答元组即可自动获得反向映射";
+    fontname="Noto Sans CJK SC"; fontsize=13;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    orig [shape=record, style="filled", fillcolor="#dbeafe",
+          label="{ ORIGINAL 元组 | src = 10.0.0.5:1234 | dst = 8.8.8.8:80 }"];
+
+    plain [shape=record, style="filled", fillcolor="#fef3c7",
+           label="{ 普通逆元组（无 NAT） | src = 8.8.8.8:80 | dst = 10.0.0.5:1234 }"];
+
+    rewritten [shape=record, style="filled", fillcolor="#dcfce7",
+               label="{ REPLY 元组（已重写） | src = 8.8.8.8:80 | dst = 203.0.113.1:50000 | 已设置 IPS_SRC_NAT }"];
+
+    reply [shape=box, style="filled", fillcolor="#e9d5ff",
+           label="应答数据包到达\n8.8.8.8:80 -> 203.0.113.1:50000\n哈希查找命中 REPLY 元组"];
+
+    rmap [shape=box, style="filled", fillcolor="#dbeafe",
+          label="自动反向映射 dst\n203.0.113.1:50000 -> 10.0.0.5:1234\n（无需第二条规则）"];
+
+    orig -> plain [style=dashed, color="#9ca3af", label="无 NAT 时应为"];
+    orig -> rewritten [color="#16a34a", style=bold, label="NAT 重写预期的\n应答元组"];
+    reply -> rewritten [color="#7c3aed", style=bold, label="同一次元组查找"];
+    rewritten -> rmap [color="#2563eb", style=bold, label="反向映射"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="SNAT/MASQUERADE 规则只需编写一次。应答识别机制——将入站元组\l与已存储的应答元组匹配——正是 NAT 加以利用的机制。重写发生在\lconfirm 阶段；之后的每个应答都会自动进行反向映射。\l"];
+    rmap -> note [style=invis];
+}

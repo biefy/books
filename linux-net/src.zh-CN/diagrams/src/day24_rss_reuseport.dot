@@ -1,0 +1,51 @@
+digraph rss_reuseport {
+    rankdir=TB;
+    labelloc=t;
+    label="两个独立哈希共同引导一个连接：NIC RSS 与 reuseport";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    wire [shape=box, style="filled", fillcolor="#fef3c7", label="从线路到达的帧"];
+
+    toeplitz [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+              label="NIC Toeplitz 哈希\n作用于四元组\n（硬件内，RX 时）"];
+
+    indir [shape=box, style="filled", fillcolor="#dbeafe",
+           label="间接表\n（哈希低位 → 队列）"];
+
+    subgraph cluster_queues {
+        label="RX 队列——每个队列都有自己的 MSI-X IRQ + NAPI + CPU（RSS）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=record, style="filled", fillcolor="#dbeafe"];
+        q0 [label="队列 0|IRQ→CPU0|NAPI"];
+        q1 [label="队列 1|IRQ→CPU1|NAPI"];
+        q2 [label="队列 2|IRQ→CPU2|NAPI"];
+        q3 [label="队列 3|IRQ→CPU3|NAPI"];
+    }
+
+    stack [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+           label="协议栈在该队列的 CPU 上运行\n（softirq RX 并行处理）"];
+
+    lookup [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="__inet_lookup_listener"];
+
+    inethash [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+              label="通过 inet_ehashfn\n进行 reuseport 选择\n（内核中，查找时）"];
+
+    worker [shape=box, style="filled", fillcolor="#dbeafe",
+            label="选中的工作进程\n（固定到某个 CPU）"];
+
+    wire -> toeplitz -> indir;
+    indir -> q0; indir -> q1; indir -> q2; indir -> q3;
+    q1 -> stack [color="#16a34a", style=bold];
+    stack -> lookup -> inethash -> worker;
+
+    warn [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="两个不同的哈希，使用不同的种子！\lNIC Toeplitz 选择 RX 队列/CPU。\linet_ehashfn 独立选择工作进程。\l一个流可能落到 CPU1 的队列，却哈希到 CPU3 的工作进程。\l"];
+    toeplitz -> warn [style=invis];
+    inethash -> warn [style=invis];
+
+    align [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+           label="若要让接收 CPU = 工作进程 CPU 位于同一处，\l需有意对齐二者：\lSO_INCOMING_CPU（内核）或 aRFS（NIC）。\l"];
+    worker -> align [style=dashed, color="#7c3aed", label="对齐"];
+}

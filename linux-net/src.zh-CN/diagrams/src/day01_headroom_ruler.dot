@@ -1,0 +1,27 @@
+digraph headroom {
+    rankdir=TB;
+    labelloc=t;
+    label="线性缓冲区：头部空间、数据、尾部空间与 skb_push";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // The buffer as a single horizontal record, left to right
+    buf [shape=record, style="filled", fillcolor="#fef3c7", fontsize=10,
+         label="{ head | NET_SKB_PAD\n= 64B\n（头部空间） | <d> data:\nETH | IP | TCP | 载荷 | <t> tail | 尾部空间 | end | shinfo }"];
+
+    // Pointers annotation
+    ptrs [shape=note, style="filled", fillcolor="#fef9c3", fontsize=9,
+          label="头部空间 = data - head   （分配时预留）\l尾部空间 = end - tail\llen      = tail - data  (+ data_len for frags)\l"];
+    buf -> ptrs [style=invis];
+
+    // skb_push eating into headroom
+    push [shape=box, style="filled,rounded", fillcolor="#dbeafe", fontsize=10,
+          label="skb_push(skb, VLAN_HLEN)\n→ data 向左移入预留的\n头部空间。\n无需重新分配。"];
+
+    why [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+         label="为何预留 64B？\l1. 留出前置外层头部的空间\l   （VLAN、隧道），无需重新分配。\l2. = L1_CACHE_BYTES，因此 data 从\l   缓存行边界开始。\l"];
+
+    buf:d -> push [label="前置头部", color="#2563eb"];
+    push -> why [style=invis];
+    { rank=same; ptrs; why; }
+}

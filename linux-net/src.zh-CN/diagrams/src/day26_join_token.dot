@@ -1,0 +1,59 @@
+digraph join_token {
+    rankdir=TB;
+    labelloc=t;
+    label="MP_JOIN 通过 token 而非四元组标识连接；HMAC 证明请求并非伪造";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC", fontsize=10];
+
+    // Two endpoints
+    A [shape=box, style="filled", fillcolor="#e9d5ff", label="主机 A（客户端）\n持有 key_A"];
+    B [shape=box, style="filled", fillcolor="#e9d5ff", label="主机 B（服务器）\n持有 key_B"];
+
+    // Primary subflow handshake
+    subgraph cluster_cap {
+        label="1. 主子流——MP_CAPABLE 握手（密钥在线路上仅出现一次）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        syn [shape=box, style="filled", fillcolor="#dbeafe",
+             label="SYN  MP_CAPABLE\n（通告 key_A）"];
+        synack [shape=box, style="filled", fillcolor="#dbeafe",
+                label="SYN-ACK  MP_CAPABLE\n（通告 key_B）"];
+        syn -> synack [style=invis];
+    }
+    A -> syn [color="#2563eb"];
+    syn -> B [color="#2563eb"];
+    B -> synack [color="#2563eb"];
+    synack -> A [color="#2563eb"];
+
+    // Token derivation
+    token [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+           label="token = SHA256（对端密钥）的前 32 位\l（mptcp_crypto_key_sha）。这是一个能放进选项预算的\l稳定 32 位句柄；密钥本身绝不会再次传输。\l"];
+
+    // The join from a new address
+    subgraph cluster_join {
+        label="2. 附加子流——来自不同源地址的全新 TCP 四元组";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#d97706";
+        join [shape=record, style="filled", fillcolor="#fef3c7",
+              label="{SYN  MP_JOIN  （新 src 地址）|token = hash(key_B)|对 key_A + key_B 计算 HMAC}"];
+    }
+    A -> join [label="打开第 2 条路径", color="#d97706"];
+
+    // Demux
+    table [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+           label="token -> msk 表\n(mptcp_token_get_sock)\n按 token 查找，而非四元组"];
+    join -> table [label="到达 B", color="#d97706", style=bold];
+
+    msk [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+         label="现有 msk\nconn_list（子流列表）"];
+    table -> msk [label="token 命中 -> 挂接", color="#16a34a", style=bold];
+
+    new_conn [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+              label="不是一个全新且无关的连接\n（普通四元组多路分解\n原本会这样处理）"];
+    table -> new_conn [label="已避免", style=dashed, color="#dc2626"];
+
+    note_hmac [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+               label="任何窃听者都能看到 token，因此它不能充当凭证。\lHMAC 需要 A 和 B 才持有的两个密钥 -> 即使陌生人\l拥有 token，也仍然无法伪造加入请求。\l"];
+
+    synack -> token [style=dashed, color="#16a34a", constraint=false];
+    join -> note_hmac [style=dashed, color="#dc2626", constraint=false];
+}

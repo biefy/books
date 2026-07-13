@@ -1,0 +1,37 @@
+---
+config:
+  flowchart:
+    defaultRenderer: elk
+  themeVariables:
+    fontFamily: '"Noto Sans CJK SC", "PingFang SC", sans-serif'
+---
+flowchart TD
+    Send["TX 路径：ip_finish_output2"]
+    Lookup["neigh_lookup(arp_tbl,<br/>&nexthop_ip, dev)<br/>net/core/neighbour.c:625"]
+    Found{条目存在？}
+    State{neigh 状态？}
+    None["无条目 → neigh_create"]
+    Reachable["NUD_REACHABLE<br/>具有 dst_ha (MAC)<br/>最近的确认仍然有效"]
+    Stale["NUD_STALE<br/>有 MAC，但已过期<br/>启动探测"]
+    Incomplete["NUD_INCOMPLETE<br/>正在解析（已发送 ARP 请求）<br/>等待时将 skb 排队"]
+    Failed["NUD_FAILED<br/>ARP 超时<br/>丢弃或生成<br/>ICMP 不可达消息"]
+    BuildL2["使用 neigh->ha 构建<br/>以太网标头 (eth_header)"]
+    Xmit["dev_queue_xmit"]
+    Send --> Lookup --> Found
+    Found -->|否| None --> Incomplete
+    Found -->|是| State
+    State -->|REACHABLE| Reachable
+    State -->|STALE| Stale
+    State -->|INCOMPLETE| Incomplete
+    State -->|FAILED| Failed
+    Reachable --> BuildL2 --> Xmit
+    Stale --> BuildL2
+    Reachable ~~~ Stale
+    Incomplete ~~~ Failed
+
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    classDef hot fill:#fef3c7,stroke:#d97706
+    class BuildL2,Xmit ok
+    class Failed bad
+    class Found,State hot

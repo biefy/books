@@ -1,0 +1,44 @@
+digraph packet_type_demux {
+    rankdir=TB;
+    labelloc=t;
+    label="packet_type 分用：__netif_receive_skb_core 按 skb->protocol 分派";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    skb [shape=record, style="filled", fillcolor="#fef3c7",
+         label="{入站 skb|skb-\>protocol = ETH_P_IP\n（eth_type_trans 返回的 EtherType）}"];
+
+    core [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+          label="__netif_receive_skb_core()"];
+    skb -> core [style=bold, color="#d97706"];
+
+    // ptype_all: taps
+    subgraph cluster_all {
+        label="1. 遍历 ptype_all——接收每个数据包的接收方";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        tap [shape=box, style="filled", fillcolor="#dbeafe",
+             label="tcpdump / AF_PACKET 抓包点"];
+    }
+    core -> tap [label="对每个额外接收方"];
+
+    clone [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+           label="skb_clone()\n新描述符，\n共享数据（dataref）"];
+    tap -> clone [style=dashed, color="#16a34a", label="通过 pt_prev 交付"];
+
+    // ptype_base: the L3 hash table
+    subgraph cluster_base {
+        label="2. 索引 ptype_base[ hash(skb->protocol) ]——只接收一种类型的接收方";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        node [shape=record, style="filled", fillcolor="#dbeafe"];
+        base [label="{ptype_base[]|...|<ip>ETH_P_IP → ip_packet_type|ETH_P_IPV6 → ipv6_rcv|ETH_P_ARP → arp_rcv|...}"];
+    }
+    core -> base:ip [style=bold, color="#2563eb", label="hash(ETH_P_IP)"];
+
+    iprcv [shape=box, style="filled", fillcolor="#dcfce7",
+           label="ip_packet_type.func = ip_rcv\n唯一的实际 L3 处理函数"];
+    base:ip -> iprcv [style=bold, color="#16a34a"];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="pt_prev 延迟：核心记住最后一个匹配项，\l仅在后续接收方出现时才调用它。只有一个\l接收方（仅 ip_rcv，没有 tcpdump）时，最终调用\l会跳过额外的 refcount_inc(&skb->users)\l原子递增。\l"];
+    iprcv -> note [style=invis];
+}

@@ -1,0 +1,35 @@
+digraph two_vtables {
+    rankdir=LR;
+    labelloc=t;
+    label="两张分派表：一次 bind() 系统调用跨越两层";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+    nodesep=0.5; ranksep=1.4;
+
+    call [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+          label="bind(2) 系统调用"];
+
+    subgraph cluster_bsd {
+        label="BSD 层：struct socket->ops (proto_ops = inet_stream_ops)";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        ops [shape=record, style="filled", fillcolor="#dbeafe",
+             label="{.listen → inet_listen|<b>.bind → inet_bind|.poll → ...|.sendmsg → inet_sendmsg}"];
+        notea [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+               label="每个回调函数都接受\lstruct socket *\l面向用户空间\l"];
+        ops -> notea [style=invis];
+    }
+
+    subgraph cluster_proto {
+        label="协议层：struct sock->sk_prot (proto = tcp_prot)";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#d97706";
+        prot [shape=record, style="filled", fillcolor="#fef3c7",
+              label="{<g>.get_port → inet_csk_get_port|.connect → tcp_v4_connect|.sendmsg → tcp_sendmsg|.recvmsg → tcp_recvmsg}"];
+        noteb [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+               label="每个回调函数都接受\lstruct sock *\l面向线路\l"];
+        prot -> noteb [style=invis];
+    }
+
+    call -> ops:b [color="#dc2626", style=bold, label="ops->bind"];
+    ops:b -> prot:g [color="#dc2626", style=bold, label="__inet_bind 调用\nsk_prot->get_port"];
+}

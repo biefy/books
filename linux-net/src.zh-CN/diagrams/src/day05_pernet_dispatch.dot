@@ -1,0 +1,56 @@
+digraph pernet_dispatch {
+    rankdir=TB;
+    labelloc=t;
+    label="pernet_operations：为每个 struct net 配置状态的装配线";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // Left: subsystems registering
+    subgraph cluster_subsys {
+        label="子系统在启动时注册一次";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        node [shape=box, style="filled", fillcolor="#dbeafe"];
+        routing [label="IPv4 路由"];
+        netfilter [label="netfilter"];
+        conntrack [label="conntrack"];
+        tcp [label="tcp"];
+        nftables [label="nftables"];
+        routing -> netfilter -> conntrack -> tcp -> nftables [style=invis];
+    }
+
+    // The list
+    subgraph cluster_list {
+        label="pernet_list（全局，按注册顺序）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=record, style="filled", fillcolor="#e9d5ff"];
+        n0 [label="<f>pernet_operations|init / exit|id, size"];
+        n1 [label="<f>pernet_operations|init / exit|id, size"];
+        n2 [label="<f>pernet_operations|init / exit|id, size"];
+        n0 -> n1 -> n2 [color="#94a3b8", arrowhead=none];
+    }
+
+    routing -> n0 [label="register_pernet_subsys()", fontsize=9, color="#2563eb"];
+    netfilter -> n0 [style=dashed, color="#94a3b8"];
+    conntrack -> n1 [style=dashed, color="#94a3b8"];
+    tcp -> n1 [style=dashed, color="#94a3b8"];
+    nftables -> n2 [style=dashed, color="#94a3b8"];
+
+    // Center: setup_net
+    setup [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+           label="setup_net(net)\nlist_for_each_entry：\n调用 ops->init(net)"];
+    n1 -> setup [style=bold, color="#16a34a", label="遍历列表"];
+
+    // Right: two storage outcomes
+    direct [shape=record, style="filled", fillcolor="#fef3c7",
+            label="struct net|<a>net-\>ipv4 (直接字段)|net-\>nf|net-\>ct"];
+    gen [shape=record, style="filled", fillcolor="#fef3c7",
+         label="net-\>gen[ ] (net_generic 侧数组)|<b>net-\>gen[nft_id] = kzalloc(size)"];
+
+    setup -> direct [label="箭头 A：\n写入直接字段", color="#d97706", fontsize=9];
+    setup -> gen [label="箭头 B：\nkzalloc + net_assign_generic", color="#d97706", fontsize=9];
+
+    // cleanup mirror
+    cleanup [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+             label="cleanup_net(net)\n反向遍历列表：\n调用 ops->exit(net)"];
+    n1 -> cleanup [style=dashed, color="#dc2626", label="镜像流程：拆除", fontsize=9];
+}

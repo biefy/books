@@ -1,0 +1,29 @@
+digraph vlan_tci {
+    rankdir=TB;
+    labelloc=t;
+    label="802.1Q 标记 — 插入源 MAC 与原始 EtherType 之间的 4 字节";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    // 标记在帧中的位置
+    frame [shape=record, style="filled", fillcolor="#dbeafe",
+           label="{ 目的 MAC[6] | 源 MAC[6] | <tag> 802.1Q 标记[4]\n（插入） | 原始 EtherType[2]\n= h_vlan_encapsulated_proto } "];
+
+    // 将 4 字节标记展开为 TPID + TCI
+    tag [shape=record, style="filled", fillcolor="#fef3c7",
+         label="{ <tpid> TPID[16 位]\n0x8100 C-VLAN\n0x88A8 S-VLAN (QinQ) | <tci> TCI[16 位] } "];
+
+    frame:tag -> tag:tpid [color="#d97706", style=bold, label="展开 4 字节"];
+
+    // 将 TCI 分为三部分
+    tci [shape=record, style="filled", fillcolor="#dcfce7",
+         label="{ <pcp> PCP[3]\n802.1p 优先级\nVLAN_PRIO_MASK 0xe000 | <dei> DEI/CFI[1]\n可丢弃\nVLAN_CFI_MASK 0x1000 | <vid> VID[12]\nVLAN ID\nVLAN_VID_MASK 0x0fff } "];
+
+    tag:tci -> tci:dei [color="#16a34a", style=bold, label="拆分 16 位"];
+
+    // 4096 这一结果
+    note [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9, fontname="Noto Sans CJK SC",
+          label="VID 只有 12 位 ->\l  2^12 = VLAN_N_VID 4096 个 VLAN ID\l  （0 和 4095 保留）\l  VID 100 完全可以容纳\l"];
+    tci:vid -> note [color="#7c3aed", style=dashed, constraint=false];
+}

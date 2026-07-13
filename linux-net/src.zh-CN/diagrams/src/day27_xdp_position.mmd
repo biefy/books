@@ -1,0 +1,24 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, sans-serif"}}}%%
+flowchart TD
+    Frame["驱动 RX 缓冲区<br/><b>操作：</b>在分配 skb 前<br/>保存数据包字节<br/><b>下一步原因：</b>XDP 获得第一次<br/>策略处理机会<br/><b>状态：</b>xdp_buff 指向<br/>DMA 支持的数据"]
+    XDP["XDP 程序<br/><b>操作：</b>使用 data/data_end<br/>边界检查解析数据包<br/><b>下一步原因：</b>返回码<br/>选择缓冲区所有者<br/><b>状态：</b>数据包可能已<br/>原地修改"]
+    Action{"XDP 动作"}
+    Drop["XDP_DROP<br/><b>操作：</b>不构建 skb，直接释放/回收<br/>RX 缓冲区<br/><b>状态：</b>协议栈永远<br/>看不到数据包"]
+    Tx["XDP_TX<br/><b>操作：</b>从入站设备<br/>发回缓冲区<br/><b>状态：</b>驱动拥有<br/>用于发送的缓冲区"]
+    Redirect["XDP_REDIRECT<br/><b>操作：</b>将缓冲区排入<br/>devmap/cpumap/xskmap 目标<br/><b>状态：</b>所有权转移到<br/>重定向后端"]
+    Pass["XDP_PASS<br/><b>操作：</b>驱动从缓冲区<br/>构建 skb<br/><b>下一步原因：</b>GRO/IP/netfilter/<br/>套接字需要 skb<br/><b>状态：</b>数据包进入<br/>普通 RX 路径"]
+    Stack["普通协议栈<br/><b>操作：</b>GRO、tc ingress、<br/>Netfilter、路由、传输层<br/><b>状态：</b>skb 携带元数据<br/>穿过内核协议栈"]
+
+    Frame --> XDP --> Action
+    Action --> Drop
+    Action --> Tx
+    Action --> Redirect
+    Action --> Pass --> Stack
+
+    classDef xdp fill:#fef3c7,stroke:#d97706
+    classDef stack fill:#dcfce7,stroke:#16a34a
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    class Frame,XDP,Action xdp
+    class Pass,Stack stack
+    class Drop bad
+    class Tx,Redirect stack

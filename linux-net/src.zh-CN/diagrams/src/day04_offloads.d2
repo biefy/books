@@ -1,0 +1,56 @@
+direction: down
+
+title: |md
+  ## 三种卸载技术，三道边界
+| {near: top-center; shape: text}
+
+tso: "TSO——TCP 分段卸载" {
+  style.fill: "#fef3c7"
+  tso_body: |md
+    **位置：** NIC 硬件（或驱动软件）。
+
+    - 协议栈将一个大 skb（最大 64 KB）交给驱动。
+    - NIC 将其切分为 MSS 大小的 TCP 报文段。
+    - 为每个报文段复制 IP/TCP 头部。
+    - 计算校验和。
+    - ✅ 大幅节省 TX 的 CPU 开销
+    - ❌ NIC 必须支持（NETIF_F_TSO）
+  |
+}
+
+gso: "GSO——通用分段卸载" {
+  style.fill: "#dcfce7"
+  gso_body: |md
+    **位置：** 软件，位于 TX 路径后段。
+
+    - 如果 NIC 不执行 TSO，内核会在发送前切分。
+    - 协议栈仍对每个超级数据包只运行一次 TX。
+    - 只有最后的分段操作逐报文段执行。
+    - ✅ 适用于任何 NIC
+    - ✅ 对协议栈而言，与 TSO 有相同的 CPU 收益
+    - ❌ 分段步骤产生软件开销
+    - 参见 net/core/gso.c（2024 年新增）。
+  |
+}
+
+gro: "GRO——通用接收卸载" {
+  style.fill: "#dbeafe"
+  gro_body: |md
+    **位置：** NAPI 轮询中的软件层，位于协议栈之前。
+
+    - 将同一流的报文段合并为一个 skb（约 64 KB）。
+    - 协议栈看到一个数据包，而非 N 个。
+    - ✅ 大幅节省 RX 的 CPU 开销
+    - ❌ 增加延迟（等待突发数据）
+    - ❌ 有时干扰时序测量
+    - 参见 net/core/gro.c。
+  |
+}
+
+ctrl: "控制：\nethtool -K eth0 tso on / off\nethtool -K eth0 gso on / off\nethtool -K eth0 gro on / off" {
+  style.fill: "#fef3c7"
+}
+
+tso -> gso
+gso -> gro
+gro -> ctrl

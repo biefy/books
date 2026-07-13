@@ -1,0 +1,36 @@
+digraph gso_marker_fork {
+    rankdir=TB;
+    labelloc=t;
+    label="GSO 标记沿 TX 路径传递；驱动边界根据 netif_needs_gso 分叉";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // The big skb travelling down
+    skb [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+         label="一个大 skb（最大 64 KB）\n沿 TX 路径向下传递\ntcp_transmit_skb → ip_queue_xmit → __dev_queue_xmit"];
+
+    marker [shape=record, style="filled", fillcolor="#dcfce7",
+            label="{skb_shared_info|gso_size = 1460|gso_segs = 44|gso_type = SKB_GSO_TCPV4}"];
+
+    skb -> marker [style=dashed, color="#16a34a", label="携带"];
+
+    // The fork
+    fork [shape=diamond, style="filled", fillcolor="#e9d5ff",
+          label="netif_needs_gso?\n(validate_xmit_skb,\ndev.c:4019/4036)"];
+    skb -> fork [style=bold];
+
+    // TSO branch
+    tso [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+         label="NIC 支持 TSO → false\n整个 skb 原样交给\nndo_start_xmit\n（硬件执行拆分）"];
+
+    // GSO branch
+    gso [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+         label="NIC 不支持 → true\nskb_gso_segment() (dev.c:4039)\n先在软件中拆分"];
+
+    chain [shape=record, style="filled", fillcolor="#dbeafe",
+           label="{skb|skb|skb| … |skb}"];
+
+    fork -> tso [label="硬件", color="#2563eb", style=bold];
+    fork -> gso [label="软件", color="#dc2626", style=bold];
+    gso -> chain [label="MTU 大小的 skb 链"];
+}

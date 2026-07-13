@@ -1,0 +1,65 @@
+direction: down
+
+title: |md
+  ### FIB：转发
+  ### 信息库
+| {near: top-center; shape: text}
+
+flow: "查找输入：flowi4" {
+  style.fill: "#dbeafe"
+  f_body: |md
+    flowi4 查找键：
+
+    - daddr（目的 IP）
+    - saddr（源 IP，可以为 0）
+    - DSCP
+    - oif（出接口，可以为 0）
+    - iif（入接口，可以为 0）
+    - flowi4_mark（skb 标记）
+
+    对 fib_table 执行查找。
+  |
+}
+
+trie: "fib_trie：LC-trie 数据结构" {
+  style.fill: "#fef3c7"
+  t_body: |md
+    路由表使用 LC-trie
+    （层级压缩 trie）。
+
+    - 路径压缩：跳过
+    - &nbsp;&nbsp;只有单个子节点的层级
+    - 分支因子随
+    - &nbsp;&nbsp;数据密度调整
+    - 查找 O(W)，W = 键的
+    - &nbsp;&nbsp;位数（IPv4 为 32）
+    - 每次查找约需
+    - &nbsp;&nbsp;5-15 次内存访问
+
+    参见 net/ipv4/fib_trie.c
+    (fib_table_lookup)
+  |
+}
+
+result: "结果：struct fib_result" {
+  style.fill: "#dcfce7"
+  r_body: |md
+    查找返回：
+
+    - 匹配的 prefixlen
+    - nhc：下一跳
+    - &nbsp;&nbsp;(fib_nh_common)
+    - type：UNICAST、LOCAL、
+    - &nbsp;&nbsp;BROADCAST、MULTICAST
+    - tclassid
+    - table id
+
+    包装函数构建
+    dst_entry / rtable：
+
+    - ip_route_input
+    - ip_route_output_flow
+  |
+}
+
+flow -> trie -> result

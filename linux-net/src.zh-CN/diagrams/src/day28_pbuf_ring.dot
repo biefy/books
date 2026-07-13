@@ -1,0 +1,46 @@
+digraph pbuf_ring {
+    rankdir=TB;
+    labelloc=t;
+    label="Provided buffer 环：数据到达时由内核选择缓冲区并返回其 bid";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC", fontsize=10];
+
+    // The buffer-ring pool
+    subgraph cluster_pool {
+        label="provided buffer 环（第二个共享环，通过 IORING_REGISTER_PBUF_RING 注册）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=record, style="filled", fillcolor="#fef3c7"];
+        b0 [label="{addr|len|bid=0}"];
+        b1 [label="{addr|len|bid=1}"];
+        b2 [label="{addr|len|bid=2}"];
+        b3 [label="{addr|len|bid=3}"];
+        b0 -> b1 -> b2 -> b3 [color="#94a3b8", arrowhead=none];
+        b3 -> b0 [color="#94a3b8", style=dashed, constraint=false, label="回绕"];
+    }
+
+    // The recv
+    recv [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+          label="带 IOSQE_BUFFER_SELECT 的\nmultishot recv\n（缓冲区选择推迟到\n数据就绪时）"];
+
+    arrive [shape=box, style="filled", fillcolor="#dbeafe",
+            label="数据到达 →\n内核取出下一个空闲槽位\niov_iter_ubuf(...) net.c:1061"];
+
+    recv -> arrive [color="#7c3aed", style=bold];
+    b1 -> arrive [color="#d97706", style=bold, label="选择 bid=1"];
+
+    // The CQE
+    cqe [shape=record, style="filled", fillcolor="#dcfce7",
+         label="{CQE|res = 字节数|flags：已设置 F_BUFFER|bid = flags \>\> BUFFER_SHIFT (16)}"];
+    arrive -> cqe [color="#16a34a", style=bold, label="提交"];
+
+    // Re-publish
+    process [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+             label="用户空间：解码 bid，\n处理字节"];
+    cqe -> process [color="#16a34a"];
+    process -> b1 [color="#16a34a", style=dashed, constraint=false,
+                   label="将槽位重新发布\n回缓冲池"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="一个已挂载 recv + 一个缓冲区环 =\l稳态接收时无需提交、无需分配缓冲区。\l"];
+}

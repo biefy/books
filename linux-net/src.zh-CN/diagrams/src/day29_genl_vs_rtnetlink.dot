@@ -1,0 +1,54 @@
+digraph genl_vs_rtnetlink {
+    rankdir=LR;
+    labelloc=t;
+    label="固定协议号（第 8 天 rtnetlink）与具名 generic-netlink family 的对比";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC", fontsize=10];
+
+    // Top lane: rtnetlink
+    subgraph cluster_rt {
+        label="第 8 天：rtnetlink——固定、静态编号的协议";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        rt_tool [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+                 label="工具（ip / ss / tc）"];
+        rt_sock [shape=box, style="filled", fillcolor="#dbeafe",
+                 label="AF_NETLINK 套接字\n固定协议 = NETLINK_ROUTE"];
+        rt_disp [shape=box, style="filled", fillcolor="#fef3c7",
+                 label="rtnetlink 分派"];
+        rt_tool -> rt_sock -> rt_disp;
+    }
+
+    // Bottom lane: generic netlink
+    subgraph cluster_gn {
+        label="Generic netlink——具名 family，运行时解析动态 ID";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        gn_tool [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+                 label="工具（pyynl / devlink）"];
+        nlctrl [shape=box, style="filled", fillcolor="#dcfce7",
+                label="查询 nlctrl（GENL_ID_CTRL）\n解析 'psp'/'devlink'/'ethtool'\n-> 动态 family ID"];
+        gn_sock [shape=box, style="filled", fillcolor="#dbeafe",
+                 label="AF_NETLINK 套接字\n共享协议 = NETLINK_GENERIC"];
+        gn_disp [shape=box, style="filled", fillcolor="#fef3c7",
+                 label="genl 分派 ->\nfamily 的 ops 表"];
+        gn_tool -> nlctrl [label="1. 解析名称"];
+        nlctrl -> gn_sock [label="2. 获得 ID"];
+        gn_sock -> gn_disp [label="3. 与 family 通信"];
+    }
+
+    // YAML codegen feeding both ends
+    yaml [shape=note, style="filled", fillcolor="#dcfce7",
+          label="YAML 规范\l（名称 + 版本 + ops 表）\l"];
+    codegen [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+             label="代码生成步骤"];
+    kfam [shape=box, style="filled", fillcolor="#dbeafe",
+          label="内核 family\nnet/.../netlink_gen.c"];
+    ubind [shape=box, style="filled", fillcolor="#fef3c7",
+           label="用户空间绑定"];
+
+    yaml -> codegen;
+    codegen -> kfam [label="生成"];
+    codegen -> ubind [label="生成"];
+    ubind -> gn_tool [style=dashed, color="#16a34a", constraint=false];
+    kfam -> gn_disp [style=dashed, color="#16a34a", constraint=false];
+}

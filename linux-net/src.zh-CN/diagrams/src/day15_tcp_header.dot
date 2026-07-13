@@ -1,0 +1,44 @@
+digraph tcp_header {
+    rankdir=TB;
+    labelloc=t;
+    label="struct tcphdr——线路上的 20 字节 TCP 头";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    // TCP 头本身：五个 32-bit 字从上到下堆叠。
+    header [shape=record, style="filled", fillcolor="#dbeafe", fontsize=10,
+            label="{ { 源端口 source (16) | 目标端口 dest (16) } | { 序列号 seq (32) } | { 确认号 ack_seq (32) } | { 数据偏移 doff (4) | <flags> flags 字节 | 窗口 window (16) } | { 校验和 check (16) | 紧急指针 urg_ptr (16) } }"];
+
+    // 将 flags byte 展开为各个位（线路顺序，MSB->LSB）。
+    subgraph cluster_flags {
+        label="逐位查看 flags byte（th->syn、th->ack、th->fin、th->rst……）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", fontsize=10, width=0.55, height=0.45];
+
+        bAE  [fillcolor="#f1f5f9", label="AE"];
+        bCWR [fillcolor="#f1f5f9", label="CWR"];
+        bECE [fillcolor="#f1f5f9", label="ECE"];
+        bURG [fillcolor="#f1f5f9", label="URG"];
+        bACK [fillcolor="#e9d5ff", label="ACK"];
+        bPSH [fillcolor="#f1f5f9", label="PSH"];
+        bRST [fillcolor="#fee2e2", label="RST"];
+        bSYN [fillcolor="#e9d5ff", label="SYN"];
+        bFIN [fillcolor="#e9d5ff", label="FIN"];
+
+        bAE -> bCWR -> bECE -> bURG -> bACK -> bPSH -> bRST -> bSYN -> bFIN
+            [style=invis];
+        { rank=same; bAE; bCWR; bECE; bURG; bACK; bPSH; bRST; bSYN; bFIN; }
+    }
+
+    header:flags -> bACK [color="#7c3aed", style=bold, label="展开"];
+
+    legend [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+            label="高亮位驱动状态机：\lSYN = 打开 / 同步序列号\lACK = 确认已接收的数据\lFIN = 优雅半关闭\lRST = 立即中止（红色）\l它们是相互独立的位，而不是数据包类型。\l"];
+
+    inset [shape=box, style="filled,rounded", fillcolor="#fef3c7", fontsize=10,
+           label="SYN-ACK = 一个报文段\n同时设置 SYN 位和 ACK 位\n（不是两个数据包）"];
+
+    bFIN -> legend [style=invis];
+    legend -> inset [style=invis];
+}

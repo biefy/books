@@ -1,0 +1,20 @@
+%%{init: {'themeVariables': {'fontFamily': 'Noto Sans CJK SC, sans-serif'}}}%%
+flowchart TD
+    Alloc["分配 skb 头部<br/><b>操作：</b> alloc_skb/napi_build_skb<br/>创建元数据与数据指针<br/><b>后续原因：</b> 协议栈需要可修改的<br/>数据包描述符<br/><b>状态：</b> refcnt=1,<br/>head/data/tail/end 已初始化"]
+    Fill["挂接数据包字节<br/><b>操作：</b> 驱动/协议代码设置<br/>头部、长度和校验和状态<br/><b>后续原因：</b> 协议层使用<br/>偏移与元数据<br/><b>状态：</b> skb 描述一个数据包<br/>或 GRO 聚合包"]
+    Share["克隆/共享数据<br/><b>操作：</b> skb_clone 复制元数据<br/>但共享数据区<br/><b>后续原因：</b> 抓包点/重传/分段<br/>可能需要另一个所有者<br/><b>状态：</b> cloned 位与 dataref<br/>保护共享字节"]
+    Mutate{"需要修改共享字节？<br/><b>操作：</b> 检查可写性/头部空间<br/><b>后续原因：</b> 写入方不得<br/>破坏其他克隆<br/><b>状态：</b> 写时复制或<br/>安全地原地修改"}
+    Use["RX/TX 协议路径<br/><b>操作：</b> 更新 marks、dst、nfct、<br/>套接字所有者、队列<br/><b>后续原因：</b> 最终消费者决定<br/>交付或发送<br/><b>状态：</b> skb 所有权在<br/>子系统之间转移"]
+    Drop["按原因释放<br/><b>操作：</b> kfree_skb_reason 记录<br/>丢弃/释放原因并释放引用<br/><b>后续原因：</b> 析构函数释放<br/>dst、nfct、套接字、frag 引用<br/><b>状态：</b> 元数据归还 skb 缓存"]
+    Cache["slab/fclone 缓存<br/><b>操作：</b> 回收 skb 头部<br/>供后续数据包使用<br/><b>状态：</b> 内存可用于<br/>下一次分配"]
+
+    Alloc --> Fill --> Use
+    Use --> Share --> Mutate --> Use
+    Use --> Drop --> Cache -. 复用 .-> Alloc
+
+    classDef alloc fill:#dbeafe,stroke:#2563eb
+    classDef use fill:#fef3c7,stroke:#d97706
+    classDef free fill:#fee2e2,stroke:#dc2626
+    class Alloc,Fill alloc
+    class Share,Mutate,Use use
+    class Drop,Cache free

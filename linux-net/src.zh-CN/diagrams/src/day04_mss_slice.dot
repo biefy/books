@@ -1,0 +1,29 @@
+digraph mss_slice {
+    rankdir=TB;
+    labelloc=t;
+    label="一个 64 KB skb 切分为约 44 个 MSS 大小的报文段";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // The big payload bar, sliced into MSS chunks
+    subgraph cluster_bar {
+        label="大 skb 载荷（最大 GSO_LEGACY_MAX_SIZE = 65536 B）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#d97706";
+        bar [shape=record, style="filled", fillcolor="#fef3c7",
+             label="{1460|1460|1460|1460| … |1460|尾部}"];
+    }
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="每片宽度 = gso_size = 1460 B（MSS）\l切片数 = gso_segs ≈ 44\l65536 / 1460 ≈ 44.9 → 向上取整 = 45 个报文段\l"];
+
+    // One slice expanded to a wire frame
+    subgraph cluster_frame {
+        label="一个 MSS 切片加上头部 = 一个线路帧（1514 B）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        frame [shape=record, style="filled", fillcolor="#dbeafe",
+               label="{Eth\n14|IP\n20|TCP\n20|<d> 数据（MSS）\n1460}"];
+    }
+
+    bar -> frame [label="展开一个 1460-B 切片", color="#dc2626", style=bold];
+    bar -> note  [style=invis];
+}

@@ -1,0 +1,44 @@
+digraph fdb_rhashtable {
+    rankdir=TB;
+    labelloc=t;
+    label="FDB rhashtable：无锁 RCU 读取方，持单写入方锁的写入方";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    subgraph cluster_tbl {
+        label="br->fdb_hash_tbl  (rhashtable，按 {MAC, vlan_id} 哈希)";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=record, style="filled", fillcolor="#dbeafe"];
+        b0 [label="<h>桶 0"];
+        b1 [label="<h>桶 1"];
+        b2 [label="<h>桶 2"];
+        b3 [label="<h>桶 3"];
+        b0 -> b1 -> b2 -> b3 [style=invis];
+    }
+
+    oldentry [shape=record, style="filled", fillcolor="#fef3c7",
+              label="{net_bridge_fdb_entry (OLD)|键 \{MAC, vlan_id\}|dst = 端口 A|updated（独占一个缓存行）}"];
+    newentry [shape=record, style="filled", fillcolor="#dcfce7",
+              label="{net_bridge_fdb_entry (NEW)|键 \{MAC, vlan_id\}|dst = 端口 B|updated（独占一个缓存行）}"];
+
+    b1:h -> oldentry [label="rhnode 链表"];
+    b1:h -> newentry [color="#16a34a", style=bold, label="rcu_assign_pointer\n（新发布）"];
+
+    r1 [shape=box, style="filled,rounded", fillcolor="#bfdbfe",
+        label="读取方 1\nrcu_read_lock()\nrhashtable_lookup()\n无锁"];
+    r2 [shape=box, style="filled,rounded", fillcolor="#bfdbfe",
+        label="读取方 2\nrcu_read_lock()\nrhashtable_lookup()\n无锁"];
+
+    r1 -> b1:h [color="#2563eb"];
+    r2 -> oldentry [color="#2563eb", style=dashed,
+                    label="原有读取方\n在宽限期结束前\n仍看到 OLD"];
+
+    w [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+       label="写入方：br_fdb_update()\n持有 br->hash_lock\n（与其他写入方串行化）"];
+    w -> newentry [color="#7c3aed", style=bold, label="发布"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="键 = {MAC, vlan_id}：同一 MAC 位于两个 VLAN = 两个条目。\l`updated` 使用 ____cacheline_aligned_in_smp，因而每帧的\l时间戳写入不会反复争用查找操作读取的缓存行。\l读取方只能看到旧条目或新条目，绝不会看到撕裂的条目。\l"];
+    note -> w [style=invis];
+}

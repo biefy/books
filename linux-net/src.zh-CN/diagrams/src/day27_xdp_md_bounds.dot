@@ -1,0 +1,32 @@
+digraph xdp_md_bounds {
+    rankdir=TB;
+    labelloc=t;
+    label="struct xdp_md：同一批字节，程序安全视图";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC", fontsize=10];
+
+    // program view (above)
+    prog [shape=record, style="filled", fillcolor="#dbeafe",
+          label="{struct xdp_md（程序视图，__u32 偏移量）|{data|data_meta|data_end}}"];
+
+    // the byte ruler (one frame)
+    ruler [shape=record, style="filled", fillcolor="#fef3c7",
+           label="{<hs> data_hard_start|256B XDP_PACKET_HEADROOM|<d> data : ethhdr（14B）|iphdr（20B）|有效载荷 ...|<de> data_end}"];
+
+    // kernel view (below)
+    kern [shape=record, style="filled", fillcolor="#dcfce7",
+          label="{struct xdp_buff（内核视图，真实 void* 指针）|{data|data_meta|data_end}}"];
+
+    prog:nw -> ruler:hs [style=invis];
+    prog -> ruler [color="#2563eb", style=bold, label="验证器重写\n__u32 -> 指针"];
+    ruler -> kern [color="#16a34a", style=bold, label="相同 DMA 字节"];
+
+    check [shape=note, style="filled", fillcolor="#fee2e2", fontsize=10,
+           label="验证器检查（任何访问前都必须执行）：\l   if ((void *)(eth + 1) > data_end) return XDP_DROP;\l   即 data + 14 <= data_end 吗？\l跳过检查，程序将在加载时被拒绝。\l"];
+    ruler:d -> check [color="#dc2626", style=bold, label="守护每次访问"];
+
+    cap [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+         label="这些字节与第 2 天 xdp_buff 指向的相同；\l验证器呈现一个经过边界检查的窗口。\l"];
+    kern -> cap [style=invis];
+}

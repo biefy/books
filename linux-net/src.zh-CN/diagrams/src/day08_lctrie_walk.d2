@@ -1,0 +1,100 @@
+direction: down
+
+title: |md
+  ### LC-trie 查找：分支窗口 → 语义叶节点 → 结构化回溯
+| {near: top-center; shape: text}
+
+key: "查找键" {
+  style.fill: "#dbeafe"
+  k_body: |md
+    `key = ntohl(flp->daddr)`
+
+    fib_table_lookup 从 trie 根节点开始，
+    寻找可用的最具体路由。
+  |
+}
+
+tnode: "tnode：key + pos + bits + slen" {
+  style.fill: "#fef3c7"
+  t_body: |md
+    `index = (key ^ n->key) >> n->pos`
+
+    低位 `pos` 个后缀位位于
+    此节点的分支窗口之下。
+
+    如果 index 可放入 `bits`：
+      从 1 << bits 个槽位中选择 child[index]
+
+    如果 index >= 1 << bits：
+      更高位的前缀/被跳过位不匹配
+      → 进入回溯
+  |
+}
+
+descent: "最深优先下降" {
+  style.fill: "#ede9fe"
+  d_body: |md
+    沿选定的子节点继续。
+
+    仅当 `n->slen > n->pos` 表明这里可能存在
+    较短的候选前缀时，才保存 parent + cindex。
+
+    到达叶节点、NULL 子节点
+    或压缩前缀不匹配时停止。
+  |
+}
+
+leaf: "叶节点：前缀与语义检查" {
+  style.fill: "#dcfce7"
+  l_body: |md
+    `index = key ^ leaf->key`
+
+    对每个有序 fib_alias：
+      不同的位必须落在 `fa_slen` 内
+      prefixlen = 32 - fa_slen
+      检查 DSCP、scope/type、路由活性、
+      请求的 OIF 以及可用的下一跳
+
+    第一个可用别名填充 fib_result。
+  |
+}
+
+backtrace: "没有可用匹配：回溯" {
+  style.fill: "#fee2e2"
+  b_body: |md
+    如果保存的 cindex != 0：
+      cindex &= cindex - 1
+      尝试前一个子分支
+
+    如果 cindex == 0：
+      向上回溯，直到祖先节点存在候选项，
+      重新计算其子节点索引，然后清除一位
+
+    前缀模式沿非 NULL 子节点前进；
+    `prefix_mismatch` 与 `slen == pos`
+    会剪除不可能的较短匹配。
+  |
+}
+
+result: "fib_result" {
+  style.fill: "#fff7ed"
+  r_body: |md
+    prefix + prefixlen + 路由 type/scope
+    选定的 fib_info + 下一跳 + 表
+
+    调用方构建/挂载 rtable。
+
+    LPM 由最深优先下降、
+    有序别名和较短候选项的
+    回溯共同实现。
+  |
+}
+
+key -> tnode: "开始"
+tnode -> descent: "index 可放入窗口"
+descent -> leaf: "候选叶节点"
+leaf -> result: "语义匹配"
+tnode -> backtrace: "窗口/前缀不匹配" {style.stroke-dash: 4}
+descent -> backtrace: "NULL 子节点" {style.stroke-dash: 4}
+leaf -> backtrace: "没有可用别名/下一跳" {style.stroke-dash: 4}
+backtrace -> descent: "下一个较短候选项"

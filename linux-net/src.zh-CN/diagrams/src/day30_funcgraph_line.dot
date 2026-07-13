@@ -1,0 +1,49 @@
+digraph funcgraph_line {
+    rankdir=TB;
+    labelloc=t;
+    label="一行原始 trace-cmd report 输出的结构（function_graph）";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC", fontsize=10];
+
+    // The literal line, split into labeled record cells
+    line [shape=record, style="filled", fillcolor="#fef3c7", fontsize=11,
+          label="{ nc-506899 | [001] | ...1. | 245526.239429: | funcgraph_entry: | \|  tcp_sendmsg() \{ }"];
+
+    // Callout notes, one per column
+    pid    [shape=note, style="filled", fillcolor="#dbeafe", fontsize=9,
+            label="进程-PID\l记录时正在运行的任务\l"];
+    cpu    [shape=note, style="filled", fillcolor="#dbeafe", fontsize=9,
+            label="CPU 编号\l此事件位于 CPU 1\l"];
+    flags  [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+            label="四个上下文标志\l1 irqs-off（. = 开启）\l2 need-resched（. = 无）\l3 hardirq/softirq\l   . = 进程（发送）\l   s = softirq（接收）\l4 preempt-depth（1）\l"];
+    ts     [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+            label="时间戳 sec.usec\l相减即可得到持续时间（us）\l"];
+    kind   [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+            label="进入与退出\lfuncgraph_entry: 开始\lfuncgraph_exit: 结束\l"];
+    brace  [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+            label="按深度缩进的 fn + \{\l缩进 = 调用深度\l退出行中有匹配的 \}\l"];
+
+    pid   -> line [style=dashed, color="#2563eb", arrowhead=vee];
+    cpu   -> line [style=dashed, color="#2563eb", arrowhead=vee];
+    flags -> line [style=dashed, color="#16a34a", arrowhead=vee];
+    ts    -> line [style=dashed, color="#d97706", arrowhead=vee];
+    kind  -> line [style=dashed, color="#7c3aed", arrowhead=vee];
+    brace -> line [style=dashed, color="#7c3aed", arrowhead=vee];
+
+    // Duration mini-panel below
+    subgraph cluster_dur {
+        label="计算总耗时";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        entry [shape=box, style="filled", fillcolor="#dcfce7", fontsize=9,
+               label="第一个入口\ntcp_sendmsg() \{\n245526.239429"];
+        exit  [shape=box, style="filled", fillcolor="#fee2e2", fontsize=9,
+               label="匹配的最外层退出\n}\n245526.239XYZ"];
+        dur   [shape=box, style="filled,rounded", fillcolor="#fde68a", fontsize=10,
+               label="持续时间 =\n239XYZ - 239429 us"];
+        entry -> dur [label="开始", color="#16a34a"];
+        exit  -> dur [label="结束", color="#dc2626"];
+    }
+
+    line -> entry [style=invis];
+}

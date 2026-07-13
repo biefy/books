@@ -1,0 +1,49 @@
+digraph token_bucket {
+    rankdir=TB;
+    labelloc=t;
+    label="令牌桶：rate 向桶中补充令牌，数据包消耗 L 个令牌后通过";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // The tap + bucket
+    subgraph cluster_bucket {
+        label="令牌桶（tbf_sched_data）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        tap [shape=box, style="filled", fillcolor="#e9d5ff",
+             label="水龙头按 rate\n滴入（tokens/s）"];
+        bucket [shape=record, style="filled", fillcolor="#fef3c7",
+                label="{ depth = burst（MTU 或更大） | tokens（当前填充量） | 溢出部分丢失 }"];
+        tap -> bucket [label="滴入", color="#d97706", style=bold];
+    }
+
+    // incoming packets
+    pkt [shape=circle, style="filled", fillcolor="#dbeafe", width=0.5,
+         label="数据包\nL"];
+
+    pkt -> bucket [label="消耗 L 个令牌", color="#2563eb"];
+
+    // top path: tokens available
+    sent [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+          label="tokens >= L：\n数据包通过，\ntokens -= L"];
+    // bottom path: empty
+    dropped [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+             label="桶为空：\n等待将超过 latency\n=> DROP\n（overlimits/dropped 增加）"];
+
+    bucket -> sent [label="足够", color="#16a34a", style=bold];
+    bucket -> dropped [label="不足 + 补充缓慢", color="#dc2626", style=bold];
+
+    // HTB borrowing inset
+    subgraph cluster_htb {
+        label="插图：HTB 子类从父类借用令牌，最多达到 ceil";
+        fontname="Noto Sans CJK SC"; fontsize=10; style="rounded"; color="#7c3aed";
+        parent [shape=box, style="filled", fillcolor="#dbeafe",
+                label="父类\n（富余令牌）"];
+        child [shape=box, style="filled", fillcolor="#dbeafe",
+               label="子类\nrate -> ceil"];
+        parent -> child [label="借用至 ceil", color="#7c3aed", style=dashed];
+    }
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="rate = 稳态上限\lburst = 空闲后可用的初始余量（depth）\llatency = 丢包前的最大等待时间\l"];
+    sent -> note [style=invis];
+}

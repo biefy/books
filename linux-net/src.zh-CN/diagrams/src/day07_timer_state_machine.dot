@@ -1,0 +1,30 @@
+digraph timer_state_machine {
+    rankdir=LR;
+    labelloc=t;
+    label="定时器驱动的邻居状态机（neigh_timer_handler）";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10, shape=box, style="filled,rounded"];
+    edge [fontname="Noto Sans CJK SC"];
+
+    incomplete [fillcolor="#fef3c7", label="INCOMPLETE\n（尚无 MAC，\n已发送 ARP 请求）"];
+    reachable  [fillcolor="#dcfce7", label="REACHABLE\n（新鲜的 MAC）"];
+    stale      [fillcolor="#dbeafe", label="STALE\n（有 MAC，已过期）"];
+    delay      [fillcolor="#dbeafe", label="DELAY\n（等待 L4\n确认）"];
+    probe      [fillcolor="#e9d5ff", label="PROBE\n（正在主动\n重新请求）"];
+    failed     [fillcolor="#fee2e2", label="FAILED\n（已放弃）"];
+
+    reachable -> stale [label="定时器触发，\nnow > confirmed + reachable_time"];
+    stale -> delay [label="一个数据包命中\n已过期条目"];
+    delay -> reachable [label="确认\n已到达", color="#16a34a"];
+    delay -> probe [label="now > confirmed +\ndelay_probe_time"];
+
+    incomplete -> reachable [label="收到回复", color="#16a34a"];
+    incomplete -> failed [label="probes >= 6\n(3 mcast + 3 ucast)", color="#dc2626"];
+    probe -> reachable [label="收到回复", color="#16a34a"];
+    probe -> failed [label="probes >= 3\n（仅 ucast）", color="#dc2626"];
+
+    rearm [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9, fontname="Noto Sans CJK SC",
+           label="探测期间，neigh_timer_handler 会在\lnow + retrans_time (1*HZ) 重新启动自身，\l直到用尽 neigh_max_probes() 给出的探测预算。\l"];
+    incomplete -> rearm [style=dashed, color="#94a3b8", arrowhead=none];
+    probe -> rearm [style=dashed, color="#94a3b8", arrowhead=none];
+}

@@ -1,0 +1,44 @@
+digraph softirq_model {
+    rankdir=TB;
+    labelloc=t;
+    label="软中断模型：上半部触发，__do_softirq 排空";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // Top half: the hardware IRQ handler
+    subgraph cluster_top {
+        label="上半部——硬件 IRQ 上下文（极短，不得睡眠）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#7c3aed";
+        irq [shape=box, style="filled", fillcolor="#e9d5ff",
+             label="驱动 IRQ 处理函数\n1. 确认设备中断\n2. or_softirq_pending(1<<NET_RX_SOFTIRQ)\n3. 返回"];
+    }
+
+    // The 每 CPU 待处理掩码
+    mask [shape=record, style="filled", fillcolor="#dbeafe",
+          label="{每 CPU 待处理掩码|{HI|TIMER|NET_TX|<rx>NET_RX=1|BLOCK|...|RCU}}"];
+
+    irq -> mask [style=bold, color="#7c3aed", label="设置 NET_RX 位"];
+
+    // The drain
+    dosoftirq [shape=box, style="filled", fillcolor="#fef3c7",
+               label="__do_softirq()\n（IRQ 退出时）\n检查掩码，运行每个\n待处理动作函数"];
+    mask:rx -> dosoftirq [style=bold, color="#d97706", label="该位已设置"];
+
+    action [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+            label="net_rx_action()\n（RX 下半部）"];
+    dosoftirq -> action [label="NET_RX_SOFTIRQ\n→ 已注册的动作"];
+
+    // The overflow safety valve
+    restart [shape=diamond, style="filled", fillcolor="#fee2e2", fontsize=9,
+             label="经过 MAX_SOFTIRQ_RESTART\n= 10 轮后仍有\n待处理工作？"];
+    action -> restart [label="还有工作？"];
+    restart -> dosoftirq [label="否：再次循环", color="#16a34a"];
+
+    ksoftirqd [shape=box, style="filled", fillcolor="#fee2e2",
+               label="唤醒 ksoftirqd\n（每 CPU 内核线程）\n与用户任务公平竞争\n——避免饥饿"];
+    restart -> ksoftirqd [label="是：转交", style=bold, color="#dc2626"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="此处一切均为每 CPU：\l待处理掩码、__do_softirq 和\lksoftirqd 都按 CPU 运行。\l"];
+    ksoftirqd -> note [style=invis];
+}

@@ -1,0 +1,33 @@
+%%{init: {'themeVariables': {'fontFamily': 'Noto Sans CJK SC, sans-serif'}}}%%
+flowchart LR
+    subgraph TX["使用 TSO/GSO 的 TX 路径"]
+        App["应用发送 64 KB"]
+        TCP["tcp_sendmsg<br/>构造一个大 skb<br/>标记为 SKB_GSO_TCPV4"]
+        IP["IP 层将其视为一个数据包"]
+        Dev["dev_queue_xmit"]
+        Check{"NIC 支持 TSO？"}
+        TSO["TSO：将 64 KB skb 交给 NIC<br/>NIC 在硬件中分段"]
+        GSO["GSO：__skb_gso_segment<br/>在软件中拆分，<br/>将链交给驱动"]
+        Wire["线路：40 多个 MTU 大小的报文段"]
+
+        App --> TCP --> IP --> Dev --> Check
+        Check -->|是| TSO --> Wire
+        Check -->|否| GSO --> Wire
+    end
+
+    subgraph RX["使用 GRO 的 RX 路径"]
+        NIC2["NIC RX 多个报文段"]
+        NAPI["NAPI poll"]
+        GRO["napi_gro_receive<br/>尝试合并"]
+        Hold["在 napi->gro 列表中累积"]
+        Flush["以下情况刷新：<br/>- 不同流，<br/>- 超时，<br/>- napi 退出"]
+        Big["1 个最大 64 KB 的超级数据包"]
+        Stack["netif_receive_skb"]
+
+        NIC2 --> NAPI --> GRO --> Hold --> Flush --> Big --> Stack
+    end
+
+    classDef bpf fill:#fef3c7,stroke:#d97706
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    class Check bpf
+    class TSO,GSO,GRO ok

@@ -1,0 +1,25 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, sans-serif"}}}%%
+flowchart TD
+    App["应用程序<br/><b>操作：</b>调用 socket(..., IPPROTO_MPTCP)<br/><b>下一步原因：</b>显式选择启用 MPTCP<br/><b>状态：</b>应用程序仍只看到一个 SOCK_STREAM"]
+    Msk["MPTCP 主套接字（msk）<br/><b>操作：</b>拥有应用程序可见的字节流<br/><b>下一步原因：</b>需要 TCP 子流承载字节<br/><b>状态：</b>Data Sequence Number 空间"]
+    Primary["主子流<br/><b>操作：</b>带 MP_CAPABLE 的 TCP 连接<br/><b>下一步原因：</b>证明对端支持 MPTCP<br/><b>状态：</b>token/key 标识 MPTCP 连接"]
+    PM["路径管理器<br/><b>操作：</b>使用端点和对端 ADD_ADDR 信息<br/><b>下一步原因：</b>决定何时加入另一条路径<br/><b>状态：</b>候选地址/子流限制"]
+    Join["附加子流<br/><b>操作：</b>MP_JOIN 创建另一条 TCP 连接<br/><b>下一步原因：</b>调度器现在可在多条路径间选择<br/><b>状态：</b>多个 TCP cwnd/RTT"]
+    Sched["MPTCP 调度器<br/><b>操作：</b>依据当前路径状态为新数据选择子流<br/><b>下一步原因：</b>所选子流具有可用窗口/节奏控制<br/><b>状态：</b>字节已分配给一条 TCP 子流"]
+    DSS["DSS 映射<br/><b>操作：</b>将子流序列号映射到 msk DSN<br/><b>下一步原因：</b>接收端可以重排/去重<br/><b>状态：</b>原始字节流已重建"]
+    AppRecv["应用程序读取<br/><b>状态：</b>尽管存在多条 TCP 路径，仍得到一条有序流"]
+
+    TcpOnly["普通 IPPROTO_TCP 套接字<br/><b>状态：</b>保持普通 TCP，除非选择性工具/BPF 钩子将其重新映射"]
+
+    App --> Msk --> Primary --> PM --> Join --> Sched --> DSS --> AppRecv
+    Primary --> Sched
+    App -. 未选择启用 .-> TcpOnly
+
+    classDef app fill:#dbeafe,stroke:#2563eb
+    classDef sub fill:#fef3c7,stroke:#d97706
+    classDef mptcp fill:#dcfce7,stroke:#16a34a
+    classDef note fill:#f3f4f6,stroke:#6b7280
+    class App,AppRecv app
+    class Primary,Join sub
+    class Msk,PM,Sched,DSS mptcp
+    class TcpOnly note

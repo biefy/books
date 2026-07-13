@@ -1,0 +1,37 @@
+digraph jiffies_timeline {
+    rankdir=LR;
+    labelloc=t;
+    label="以 jiffies 计时：邻居的可达性窗口（所有值 = 秒数 * HZ）";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    // 时间线锚点，从左向右绘制
+    subgraph cluster_line {
+        label="jiffies（1 jiffy = 1/HZ 秒；例如 HZ=1000 时为 1ms）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", fillcolor="#dbeafe"];
+
+        t0   [label="t0 = confirmed\n（上次可达性\n确认时的 jiffies\n快照）"];
+        p1   [shape=box, style="filled", fillcolor="#fef3c7", label="+1*HZ\n(retrans_time)"];
+        p2   [shape=box, style="filled", fillcolor="#fef3c7", label="+2*HZ"];
+        p3   [shape=box, style="filled", fillcolor="#fef3c7", label="+3*HZ"];
+        dots [shape=plaintext, style="", fillcolor="white", label="……  探测间隔\n每 1*HZ 一次……"];
+        bound [shape=box, style="filled", fillcolor="#fee2e2",
+               label="+30*HZ\n(reachable_time)\nREACHABLE -> STALE\n边界"];
+
+        t0 -> p1 -> p2 -> p3 -> dots -> bound [color="#94a3b8", arrowhead=vee];
+    }
+
+    state_r [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+             label="当 now < confirmed + reachable_time 时\n为 REACHABLE"];
+    state_s [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+             label="一旦 now >= confirmed + reachable_time\n则为 STALE"];
+
+    t0 -> state_r [style=invis];
+    bound -> state_s [style=invis];
+
+    cmp [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9, fontname="Noto Sans CJK SC",
+         label="neigh_timer_handler 中的过期检测：\ltime_after(now, confirmed + reachable_time)\lnow = jiffies（一次廉价的内存加载）\l"];
+    bound -> cmp [style=invis];
+}
