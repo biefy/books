@@ -1,0 +1,41 @@
+direction: down
+
+title: |md
+  ### 内联循环与 bpf_loop
+  #### 验证器看到的内容
+| {near: top-center; shape: text}
+
+inline: "内联循环" {
+  style.fill: "#fee2e2"
+  desc: |md
+    `for (i=0; i<100; i++) { body; }`
+
+    验证器视角：
+    - **展开全部 100 次迭代**
+    - 一个巨大的直线程序
+    - `body` 中的每个分支都分叉 × 100
+    - 总路径数 = 100 × paths(body)
+    - 复杂度快速增长；触及 1M 预算
+    - 适用于小型、简单的循环体（约 100 次迭代）
+    - 复杂循环体会失效
+    - n 大于几百时会失效
+  |
+}
+
+bpf_loop_call: "bpf_loop(100, callback, ctx, 0)" {
+  style.fill: "#dcfce7"
+  desc: |md
+    验证器视角：
+    - **只验证一次 `callback` 循环体**
+    - 一条路径，一次迭代
+    - `bpf_loop` 是黑盒辅助函数
+    - 运行已验证的回调函数 ≤ 100×
+    - 复杂度 = paths(callback)
+    - 与迭代次数无关
+    - 适用于极大计数（1M？没问题）
+    - 代价：无法直接共享栈变量
+    - 必须传递 `ctx`
+  |
+}
+
+inline -> bpf_loop_call: "以下情况优先使用：\n- 迭代次数 > ~100\n- 循环体含分支\n- 循环体并非简单操作" {style.stroke-dash: 4}

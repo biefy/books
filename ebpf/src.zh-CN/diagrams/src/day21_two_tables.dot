@@ -1,0 +1,32 @@
+digraph two_tables {
+    rankdir=TB;
+    labelloc=t;
+    label="两套独立的注册机制：程序内释放与可暂存 kptr 的析构函数";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.4; ranksep=0.6;
+
+    // LEFT: in-program kfuncs
+    left [shape=record, style="filled", fillcolor="#dbeafe", fontsize=10,
+          label="{ 程序内 kfunc（第 20 天）\nKF_ACQUIRE / KF_RELEASE | bpf_task_acquire  [KF_ACQUIRE] | bpf_task_release  [KF_RELEASE] | bpf_sk_release  [KF_RELEASE] }"];
+
+    // RIGHT: kptr destructor table
+    right [shape=record, style="filled", fillcolor="#dcfce7", fontsize=10,
+           label="{ kptr 析构函数表\nregister_btf_id_dtor_kfuncs() | task_struct  -\>  bpf_task_release_dtor | cgroup  -\>  bpf_cgroup_release_dtor | sk_buff  -\>  bpf_kfree_skb_dtor }"];
+
+    // sock note
+    socknote [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+              label="sock 只出现在左侧：\l可在程序内释放（bpf_sk_release），\l但没有注册 dtor，因此不能暂存。\lbtf_parse_fields 会拒绝 sock __kptr 字段。\l"];
+
+    leftcap  [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=10,
+              label="BPF 程序运行期间释放引用\n（退出前，栈上仍有 BPF 程序）"];
+    rightcap [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=10,
+              label="栈上没有 BPF 程序时释放引用\n（删除时由 bpf_obj_free_fields 执行）"];
+
+    left  -> leftcap  [style=invis];
+    right -> rightcap [style=invis];
+    left  -> socknote [color="#dc2626", style=bold, label="sock", fontname="Noto Sans CJK SC", fontsize=9];
+
+    { rank=same; left; right; }
+    { rank=same; leftcap; rightcap; }
+}

@@ -1,0 +1,37 @@
+digraph tuple_pair {
+    rankdir=TB;
+    labelloc=t;
+    label="一个 nf_conn、两个元组、一张全局哈希表";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // The reply packet that arrives
+    pkt [shape=box, style="filled", fillcolor="#fef3c7",
+         label="入站应答数据包\n8.8.8.8:80 -> 10.0.0.5:1234\n构建元组，只查找一次"];
+
+    // The global hash table both tuples register into
+    hash [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+          label="全局 nf_conntrack_hash\n（一张表；两个元组\n都哈希到其中）"];
+
+    // The connection record with its two tuples
+    subgraph cluster_conn {
+        label="struct nf_conn";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        node [shape=record, style="filled", fillcolor="#dbeafe"];
+        orig [label="tuplehash[ORIGINAL]|src 10.0.0.5:1234|dst 8.8.8.8:80|dir = 0"];
+        repl [label="tuplehash[REPLY]|src 8.8.8.8:80|dst 10.0.0.5:1234|dir = 1"];
+        orig -> repl [style=invis];
+    }
+
+    pkt -> hash [style=bold, color="#16a34a", label="1. 查找"];
+    hash -> orig [color="#7c3aed", label="注册", dir=back];
+    hash -> repl [style=bold, color="#16a34a", label="2. 匹配 REPLY（dir=1）"];
+
+    tag [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+         label="3. 匹配 REPLY 元组（dir=1），\l因此该数据包属于应答方向：\l用此 nf_conn + ctinfo >= IP_CT_IS_REPLY\l标记 skb\l"];
+    repl -> tag [color="#16a34a"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="REPLY = ORIGINAL 的逆元组\l（nf_ct_invert_tuple）：交换 src/dst，\l交换 L4 id。nf_ct_tuplehash_to_ctrack\l使用 dir 字节还原 nf_conn。\l"];
+    orig -> note [style=invis];
+}

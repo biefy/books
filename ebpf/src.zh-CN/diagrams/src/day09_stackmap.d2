@@ -1,0 +1,32 @@
+direction: down
+
+title: |md
+  ## BPF_MAP_TYPE_STACK_TRACE
+  每个唯一栈只存储一次
+| {near: top-center; shape: text}
+
+call: "BPF 程序调用\n`bpf_get_stackid(ctx, &stacks, 0)`" {style.fill: "#dbeafe"}
+
+walk: "内核遍历帧指针\n或使用 ORC 栈展开器" {style.fill: "#fef3c7"}
+
+frames: "捕获的帧\n[ip0, ip1, ip2, ...]" {style.fill: "#fef3c7"}
+
+hash: "对帧数组进行哈希\n→ stackid（32 位）" {style.fill: "#fef3c7"}
+
+map: "stacks 映射" {
+  style.fill: "#dcfce7"
+  m_layout: |md
+    映射类型：STACK_TRACE
+    `stackid → [ip0, ip1, ...]`
+    - 每个唯一栈只存储一次
+    - 相同栈 → 相同 stackid
+    - 受 max_entries 限制
+    - 将 stackid 用作另一映射中的键
+    - 例如“stackid → count”直方图
+  |
+}
+
+call -> walk -> frames -> hash -> map: "存储"
+map -> use: "返回 stackid"
+
+use: "将 stackid 用作计数器/\n直方图映射中的键" {style.fill: "#dcfce7"}

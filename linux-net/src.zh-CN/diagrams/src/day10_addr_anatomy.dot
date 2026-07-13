@@ -1,0 +1,33 @@
+digraph addr_anatomy {
+    rankdir=TB;
+    labelloc=t;
+    label="IPv6 地址结构：128 位 = 64 位前缀 + 64 位接口 ID";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    // 128 位条形图，分成两半
+    bar [shape=record, style="filled", fillcolor="#dbeafe",
+         label="{ <p> 高 64 位：网络前缀\n（链路本地地址为 fe80::，\n或从 RA 获得的 /64） | <h> 低 64 位：接口 ID\n（“主机部分”） }"];
+
+    // 填充主机部分的三种方式
+    subgraph cluster_feeders {
+        label="填充低 64 位的三种方式（addr_gen_mode）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#d97706";
+        eui64 [shape=box, style="filled", fillcolor="#fef3c7",
+               label="EUI-64\nMAC + 插入 fffe\n+ 翻转 U/L 位\n（可预测，会泄露隐私）"];
+        secret [shape=box, style="filled", fillcolor="#fef3c7",
+                label="stable_secret\n对每接口种子进行哈希\n（稳定，并非从 MAC 派生）"];
+        temp [shape=box, style="filled", fillcolor="#fef3c7",
+              label="tempaddr (RFC 4941)\n轮换的随机主机\n部分（保护隐私）"];
+    }
+
+    eui64 -> bar:h [color="#d97706"];
+    secret -> bar:h [color="#d97706"];
+    temp -> bar:h [color="#d97706"];
+
+    // 旁侧的表示法解读
+    decode [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9, fontname="Noto Sans CJK SC",
+            label=":: = 全部 128 位均为零（未指定地址）\lfe80::/64 = 链路本地地址（链路启用时始终存在）\lff00::/8 = 组播\l"];
+    bar:p -> decode [style=invis];
+}

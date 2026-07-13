@@ -1,0 +1,30 @@
+digraph btf_pipeline {
+    rankdir=LR;
+    labelloc=t;
+    label="/sys/kernel/btf/vmlinux 的来源：一条构建流水线";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.4; ranksep=0.6;
+
+    src [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+         label="内核 C 源码"];
+    cc [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+        label="gcc / clang\n（+DWARF 调试信息）"];
+    pahole [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="pahole\n（去重并生成）"];
+    btfsec [shape=box, style="filled", fillcolor="#dbeafe",
+            label=".BTF 节\n链接到 vmlinux 中"];
+    sysfs [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+           label="/sys/kernel/btf/vmlinux\n（启动时公开）"];
+
+    readers [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+             label="bpftool / libbpf / 验证器\n（读取该二进制块）"];
+
+    src -> cc -> pahole -> btfsec -> sysfs;
+    sysfs -> readers [label="由它们读取", color="#2563eb", style=bold,
+                      fontname="Noto Sans CJK SC", fontsize=9];
+
+    gate [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="由 CONFIG_DEBUG_INFO_BTF 控制\l（模块：CONFIG_DEBUG_INFO_BTF_MODULES）。\l这个二进制块并非人工编写。\l"];
+    pahole -> gate [style=invis];
+}

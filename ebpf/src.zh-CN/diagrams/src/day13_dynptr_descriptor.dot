@@ -1,0 +1,36 @@
+digraph dynptr_descriptor {
+    rankdir=TB;
+    labelloc=t;
+    label="bpf_dynptr：验证器跟踪的 (data, offset, size) 能力描述符";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // 描述符结构
+    desc [shape=record, style="filled", fillcolor="#dbeafe", fontsize=10,
+          label="{ struct bpf_dynptr_kern | <d> data*（区域基址） | offset（游标） | <s> size | type | ro\n（低 24 位 = 长度） }"];
+
+    // 描述符指向的已预留 ringbuf 槽位
+    slot [shape=record, style="filled", fillcolor="#fef3c7", fontsize=10,
+          label="{ 已预留的 ringbuf 槽位 | 头部字节 | 载荷字节... | 尾部 }"];
+
+    desc:d -> slot [color="#dc2626", style=bold, label="data* 指向此处"];
+
+    // size 上限说明
+    ceil [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="size 位于低 24 位（DYNPTR_SIZE_MASK = 0xFFFFFF）\lDYNPTR_MAX_SIZE = (1<<24)-1  ->  最大 16 MiB - 1 字节\lbpf_dynptr_check_size()：size > MAX  ->  -E2BIG（尚未触及任何内存）\l"];
+    desc:s -> ceil [style=invis];
+
+    // 由辅助函数执行边界检查的写入
+    write [shape=box, style="filled", fillcolor="#e9d5ff",
+           label="bpf_dynptr_write(&ptr, off, src, len, 0)\n辅助函数在调用时检查 off + len <= size\n（运行时防护）"];
+    ok [shape=box, style="filled", fillcolor="#dcfce7",
+        label="在边界内：\nmemmove 到区域中"];
+    bad [shape=box, style="filled", fillcolor="#fee2e2",
+         label="off + len > size：\n拒绝，-EINVAL\n（不会乱写）"];
+
+    write -> ok  [label="通过", color="#2563eb", style=bold];
+    write -> bad [label="失败", color="#dc2626", style=bold];
+
+    slot -> write [style=invis];
+    ceil -> write [style=invis];
+}

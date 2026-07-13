@@ -1,0 +1,30 @@
+digraph rodata_config {
+    rankdir=LR;
+    labelloc=t;
+    label="const volatile 全局变量：加载前可设置，加载后冻结为只读";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    open [shape=box, style="filled", fillcolor="#dbeafe",
+          label="打开 skeleton\l（创建 .rodata 映射，\l 可写）\l"];
+
+    write [shape=box, style="filled", fillcolor="#fef3c7",
+           label="用户空间写入\lskel-\>rodata-\>\lpriority_cgroup_id\l= read_cgroup_id(...)\l"];
+
+    load [shape=box, style="filled", fillcolor="#e9d5ff",
+          label="加载 / 冻结\l（.rodata 映射变为\l 只读）\l"];
+
+    fold [shape=box, style="filled", fillcolor="#dcfce7",
+          label="验证器进行常量折叠\lif (priority_cgroup_id)\l"];
+
+    attach [shape=box, style="filled", fillcolor="#dbeafe",
+            label="挂载\l（调度器运行）\l"];
+
+    open -> write -> load -> fold -> attach [color="#7c3aed", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="id == 0 ⇒ 可证明该分支不可达\l⇒ 受控功能作为死代码被消除\l（未设置或错误的 id 会让它被静默编译掉）\l"];
+
+    fold -> note [style=invis];
+}

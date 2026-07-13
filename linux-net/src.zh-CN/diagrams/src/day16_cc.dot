@@ -1,0 +1,37 @@
+digraph cc_framework {
+    rankdir=TB;
+    labelloc=t;
+    label="TCP 拥塞控制框架：一个操作结构体（虚函数表）、多种算法、运行时选择";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    ops [shape=box, style="filled", fillcolor="#dbeafe", fontname="Noto Sans CJK SC", fontsize=11,
+         label=<<b>struct tcp_congestion_ops</b><br/><br/>
+<font face="Noto Sans Mono CJK SC" point-size="9">cong_avoid / cong_control &mdash; 增长侧（背景 1）<br align="left"/>
+ssthresh &mdash; 丢包时的减小侧（背景 1）<br align="left"/>
+set_state &mdash; ca_state 转换（背景 2）<br align="left"/>
+cwnd_event &mdash; ca_event 事件流，包括 ECN（背景 2/3）<br align="left"/>
+in_ack_event &mdash; ECN/alpha 钩子、DCTCP（背景 3）<br align="left"/>
+pkts_acked &mdash; RTT 反馈（背景 4）<br align="left"/>
+ssthresh / undo_cwnd / init / name / owner<br align="left"/></font>>];
+
+    algos [shape=box, style="filled", fillcolor="#fef3c7", fontname="Noto Sans CJK SC", fontsize=10,
+           label=<<b>源码树中的算法</b><br/><br/>
+<font face="Noto Sans Mono CJK SC" point-size="9">tcp_cubic &mdash; 自 2.6.19 起为默认算法，三次函数增长<br align="left"/>
+tcp_bbr &mdash; 基于模型，cong_control（4.9+）<br align="left"/>
+tcp_reno &mdash; 经典 AIMD 参照算法<br align="left"/>
+tcp_dctcp &mdash; ECN/alpha，仅用于数据中心<br align="left"/>
+tcp_vegas / bic / westwood / yeah / ...<br align="left"/><br/></font>
+<font point-size="9">每种算法都通过 tcp_register_congestion_control 注册；<br align="left"/>
+模块位于 /lib/modules/.../net/ipv4/tcp_*.ko<br align="left"/></font>>];
+
+    sel [shape=box, style="filled", fillcolor="#dcfce7", fontname="Noto Sans CJK SC", fontsize=10,
+         label=<<b>选择方式</b><br/><br/>
+<font face="Noto Sans Mono CJK SC" point-size="9">系统默认：sysctl net.ipv4.tcp_congestion_control<br align="left"/>
+每套接字：setsockopt(TCP_CONGESTION, "bbr")<br align="left"/>
+每路由：ip route ... congctl bbr<br align="left"/>
+可用算法：sysctl net.ipv4.tcp_available_congestion_control<br align="left"/></font>>];
+
+    ops -> algos [label="  每种算法实现\n这些回调函数", fontname="Noto Sans CJK SC", fontsize=9, color="#2563eb"];
+    algos -> sel [label="  每个套接字指向\n一个已注册实例", fontname="Noto Sans CJK SC", fontsize=9, color="#16a34a"];
+}

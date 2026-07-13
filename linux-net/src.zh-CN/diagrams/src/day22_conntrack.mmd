@@ -1,0 +1,25 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, sans-serif"}}}%%
+flowchart TD
+    Pkt["Netfilter 钩子处的数据包<br/><b>作用：</b> 提供五元组、zone、direction<br/><b>为何进入下一步：</b> conntrack 需要元组键<br/><b>状态：</b> skb 可能尚无 nfct"]
+    Tuple["提取元组<br/><b>作用：</b> 解析 L3/L4 头部和应答元组<br/><b>为何进入下一步：</b> 哈希查找使用规范化的原始/应答键<br/><b>状态：</b> tuplehash 候选项"]
+    Lookup["conntrack 查找<br/><b>作用：</b> 在已确认表中搜索任一方向<br/><b>为何进入下一步：</b> 已有流可更新状态；未命中时可创建 NEW<br/><b>状态：</b> 找到 nf_conn 或未命中"]
+    Existing["已有条目<br/><b>作用：</b> 更新 TCP/UDP/ICMP 状态和超时<br/><b>为何进入下一步：</b> 规则需要 ct 状态标签<br/><b>状态：</b> skb 上的 ESTABLISHED/RELATED/INVALID 等"]
+    New["未确认的 NEW 条目<br/><b>作用：</b> 分配 nf_conn 并挂到 skb<br/><b>为何进入下一步：</b> 后续裁决决定它是否可见<br/><b>状态：</b> skb->nfct 指向未确认的 ct"]
+    Rules["过滤/NAT 规则<br/><b>作用：</b> 匹配 ct 状态，可执行 DNAT/SNAT 或 DROP<br/><b>为何进入下一步：</b> 只应确认已接受的首个数据包<br/><b>状态：</b> 裁决以及可能已转换的元组"]
+    Confirm["nf_conntrack_confirm<br/><b>作用：</b> 将已接受的 NEW ct 插入全局哈希<br/><b>为何进入下一步：</b> 应答/后续数据包可以找到它<br/><b>状态：</b> 已确认的 conntrack 条目"]
+    Drop["DROP/无效/压力路径<br/><b>作用：</b> 释放条目或让其保持未确认<br/><b>状态：</b> 没有可复用的流状态"]
+
+    Pkt --> Tuple --> Lookup
+    Lookup -->|命中| Existing --> Rules
+    Lookup -->|未命中| New --> Rules
+    Rules -->|ACCEPT 首个数据包| Confirm
+    Rules -->|DROP 或无效| Drop
+
+    classDef parse fill:#dbeafe,stroke:#2563eb
+    classDef ct fill:#fef3c7,stroke:#d97706
+    classDef out fill:#dcfce7,stroke:#16a34a
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    class Pkt,Tuple parse
+    class Lookup,Existing,New,Rules ct
+    class Confirm out
+    class Drop bad

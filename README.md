@@ -1,5 +1,7 @@
 # books
 
+[简体中文](README.zh-CN.md)
+
 Two hands-on books on Linux kernel internals, written in Head First style with rendered diagrams.
 
 ## Read online

@@ -1,0 +1,27 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif"}}}%%
+flowchart TD
+    Bpf["BPF 程序以高频率<br/>发出事件"]
+    Reserve["bpf_ringbuf_reserve(sz)"]
+    Check{Reserve<br/>返回 NULL？}
+    Drop["递增<br/>'drops' 计数器<br/>(BPF_MAP_TYPE<br/>_PERCPU_ARRAY)"]
+    Submit["bpf_ringbuf_submit"]
+    Done["return 0"]
+
+    User["用户空间消费者<br/>定期读取<br/>drops 计数器"]
+    Diag["日志：'dropped N events<br/>since last sample'"]
+
+    Bpf --> Reserve
+    Reserve --> Check
+    Check -->|是，已满| Drop
+    Drop --> Done
+    Check -->|否| Submit
+    Submit --> Done
+
+    User -.->|读取 drops 映射| Diag
+
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    classDef us fill:#dbeafe,stroke:#2563eb
+    class Submit,Done ok
+    class Drop bad
+    class User,Diag us

@@ -1,0 +1,43 @@
+digraph rpfilter {
+    rankdir=TB;
+    labelloc=t;
+    label="反向路径过滤：反向路由源地址，并询问“回复会从到达接口离开吗？”";
+    fontname="Noto Sans CJK SC"; fontsize=13;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    pkt [shape=record, style="filled", fillcolor="#dbeafe",
+         label="{数据包从 eth0 到达|src = S  dst = D}"];
+
+    fib [shape=box, style="filled", fillcolor="#fef3c7",
+         label="对 S 执行反向 FIB 查找\n（交换 src/dst：daddr=S, saddr=D）\n完整 fib_lookup — 也会查询自定义规则\n(net/ipv4/fib_frontend.c:359-360)"];
+    pkt -> fib [label="反向查找 S", style=dashed, color="#dc2626"];
+
+    // 结果
+    same [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+          label="回复路由解析为\n返回 eth0\n（对称路径）"];
+    other [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+           label="回复路由解析为\n从 eth1 离开（非对称）"];
+    none [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+          label="无法解析到任何地方\n（未知源）"];
+
+    fib -> same;
+    fib -> other;
+    fib -> none;
+
+    accept [shape=box, style="filled", fillcolor="#dcfce7",
+            label="ACCEPT"];
+    dropstrict [shape=box, style="filled", fillcolor="#fee2e2",
+                label="作为 martian 丢弃\ne_rpf（第 424 行）"];
+
+    same -> accept [label="所有模式", color="#16a34a", style=bold];
+
+    other -> dropstrict [label="严格（rp_filter=1）\n要求接口相同", color="#dc2626", style=bold];
+    other -> accept [label="宽松（rp_filter=2）\n能以某种方式到达 -> 接受", color="#16a34a", style=bold];
+
+    none -> dropstrict [label="严格与宽松", color="#dc2626"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9, fontname="Noto Sans CJK SC",
+          label="源路由失效的原因：反向查找会交换 src/dst，\l因此按源地址选择的 'from' 规则在反向时不再选择你的表；\l严格模式随后要求 oif == 到达 iif，非对称路径无法满足。\l宽松模式（2）只询问“能以某种方式到达吗？”。\l"];
+    dropstrict -> note [style=invis];
+}

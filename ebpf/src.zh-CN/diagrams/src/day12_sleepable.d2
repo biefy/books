@@ -1,0 +1,58 @@
+direction: down
+
+title: |md
+  ## 可休眠 BPF 程序
+| {near: top-center; shape: text}
+
+normal: "普通 BPF 程序（不可休眠）" {
+  style.fill: "#fee2e2"
+  n_body: |md
+    原子 / 不可缺页上下文：
+    - IRQ 处理程序中的 kprobe
+    - 调度器内部的 tracepoint
+    - NAPI 软中断中的 XDP
+
+    **不能：**
+    - 调用可能触发缺页的辅助函数
+    - 调用可能阻塞的辅助函数
+    - 获取普通互斥锁
+
+    **不能使用：**
+    - bpf_copy_from_user（触发缺页）
+    - bpf_ima_inode_hash（密码学运算）
+    - bpf_d_path（在 dentry 上触发缺页）
+  |
+}
+
+sleepable: "可休眠 BPF 程序（SEC 后缀 .s/）" {
+  style.fill: "#dcfce7"
+  s_body: |md
+    可缺页上下文：
+    - fentry.s（可休眠跳板）
+    - lsm.s（可休眠 LSM 钩子）
+    - tracing iter
+    - sk_lookup, cgroup{,_skb}.s
+
+    **可以：**
+    - bpf_copy_from_user（可能触发缺页）
+    - bpf_d_path（可能调度）
+    - 运行时间更长的操作
+    - 某些分配器
+
+    **底层机制：**
+    - 由 SRCU（而非 RCU）保护
+    - 可以让出 CPU，运行时间可达数毫秒
+  |
+}
+
+decl: "在 SEC 名称中添加 .s/ 的声明" {
+  style.fill: "#fef3c7"
+  decl_body: |md
+    ```c
+    SEC("fentry.s/__x64_sys_openat")
+    /*       ^^ .s/ suffix == sleepable */
+    ```
+  |
+}
+
+normal -> sleepable -> decl

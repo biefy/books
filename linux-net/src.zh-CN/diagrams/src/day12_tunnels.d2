@@ -1,0 +1,64 @@
+direction: down
+
+title: |md
+  ## 隧道一览
+| {near: top-center; shape: text}
+
+ipip: "IPIP (RFC 1853)" {
+  style.fill: "#dbeafe"
+  ipip_body: |md
+    - IP-in-IP 封装
+    - 外层 IP 头 + 内层 IP 数据包
+    - 最简单的隧道；约 20B 开销
+    - net/ipv4/ipip.c
+  |
+}
+
+gre: "GRE" {
+  style.fill: "#fef3c7"
+  gre_body: |md
+    - 通用路由封装
+    - 外层 IP + GRE 头 + 内层数据包
+    - GRE 头携带：tag, key, seq
+    - 任意协议之上承载任意协议的隧道
+    - net/ipv4/ip_gre.c
+  |
+}
+
+vxlan: "VXLAN" {
+  style.fill: "#dcfce7"
+  vxlan_body: |md
+    - 外层 UDP + VXLAN 头
+      + Ethernet + 内层数据
+    - VNI (24-bit) 标识覆盖网络
+    - 默认 UDP 端口 4789
+    - 大量用于容器
+    - drivers/net/vxlan/
+    - net/ipv4/udp_tunnel*
+  |
+}
+
+wireguard: "WireGuard" {
+  style.fill: "#dbeafe"
+  wg_body: |md
+    - 现代、快速的 VPN
+    - 基于 UDP，消息格式固定
+    - 加密路由（对端公钥）
+    - drivers/net/wireguard/
+    - 自 5.6 (2020) 起进入主线
+  |
+}
+
+shared: "所有隧道都是 netdev" {
+  style.fill: "#fef3c7"
+  sh_body: |md
+    - 显示为虚拟接口
+    - (vxlan0, gre0, wg0)
+    - 像其他接口一样通过它们路由
+    - xmit 处理程序执行封装
+    - RX 经由 UDP 套接字或执行解封装的
+      协议处理程序
+  |
+}
+
+ipip -> gre -> vxlan -> wireguard -> shared

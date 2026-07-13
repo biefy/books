@@ -1,0 +1,23 @@
+%%{init: {'themeVariables': {'fontFamily': 'Noto Sans CJK SC, Noto Sans SC, sans-serif'}}}%%
+flowchart TD
+    In["<b>1. 帧进入网桥端口</b><br/>skb 携带源/目的 MAC、<br/>VLAN 和入站端口<br/><b>移交：</b>网桥必须先学习<br/>再转发<br/><b>状态：</b>skb 已与<br/>一个 br_port 关联"]
+
+    Learn["<b>2. 学习源地址</b><br/>将源 MAC/VLAN 记录到<br/>入站端口，并刷新老化时间<br/><b>移交：</b>目的地址决策<br/>可使用更新后的 FDB<br/><b>状态：</b>反向流量<br/>可变为已知单播"]
+
+    Policy["<b>3. 网桥策略</b><br/>检查端口状态、STP、<br/>VLAN 过滤和本地交付<br/><b>移交：</b>只有处于转发状态的<br/>端口才能继续发送<br/><b>状态：</b>允许、本地<br/>消费或丢弃"]
+
+    Lookup["<b>4. 目的地址查找</b><br/>在 FDB 中查找目的 MAC/VLAN<br/><b>移交：</b>命中时选择一个端口，<br/>未命中/广播时选择泛洪端口集合<br/><b>状态：</b>出站端口列表已确定"]
+
+    Egress["<b>5. 出站副本</b><br/>已知单播排队一个 skb，<br/>泛洪则克隆<br/><b>移交：</b>选定端口将帧<br/>传给 qdisc/驱动程序<br/><b>状态：</b>一个或多个出站 skb"]
+
+    Drop["<b>丢弃 / 消费</b><br/>没有出站帧"]
+
+    In --> Learn --> Policy --> Lookup --> Egress
+    Policy -. 阻塞或本地交付 .-> Drop
+
+    classDef br fill:#fef3c7,stroke:#d97706,stroke-width:2px
+    classDef ok fill:#dcfce7,stroke:#16a34a,stroke-width:2px
+    classDef bad fill:#fee2e2,stroke:#dc2626,stroke-width:2px
+    class In,Learn,Policy,Lookup br
+    class Egress ok
+    class Drop bad

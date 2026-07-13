@@ -1,0 +1,60 @@
+digraph tc_pipeline {
+    rankdir=TB;
+    labelloc=t;
+    label="clsact：仅提供钩子，不进行排队——与真正进行排队的 qdisc 对比";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.5; ranksep=0.7;
+
+    // 中间的 net_device
+    netdev [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="net_device  (veth1)"];
+
+    // clsact 伪 qdisc 集群
+    subgraph cluster_clsact {
+        label="clsact 伪 qdisc  (handle TC_H_CLSACT)";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+
+         in_hook [shape=box, style="filled", fillcolor="#dbeafe",
+                  label="入站钩子\nminor 0xFFF2\n(RX 侧)"];
+        in_filt [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+                 label="cls_bpf 过滤器\n(你的 tc_ingress 程序)"];
+
+        eg_hook [shape=box, style="filled", fillcolor="#dbeafe",
+                 label="出站钩子\nminor 0xFFF3\n(TX 侧)"];
+        eg_filt [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+                 label="cls_bpf 过滤器\n(你的 tc_egress 程序)"];
+
+        in_hook -> in_filt;
+        eg_hook -> eg_filt;
+    }
+
+    noq [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9, fontname="Noto Sans CJK SC",
+         label="仅提供钩子，不进行排队\lclsact_init 连接两个 tcf_blocks，\l没有 .enqueue / .dequeue\l"];
+
+    netdev -> in_hook [label="RX 入站", color="#2563eb", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+    netdev -> eg_hook [label="TX 出站", color="#d97706", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+    noq -> eg_filt [style=invis];
+
+    // 用真正进行排队的 qdisc 作对比
+    subgraph cluster_pfifo {
+        label="pfifo_fast 出站 qdisc  (真正进行排队)";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#d97706";
+
+        band0 [shape=record, style="filled", fillcolor="#fde68a",
+               label="band 0 (高优先级) | 数据包 | 数据包"];
+        band1 [shape=record, style="filled", fillcolor="#fde68a",
+               label="band 1 (普通) | 数据包 | 数据包 | 数据包"];
+        band2 [shape=record, style="filled", fillcolor="#fde68a",
+               label="band 2 (批量) | 数据包"];
+        sched [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+               label="按优先级出队\n-> 驱动 TX"];
+
+        band0 -> sched;
+        band1 -> sched;
+        band2 -> sched;
+    }
+
+    netdev -> band0 [label="入队\n(真实字节)", color="#dc2626", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+    in_filt -> band0 [style=invis, weight=100];
+}

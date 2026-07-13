@@ -1,0 +1,95 @@
+direction: down
+
+title: |md
+  ## kptr：跨多次运行保存内核指针
+| {near: top-center; shape: text}
+
+problem: "问题：tp_btf 提供一个 *task_struct" {
+  style.fill: "#fee2e2"
+  p_body: |md
+    该指针仅在
+    本次运行期间
+    **受信任**。
+
+    返回之后，
+    task 可能已被
+    释放。
+
+    验证器会拒绝
+    将它保存到
+    映射中：
+
+    "cannot reference
+    object of type X
+    in this map".
+  |
+}
+
+solution: "解决方案：映射中的引用计数 kptr" {
+  style.fill: "#dcfce7"
+  s_code: |md
+    ```c
+    struct val {
+      struct task_struct
+        __kptr *t;
+    };
+    struct {
+      __uint(type,
+        BPF_MAP_TYPE_HASH);
+      __type(value,
+        struct val);
+    } m SEC(".maps");
+    ```
+  |
+  s_notes: |md
+    `__kptr`
+    标记该槽位
+
+    保存的是一个
+    引用计数
+    指针。
+
+    `bpf_kptr_xchg`
+    (slot, new)
+
+    以原子方式
+    交换它；
+    必须释放旧值。
+  |
+  s_code -> s_notes: { style.opacity: 0 }
+}
+
+flow: "生命周期" {
+  style.fill: "#fef3c7"
+  f_body: |md
+    1. 调用 acquire kfunc：
+
+    refcount=1，
+    ref id N
+
+    2. xchg 放入映射：
+
+    ref id N 关闭，
+    槽位拥有该引用计数
+
+    3. 查找：
+
+    kptr_xchg(slot,
+    NULL) 返回
+    kptr，并打开
+    ref id M
+
+    4. 释放：
+
+    bpf_task_release，
+    ref id M 关闭
+
+    所有状态转换均由
+    验证器检查。
+
+    不会泄漏，
+    不会发生 UAF。
+  |
+}
+
+problem -> solution -> flow

@@ -1,0 +1,47 @@
+digraph nexthop_objects {
+    rankdir=TB;
+    labelloc=t;
+    label="下一跳对象模型：路由指向一个可通过 ID 寻址的共享下一跳对象";
+    fontname="Noto Sans CJK SC"; fontsize=13;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    // 两条路由
+    subgraph cluster_routes {
+        label="路由（多条路由可共享一个下一跳）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        r1 [shape=box, style="filled", fillcolor="#dbeafe",
+            label="路由：default\nnhid 100"];
+        r2 [shape=box, style="filled", fillcolor="#dbeafe",
+            label="路由：10.0.0.0/8\nnhid 100"];
+    }
+
+    // 共享组对象
+    grp [shape=record, style="filled", fillcolor="#e9d5ff",
+         label="{struct nexthop  id 100|GROUP  类型 resilient|fi-\>nh 指向此处}"];
+
+    r1 -> grp [label="nhid 100", color="#dc2626", style=bold];
+    r2 -> grp [label="nhid 100", color="#dc2626", style=bold];
+
+    // 成员对象
+    subgraph cluster_members {
+        label="成员下一跳对象";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+        m1 [shape=box, style="filled", fillcolor="#dcfce7",
+            label="struct nexthop id 10\nvia 192.168.1.1 dev eth0"];
+        m2 [shape=box, style="filled", fillcolor="#dcfce7",
+            label="struct nexthop id 20\nvia 192.168.2.1 dev eth0"];
+    }
+
+    grp -> m1 [label="组 10/20"];
+    grp -> m2;
+
+    // 桶表
+    buckets [shape=record, style="filled", fillcolor="#fef3c7",
+             label="{nh_res_table — 65535 个桶|桶 0 -\> id 10|桶 1 -\> id 20|桶 2 -\> id 10|...|桶 65534 -\> id 20}"];
+    grp -> buckets [label="拥有", style=dashed, color="#d97706"];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9, fontname="Noto Sans CJK SC",
+          label="桶表属于状态，无法安放在内联路由中\l（路由条目只是前缀 + 嵌入的下一跳）。独立的\l组对象有地方保存该状态 — 这正是此 API 存在的原因。\l"];
+    buckets -> note [style=invis];
+}

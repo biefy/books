@@ -1,0 +1,66 @@
+digraph tunnel_pmtu {
+    rankdir=TB;
+    labelloc=t;
+    label="隧道 MTU 陷阱：封装开销、DF 位与本地 EMSGSIZE 短路";
+    fontname="Noto Sans CJK SC"; fontsize=13;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    inner [shape=record, style="filled", fillcolor="#fef3c7",
+           label="{内部帧 1500B|vxlan0 的 MTU=1450 时可容纳，但这里强制设为 1500}"];
+
+    encap [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+           label="VXLAN 封装：增加约 50B 外层\n（Ethernet 14 + IP 20 + UDP 8 + VXLAN 8）"];
+    inner -> encap [style=bold, color="#d97706"];
+
+    oversize [shape=box, style="filled", fillcolor="#fde68a",
+              label="外层数据包约 1550B——超过底层网络 MTU 1500"];
+    encap -> oversize [style=bold, color="#d97706"];
+
+    branch [shape=diamond, style="filled", fillcolor="#dbeafe", label="外层 DF 位？"];
+    oversize -> branch [style=bold];
+
+    // DF 清零：分片 + 重组
+    subgraph cluster_clear {
+        label="DF 清零（未设置 df，实验默认值）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        frag [shape=box, style="filled", fillcolor="#dbeafe",
+              label="底层网络 ip_do_fragment()\n拆分，并对除最后一个分片外的所有分片设置 IP_MF"];
+        reasm [shape=box, style="filled", fillcolor="#dbeafe",
+               label="对端按偏移量重组"];
+        frag -> reasm [style=bold, color="#2563eb"];
+    }
+    branch -> frag [label="清零", color="#2563eb"];
+
+    // DF 置位：丢弃 + ICMP
+    subgraph cluster_set {
+        label="DF 置位（预期的线路行为）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#dc2626";
+        drop [shape=box, style="filled", fillcolor="#fee2e2",
+              label="路由器丢弃数据包"];
+        icmp [shape=box, style="filled", fillcolor="#fee2e2",
+              label="ICMP 需要分片\ntype 3 / code 4，携带下一跳 MTU\n（若被过滤 → 黑洞）"];
+        drop -> icmp [style=bold, color="#dc2626"];
+    }
+    branch -> drop [label="置位", color="#dc2626"];
+
+    // 实验实际展示的本地短路
+    subgraph cluster_local {
+        label="实验实际展示的情况（本地产生的隧道流量）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+        first [shape=box, style="filled", fillcolor="#dcfce7",
+               label="第一次 DF 探测：在缓存存在前发送 → 成功"];
+        cache [shape=box, style="filled", fillcolor="#dcfce7",
+               label="skb_tunnel_check_pmtu()\n缓存内部路由 PMTU = 1450"];
+        later [shape=box, style="filled", fillcolor="#fee2e2",
+               label="之后每次发送都命中缓存的 1450\n→ 在本地被拒绝：EMSGSIZE\n\"sendmsg: Message too long\""];
+        first -> cache -> later [style=bold, color="#16a34a"];
+    }
+    oversize -> first [style=dashed, color="#16a34a", constraint=false, label="本地隧道"];
+
+    // 持久修复
+    fix [shape=note, style="filled", fillcolor="#dcfce7", fontsize=10,
+         label="持久修复——MSS 钳制：\l将经过的 SYN/SYN-ACK 中 TCP MSS 选项改写为 1410。\l两端协商更小的 MSS，从而绝不会发出过大的报文段。\l"];
+    later -> fix [style=invis];
+    icmp -> fix [style=invis];
+}

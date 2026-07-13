@@ -1,0 +1,52 @@
+digraph stp_storm {
+    labelloc=t;
+    label="L2 环路 = 广播风暴（无 TTL）；STP 选举根并阻塞一个端口";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    // 左侧面板：风暴
+    subgraph cluster_storm {
+        label="没有 STP——广播风暴";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#dc2626";
+        node [shape=box, style="filled", fillcolor="#fee2e2"];
+        A [label="网桥 A"];
+        B [label="网桥 B"];
+        C [label="网桥 C"];
+        A -> B [dir=both, color="#dc2626", style=bold, label="泛洪"];
+        B -> C [dir=both, color="#dc2626", style=bold, label="泛洪"];
+        C -> A [dir=both, color="#dc2626", style=bold, label="泛洪"];
+        storm [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+               label="一次广播会在环路中\l不断倍增。\l以太网没有 TTL\l来阻止它。\l"];
+        storm -> B [style=invis];
+    }
+
+    // 右侧面板：STP 已解决
+    subgraph cluster_stp {
+        label="启用 STP——环路已断开";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+        node [shape=box, style="filled", fillcolor="#dcfce7"];
+        rA [label="网桥 A\n（根）", fillcolor="#bfdbfe"];
+        rB [label="网桥 B"];
+        rC [label="网桥 C"];
+        rA -> rB [dir=both, color="#16a34a", style=bold, label="转发"];
+        rA -> rC [dir=both, color="#16a34a", style=bold, label="转发"];
+        rB -> rC [dir=both, color="#9ca3af", style=dashed,
+                  label="阻塞\n（冗余链路）"];
+    }
+
+    // 状态转换条
+    subgraph cluster_states {
+        label="STP 下正在启用的端口";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", fillcolor="#dbeafe"];
+        s1 [label="LISTENING"];
+        s2 [label="LEARNING\n（学习 MAC，\n不转发）"];
+        s3 [label="FORWARDING", fillcolor="#dcfce7"];
+        s1 -> s2 [label="15 s"];
+        s2 -> s3 [label="15 s"];
+    }
+
+    A -> rA [style=invis];
+    rC -> s1 [style=invis];
+}

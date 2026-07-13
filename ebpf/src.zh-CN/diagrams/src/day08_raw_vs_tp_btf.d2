@@ -1,0 +1,56 @@
+direction: down
+
+title: |md
+  ## 一个跟踪点事件，三种 BPF 接口
+| {near: top-center; shape: text}
+
+kernel: "内核 TRACE_EVENT" {
+  style.fill: "#fef3c7"
+  body: |md
+    `trace_sched_switch(preempt, prev, next)`
+
+    - **作用：** 标记调度器切换点。
+    - **下一步的原因：** 使用方选择所需的结构化程度。
+    - **状态：** 原始 C 参数仍在手中。
+  |
+}
+
+regular: "SEC(\"tracepoint/sched/sched_switch\")" {
+  style.fill: "#fee2e2"
+  body: |md
+    - **作用：** 内核将选定字段复制到
+      `trace_event_raw_sched_switch`。
+    - **状态：** 稳定的复制字节：
+      `prev_comm`、`prev_pid`、`next_comm`、...
+    - **权衡：** 格式稳定，但
+      无法访问实时 `task_struct *`。
+  |
+}
+
+raw: "SEC(\"raw_tracepoint/sched_switch\")" {
+  style.fill: "#fde68a"
+  body: |md
+    - **作用：** 在 `bpf_raw_tracepoint_args` 中
+      公开原始跟踪点参数。
+    - **状态：** `ctx->args[0]`、`ctx->args[1]`、...
+      按位置解码。
+    - **权衡：** 不复制事件结构体，
+      但类型辅助少于 `tp_btf`。
+  |
+}
+
+btf: "SEC(\"tp_btf/sched_switch\")" {
+  style.fill: "#dcfce7"
+  body: |md
+    - **作用：** 传递由 BTF 确定类型的参数：
+      `bool preempt`、`task_struct *prev`、`*next`。
+    - **状态：** 实时的类型化指针
+      在回调期间有效。
+    - **权衡：** 需要内核 BTF，访问结构体字段时
+      需注意 CO-RE。
+  |
+}
+
+kernel -> regular: "复制字段"
+regular -> raw: "原始槽"
+raw -> btf: "BTF 类型化参数"

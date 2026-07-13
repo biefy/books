@@ -244,8 +244,8 @@ libc's USDTs include `lll_lock_wait`, `lll_lock_wait_private`, `setjmp`, `longjm
 >
 > Bash is a single-process per terminal session. You uprobe `readline` and observe nothing — but you're definitely typing in another terminal. What's wrong?
 >
-> .  
-> .  
+> .\
+> .\
 > .
 >
 > **Answer:** likely one of: (a) bash version mismatch — the bash on disk and the bash running might differ if you're inside a shell started before a system upgrade. Restart your shell. (b) bash's `readline` may be statically linked or in `libreadline.so.8` rather than the bash binary itself — `nm /usr/bin/bash | grep readline` to confirm. If empty, attach to libreadline instead. (c) PATH issue — `which bash` gives one path; the running shell may have started from a different one (e.g., `/bin/bash` symlink resolution).

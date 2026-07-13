@@ -1,0 +1,24 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, sans-serif"}}}%%
+flowchart TD
+    Pick["<b>1. 选择一个数据包</b><br/>确定具体的五元组和方向<br/><b>交接条件：</b>每个探针都需要相同的数据包标识<br/><b>状态：</b>预期的 src、dst、proto、ports"]
+
+    Entry["<b>2. RX 入口</b><br/>驱动、可选 XDP、skb 创建、GRO、RX 核心分派<br/><b>交接条件：</b>被接受的 skb 到达 IP 处理程序<br/><b>状态：</b>skb 带有协议元数据和可能的 GRO 聚合"]
+
+    Policy["<b>3. 入站策略</b><br/>tc ingress、PREROUTING、conntrack、DNAT、过滤器<br/><b>交接条件：</b>路由查找必须看到所有改写<br/><b>状态：</b>可能已挂接 nfct，dst 可能已更改"]
+
+    Route["<b>4. 路由决策</b><br/>FIB 规则和表选择本地交付或转发<br/><b>交接条件：</b>dst input/output 选择下一个子系统<br/><b>状态：</b>skb_dst 指向所选路由"]
+
+    Local["<b>5a. 本地接收</b><br/>LOCAL_IN 和 TCP/UDP 套接字查找交付有效载荷<br/><b>状态：</b>数据排队等待应用程序读取"]
+
+    Forward["<b>5b. 转发</b><br/>FORWARD、POST_ROUTING、qdisc、驱动 TX<br/><b>状态：</b>数据包通过所选出站设备离开"]
+
+    Pick --> Entry --> Policy --> Route
+    Route --> Local
+    Route --> Forward
+
+    classDef observe fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+    classDef hook fill:#fef3c7,stroke:#d97706,stroke-width:2px
+    classDef state fill:#dcfce7,stroke:#16a34a,stroke-width:2px
+    class Pick,Entry observe
+    class Policy,Forward hook
+    class Route,Local state

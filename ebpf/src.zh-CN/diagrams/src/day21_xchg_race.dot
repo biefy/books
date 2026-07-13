@@ -1,0 +1,48 @@
+digraph xchg_race {
+    rankdir=TB;
+    labelloc=t;
+    label="为什么要用 xchg 而不是普通存储：一条不可分割的指令只产生一个所有者";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.5; ranksep=0.6;
+
+    // TOP: plain store (racey)
+    subgraph cluster_store {
+        label="普通存储 v->t = ptr（存在竞态——验证器会拒绝）";
+        fontname="Noto Sans CJK SC"; fontsize=12; style="rounded"; color="#dc2626";
+
+        s_cpu0 [shape=box, style="filled", fillcolor="#dbeafe",
+                label="CPU0\n读取 old = T*\nrelease(T)"];
+        s_cpu1 [shape=box, style="filled", fillcolor="#dbeafe",
+                label="CPU1\n读取 old = T*\nrelease(T)"];
+        s_slot [shape=box, style="filled", fillcolor="#fef3c7",
+                label="共享的 8 字节槽位\nv->t = T*"];
+        s_out  [shape=box, style="filled", fillcolor="#fee2e2",
+                label="重复释放\n一个引用却让 rcu_users\n减少两次"];
+        s_cpu0 -> s_slot [color="#dc2626"];
+        s_cpu1 -> s_slot [color="#dc2626"];
+        s_cpu0 -> s_out [style=invis];
+        s_cpu1 -> s_out [style=invis];
+        s_slot -> s_out [color="#dc2626", style=bold];
+    }
+
+    // BOTTOM: xchg (atomic)
+    subgraph cluster_xchg {
+        label="bpf_kptr_xchg（原子操作——所有者恰好只有一个）";
+        fontname="Noto Sans CJK SC"; fontsize=12; style="rounded"; color="#2563eb";
+
+        x_cpu0 [shape=box, style="filled", fillcolor="#dbeafe",
+                label="CPU0\nxchg 返回 T*\n-> release(T)"];
+        x_cpu1 [shape=box, style="filled", fillcolor="#dbeafe",
+                label="CPU1\nxchg 返回 NULL\n-> release(NULL) = 空操作"];
+        x_slot [shape=box, style="filled", fillcolor="#fef3c7",
+                label="共享的 8 字节槽位\n在一条不可分割的指令中\n完成读取和写入"];
+        x_out  [shape=box, style="filled", fillcolor="#dcfce7",
+                label="恰好释放一次\n既不重复释放，也不泄漏"];
+        x_cpu0 -> x_slot [color="#2563eb"];
+        x_cpu1 -> x_slot [color="#2563eb"];
+        x_slot -> x_out [color="#2563eb", style=bold];
+    }
+
+    s_out -> x_cpu0 [style=invis];
+}

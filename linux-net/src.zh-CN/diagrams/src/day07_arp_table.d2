@@ -1,0 +1,20 @@
+direction: down
+
+title: |md
+  ## ARP 表（arp_tbl）布局
+| {near: top-center; shape: text}
+
+table: "struct neigh_table arp_tbl\n(net/ipv4/arp.c:152)\n\n邻居条目的哈希表：\n- 键：IP 地址 + dev 指针\n- 值：struct neighbour（MAC + 状态）\n\n内存计数：\n- gc_thresh1（低水位）\n- gc_thresh2（软限制）\n- gc_thresh3（硬限制；拒绝新条目）\n\nnet.ipv4.neigh.default.*\n默认值：128 / 512 / 1024。\n流量较大时通常会调高。" {
+  style.fill: "#dbeafe"
+}
+
+operations: "操作\n\n- neigh_lookup(arp_tbl, &ip, dev)\n   返回 struct neighbour *（带引用计数）\n- neigh_create()\n   插入 INCOMPLETE 条目，\n   触发 ARP 请求\n- neigh_update()\n   收到 ARP 回复时更新 HA + 状态\n- neigh_event_send()\n   每 skb 路径；尚未解析时排队\n- 垃圾回收（定时器驱动）\n   回收旧条目" {
+  style.fill: "#fef3c7"
+}
+
+userspace: "查看/操作\n\nip neigh show\nip neigh add 10.0.0.1\n   lladdr aa:bb:cc... dev eth0\nip neigh flush all\n\n/proc/net/arp（旧式视图）\n/proc/sys/net/ipv4/neigh/eth0/*\n   （每接口可调参数）" {
+  style.fill: "#dcfce7"
+}
+
+table -> operations
+operations -> userspace

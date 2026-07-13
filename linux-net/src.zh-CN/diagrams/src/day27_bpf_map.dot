@@ -1,0 +1,35 @@
+digraph bpf_map {
+    rankdir=TB;
+    labelloc=t;
+    label="BPF 映射：一个内核驻留表、两个写入方，跨数据包持久存在";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC", fontsize=10];
+
+    // userspace control plane
+    subgraph cluster_user {
+        label="用户空间";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        ctrl [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+              label="控制平面进程\nbpf() 系统调用：\n填充/读取条目\n（配置写入，统计读出）"];
+    }
+
+    // kernel side
+    subgraph cluster_kernel {
+        label="内核";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+
+        prog [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+              label="内核中 XDP 程序\nbpf_redirect_map(&map, key)\n在热路径上查找\n（无系统调用）"];
+
+        map [shape=record, style="filled", fillcolor="#dbeafe",
+             label="{BPF 映射（key → value 表）|{key|value}|{12|netdev（DEVMAP）}|{0|每 CPU 队列（CPUMAP）}|{q3|AF_XDP 套接字（XSKMAP）}}"];
+    }
+
+    ctrl -> map [color="#7c3aed", style=bold, label="bpf() 系统调用\n（跨越用户/内核边界）"];
+    prog -> map [color="#16a34a", style=bold, label="查找/更新\n（内核中）"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="映射可跨数据包、跨程序运行持久存在，\l甚至在分离/重新挂载后依然存在。\l这与第 1 天每个数据包短暂存在的引用计数正相反。\l"];
+    map -> note [style=invis];
+}

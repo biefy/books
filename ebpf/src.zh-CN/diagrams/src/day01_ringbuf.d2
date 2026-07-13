@@ -1,0 +1,32 @@
+direction: down
+
+title: |md
+  ## ringbuf：多个写入者、一个读取者、无锁
+| {near: top-center; shape: text}
+
+producers: "BPF 程序实例（每 CPU）" {
+  grid-columns: 2
+  style.fill: "#dbeafe"
+  cpu0: "CPU 0"
+  cpu1: "CPU 1"
+  cpu2: "CPU 2"
+  cpu3: "CPU 3"
+}
+
+ring: "ringbuf 共享内存（256 KiB）" {
+  shape: rectangle
+  style.fill: "#fef3c7"
+  rec0: "[hdr | 事件 0]"
+  rec1: "[hdr | 事件 1]"
+  rec2: "[hdr | 事件 2]"
+  rec3: "[hdr | 事件 3]"
+  free: "...空闲空间..." {style.fill: "#f9fafb"}
+  rec0 -- rec1 -- rec2 -- rec3 -- free
+}
+
+producers -> ring: "预留+提交\n（在生产者位置上\n执行原子 cmpxchg）"
+
+reader: "用户空间消费者\n（对 ring fd 执行 epoll）" {shape: rectangle; style.fill: "#dcfce7"}
+ring -> reader: "ring_buffer__poll()"
+
+note: "生产者：bpf_ringbuf_reserve()\n通过 cmpxchg 推进生产者位置\n\n消费者：按生产者顺序读取，\n不受提交顺序影响\n\n每条记录的头部：保存大小 + busy 位\n（使提交/丢弃操作无竞态）" {near: bottom-center; shape: text}

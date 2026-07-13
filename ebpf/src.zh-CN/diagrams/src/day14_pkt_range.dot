@@ -1,0 +1,31 @@
+digraph pkt_range {
+    rankdir=TB;
+    labelloc=t;
+    label="验证器已证明安全的范围：每次 x+1 > end 比较都会扩展边界";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // 阶段 0：尚未证明任何范围
+    s0 [shape=record, style="filled", fillcolor="#fee2e2",
+        label="{ data |<safe> 已证明 0 字节 | ... | data_end }|加载时：range = 0。对 data 的任何解引用都会被拒绝。"];
+
+    // 阶段 1：检查 eth 之后
+    s1 [shape=record, style="filled", fillcolor="#dbeafe",
+        label="{ data |<safe> 已证明 0..14（ethhdr） | 未证明 | data_end }|检查 eth+1 后：可以读取 eth-\>h_proto"];
+
+    // 阶段 2：检查 ip 之后
+    s2 [shape=record, style="filled", fillcolor="#dcfce7",
+        label="{ data |<safe> 已证明 0..34（eth + ip） | 未证明 | data_end }|检查 ip+1 后：可以读取 ip-\>protocol（字节 23）"];
+
+    s0 -> s1 [label="eth + 1 > end ?", color="#7c3aed", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+    s1 -> s2 [label="ip + 1 > end ?", color="#7c3aed", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+
+    // 错误访问
+    bad [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+        label="X  未检查 ip 就读取 ip->protocol\n（字节 23 超出范围 0..14）"];
+    s1 -> bad [label="跳过检查", color="#dc2626", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+
+    err [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+        label="verifier: invalid access to packet,\loff=23 size=1, R1(...,r=14)\l"];
+    bad -> err [style=invis];
+}

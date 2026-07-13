@@ -1,0 +1,32 @@
+digraph map_pinning {
+    rankdir=LR;
+    labelloc=t;
+    label="三个引用让一个 LPM trie 保持存活：两个进程 fd 加一个 bpffs 固定引用";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.6; ranksep=1.3;
+
+    // 共享内核对象
+    mapobj [shape=box, style="filled,rounded", fillcolor="#dbeafe", fontname="Noto Sans CJK SC", fontsize=11,
+            label="deny：LPM trie\n（一个内核对象）\n\nrefcount = 3"];
+
+    // 进程 A：加载器
+    loader [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+            label="xdp_block 加载器\n持有 fd + bpf_link\n（挂载 XDP）"];
+
+    // 进程 B：CLI
+    cli [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+         label="blockcli\nbpf_obj_get(\"/sys/fs/bpf/deny\")\n持有自己的 fd"];
+
+    // 固定引用
+    pin [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+         label="/sys/fs/bpf/deny\n（bpffs 固定引用）\n持有自己的引用"];
+
+    loader -> mapobj [label="fd 引用", color="#d97706", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+    cli -> mapobj [label="fd 引用", color="#d97706", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+    pin -> mapobj [label="固定引用", color="#16a34a", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+
+    note [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9, fontname="Noto Sans CJK SC",
+          label="终止 xdp_block：\l  - 它的 fd 被释放\l  - bpf_link 被释放（XDP 自动分离）\l\l但是固定引用仍持有一个引用，\l所以映射会保持存活，直到执行\l`rm /sys/fs/bpf/deny`。\l"];
+    mapobj -> note [style=invis];
+}

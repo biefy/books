@@ -1,0 +1,25 @@
+---
+config:
+  themeVariables:
+    fontFamily: '"Noto Sans CJK SC", "PingFang SC", sans-serif'
+---
+flowchart TD
+    Start["<b>1. 接口启用 IPv6</b><br/>加入所需组播组，<br/>准备链路本地状态<br/><b>交接：</b>每个 IPv6 节点都需要<br/>可用的链路本地地址<br/><b>状态：</b>暂定的设备 IPv6 配置"]
+
+    LinkLocal["<b>2. 链路本地地址 + DAD</b><br/>生成 fe80:: 地址，<br/>探测重复地址<br/><b>交接：</b>没有重复意味着<br/>控制流量可以使用该链路<br/><b>状态：</b>链路本地地址首选或被拒绝"]
+
+    RA["<b>3. Router Advertisement</b><br/>获知前缀、生命周期、<br/>默认路由器、A/M/O 标志<br/><b>交接：</b>标志决定选择 SLAAC、<br/>DHCPv6 或两者兼用<br/><b>状态：</b>路由器和前缀策略已知"]
+
+    Addr["<b>4. 地址配置</b><br/>SLAAC 生成地址，<br/>DHCPv6 获取托管数据<br/><b>交接：</b>每个新地址在使用前<br/>都必须通过 DAD<br/><b>状态：</b>全局地址和选项已安装"]
+
+    Ready["<b>5. NDP 就绪的接口</b><br/>邻居发现解析下一跳，<br/>跟踪可达性<br/><b>状态：</b>IPv6 可以向链路本地<br/>邻居和路由器发送数据"]
+
+    Start --> LinkLocal --> RA --> Addr --> Ready
+    LinkLocal -. 重复 .-> Start
+
+    classDef init fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+    classDef decision fill:#fef3c7,stroke:#d97706,stroke-width:2px
+    classDef ready fill:#dcfce7,stroke:#16a34a,stroke-width:2px
+    class Start,RA init
+    class LinkLocal,Addr decision
+    class Ready ready

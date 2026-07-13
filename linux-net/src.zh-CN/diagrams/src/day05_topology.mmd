@@ -1,0 +1,26 @@
+%%{init: {'themeVariables': {'fontFamily': 'Noto Sans CJK SC, sans-serif'}}}%%
+flowchart TD
+    Init["init_net<br/>(默认命名空间)"]
+    A["netns A<br/>(ip netns add A)"]
+    B["netns B"]
+
+    Init -- "veth 对端" --> VethB["vethA1<br/>（对端）"]
+    Init -- "物理设备位于此处" --> Eth0["eth0<br/>（物理 NIC）"]
+
+    Br["网桥 br0<br/>（位于 init_net）"] --> VethB
+    Br --> Eth0
+
+    A -- "veth 对" --> VethA["vethA0"]
+    A -- "环回" --> LoA["lo"]
+    Init --- A
+    A --- B
+
+    LoA -.- Note1["移动：<br/>ip link set vethA0 netns A<br/>ip netns exec A bash<br/>(unshare CLONE_NEWNET)"]
+    Note1 -.- Note2["每个命名空间独有：<br/>- 路由表（ip route）<br/>- iptables 规则<br/>&nbsp;&nbsp;(sudo nft list ruleset)<br/>- /proc/net/* 视图<br/>- 套接字/监听器<br/>- conntrack 区域"]
+
+    classDef ns fill:#dbeafe,stroke:#2563eb
+    classDef phys fill:#fef3c7,stroke:#d97706
+    classDef veth fill:#dcfce7,stroke:#16a34a
+    class Init,A,B ns
+    class Eth0,Br phys
+    class VethA,VethB,LoA veth

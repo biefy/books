@@ -1,0 +1,39 @@
+vars: {
+  d2-config: {
+    layout-engine: elk
+  }
+}
+
+direction: down
+
+title: |md
+  ## BTF + CO-RE
+  编译一次，
+  在任意内核上运行
+| {near: top-center; shape: text}
+
+build: "构建主机（内核 A）" {
+  style.fill: "#fef3c7"
+  vmlinux_a: "/sys/kernel/btf/\nvmlinux\n（内核 A 的 BTF）" {shape: cylinder}
+  bpftool_a: "bpftool btf dump\nformat c"
+  vmlinux_h: "vmlinux.h\n（所有内核类型）" {shape: document}
+  src: "hello.bpf.c\n#include vmlinux.h"
+  clang_a: "clang -target bpf -g"
+  obj: "hello.bpf.o\n（BPF 字节码 + BTF\n+ CO-RE 重定位记录）" {shape: package}
+
+  vmlinux_a -> bpftool_a -> vmlinux_h -> src
+  src -> clang_a -> obj
+}
+
+target: "目标内核 B\n（布局不同！）" {
+  style.fill: "#dbeafe"
+  vmlinux_b: "/sys/kernel/btf/\nvmlinux\n（内核 B 的 BTF）" {shape: cylinder}
+  libbpf: "加载时的 libbpf"
+  relo: "对每条 CO-RE 重定位记录：\n在 B 的 BTF 中按名称\n查找字段，再用新偏移\n修补指令"
+  loaded: "字段偏移适配 B 的\nBPF 程序" {shape: oval; style.fill: "#dcfce7"}
+
+  vmlinux_b -> libbpf
+  libbpf -> relo -> loaded
+}
+
+build.obj -> target.libbpf: "将 .o 交付到机器 B\n（无需重新编译）"

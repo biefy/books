@@ -332,7 +332,7 @@ If your work touches one of these, apply the same methodology — read source, t
 - The **backlog** is a per-CPU **software NAPI** (`sd->backlog`, poll = `process_backlog`) used by loopback and any non-NAPI path. Loopback RX: `loopback_xmit → __netif_rx → enqueue_to_backlog → sd->input_pkt_queue → process_backlog → __netif_receive_skb`.
 - `process_backlog` calls the **internal** `__netif_receive_skb`, **not** the exported `netif_receive_skb` — so `-g netif_receive_skb` is **empty** on loopback. Graph **`-g tcp_v4_rcv`** instead (works on both paths).
 - Loopback is degenerate (`noqueue` qdisc, no driver/IRQ/NAPI ring, no GRO, no ARP, no routing) precisely because its RX is the backlog. Drive real off-box traffic to exercise the full stack.
-- The capstone deliverable — packet + purpose, each function in order with file/line and data structure, total ns time, one surprise — is the artifact that proves you understood the system.
+- The capstone deliverable — packet + purpose, each function in order with file/line and data structure, total time in microseconds, one surprise — is the artifact that proves you understood the system.
 
 ## After Day 30
 

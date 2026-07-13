@@ -45,9 +45,15 @@
   }
   .tagline {
     color: var(--muted);
-    margin: 0 0 3rem;
+    margin: 0 0 0.5rem;
     font-size: 1.1rem;
   }
+  .language {
+    margin: 0 0 3rem;
+    font-size: 0.95rem;
+  }
+  .language a { color: var(--accent); text-decoration: none; }
+  .language a:hover { text-decoration: underline; }
   .book {
     display: block;
     text-decoration: none;
@@ -101,6 +107,7 @@
 <main>
   <h1>biefy / books</h1>
   <p class="tagline">Hands-on, experiment-driven books on Linux kernel internals.</p>
+  <p class="language"><a href="zh-CN/" lang="zh-CN" hreflang="zh-CN">简体中文</a></p>
 
   <a class="book" href="linux-net/">
     <h2>Linux Network Subsystem in 30 Days</h2>

@@ -1,0 +1,43 @@
+digraph func_ip_resolution {
+    rankdir=LR;
+    labelloc=t;
+    label="bpf_get_func_ip：IP 是唯一的区分依据";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=9];
+
+    // N 个传入目标
+    subgraph cluster_targets {
+        label="N 个已挂载的 vfs_* 函数";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        t1 [shape=box, style="filled,rounded", fillcolor="#dbeafe", label="vfs_read"];
+        t2 [shape=box, style="filled,rounded", fillcolor="#dbeafe", label="vfs_open"];
+        t3 [shape=box, style="filled,rounded", fillcolor="#dbeafe", label="vfs_write"];
+        t4 [shape=box, style="filled,rounded", fillcolor="#dbeafe", label="..."];
+    }
+
+    // 解析路径
+    resolve [shape=box, style="filled", fillcolor="#dcfce7",
+             label="fprobe 处理程序\nfentry_ip ->\nftrace_get_entry_ip()\n-> current->bpf_ctx\n（运行上下文）"];
+
+    t1 -> resolve [label="fentry_ip"];
+    t2 -> resolve [label="fentry_ip"];
+    t3 -> resolve [label="fentry_ip"];
+    t4 -> resolve [label="fentry_ip"];
+
+    // 程序
+    subgraph cluster_prog {
+        label="一个 BPF 程序（所有 N 个目标的 ctx / pt_regs 形状相同）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#7c3aed";
+        getip [shape=box, style="filled", fillcolor="#e9d5ff",
+               label="bpf_get_func_ip()\n从 current->bpf_ctx\n读回入口 IP"];
+        map [shape=record, style="filled", fillcolor="#fef3c7",
+             label="{ 哈希映射 | ip =\> 计数 }"];
+        getip -> map [label="IP = 键"];
+    }
+
+    resolve -> getip [color="#dc2626", style=bold, label="暂存的 IP"];
+
+    note [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+          label="IP 是区分各次调用的唯一依据。\l所有 N 个目标的 ctx（pt_regs）\l形状都相同。\l"];
+    map -> note [style=invis];
+}

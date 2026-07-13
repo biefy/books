@@ -1,0 +1,53 @@
+digraph vxlan_lab {
+    rankdir=TB;
+    labelloc=t;
+    label="VXLAN 实验拓扑：两个命名空间、两个堆叠的地址平面（覆盖网络位于底层网络之上）";
+    fontname="Noto Sans CJK SC"; fontsize=13;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+    compound=true;
+
+    // 覆盖网络平面（上）：vxlan0 上的虚拟 10.100.0.0/24 网络
+    subgraph cluster_overlay {
+        label="覆盖网络  10.100.0.0/24（内部帧所在的虚拟 L2）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded,filled"; fillcolor="#dcfce7"; color="#16a34a";
+        vxA [shape=record, style="filled", fillcolor="#dbeafe",
+             label="{vxlan0 (ns A)|10.100.0.1/24|VTEP, id 100}"];
+        vxB [shape=record, style="filled", fillcolor="#dbeafe",
+             label="{vxlan0 (ns B)|10.100.0.2/24|VTEP, id 100}"];
+        vxA -> vxB [dir=both, style=bold, color="#16a34a",
+                    label="覆盖网络 ping 10.100.0.2", fontname="Noto Sans CJK SC", fontsize=9];
+    }
+
+    // 底层网络平面（下）：通过 br-underlay 的真实 192.168.99.0/24
+    subgraph cluster_underlay {
+        label="底层网络  192.168.99.0/24（承载外层 UDP 数据包的真实 IP 网络）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded,filled"; fillcolor="#fef3c7"; color="#d97706";
+
+        vethApA [shape=record, style="filled", fillcolor="#dbeafe",
+                 label="{vethA_p (ns A)|192.168.99.1/24}"];
+        vethBpB [shape=record, style="filled", fillcolor="#dbeafe",
+                 label="{vethB_p (ns B)|192.168.99.2/24}"];
+
+        vethA [shape=box, style="filled", fillcolor="#e9d5ff", label="vethA (init_net)"];
+        vethB [shape=box, style="filled", fillcolor="#e9d5ff", label="vethB (init_net)"];
+
+        br [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="br-underlay (init_net)\n一个 L2 网段，无 IP"];
+
+        vethApA -> vethA [dir=both, style=dashed, color="#7c3aed", label="veth 对", fontname="Noto Sans CJK SC", fontsize=9];
+        vethBpB -> vethB [dir=both, style=dashed, color="#7c3aed", label="veth 对", fontname="Noto Sans CJK SC", fontsize=9];
+        vethA -> br [dir=both, color="#d97706"];
+        vethB -> br [dir=both, color="#d97706"];
+    }
+
+    // 堆叠：每个 vxlan0 均承载于其命名空间的底层网络地址之上
+    vxA -> vethApA [style=bold, color="#16a34a", constraint=true,
+                    label="封装：外层源 192.168.99.1\nUDP dport 4789", fontname="Noto Sans CJK SC", fontsize=9];
+    vxB -> vethBpB [style=bold, color="#16a34a", constraint=true,
+                    label="封装：外层源 192.168.99.2\nUDP dport 4789", fontname="Noto Sans CJK SC", fontsize=9];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="两个平面，一条线路：\l绿色的覆盖网络帧被包装（增加约 50B）成黄色的底层网络 UDP 数据报，\l经 br-underlay 发送，然后在远端 VTEP 解包。\l底层网络必须先能 ping 通。\l"];
+    br -> note [style=invis];
+}

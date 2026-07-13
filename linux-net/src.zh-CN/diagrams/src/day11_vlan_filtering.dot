@@ -1,0 +1,40 @@
+digraph vlan_filtering {
+    rankdir=LR;
+    labelloc=t;
+    label="感知 VLAN 的网桥：入站 PVID 标记、FDB 键、出站加/去标签、成员资格关卡";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    in [shape=box, style="filled", fillcolor="#fef3c7",
+        label="无标签帧\n进入 v1p"];
+
+    ingress [shape=box, style="filled", fillcolor="#dbeafe",
+             label="br_allowed_ingress()\n标记 PVID 100\n（端口的原生 VLAN）"];
+
+    fdb [shape=box, style="filled", fillcolor="#e9d5ff",
+         label="FDB 查找\n键 = {MAC, 100}"];
+
+    subgraph cluster_egress {
+        label="出站端口策略 (br_handle_vlan)";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        v2p [shape=box, style="filled", fillcolor="#dcfce7",
+             label="v2p  VID 100 无标签\n出站时去除标签\n转发（共享 VID 100）"];
+        v3p [shape=box, style="filled,rounded", fillcolor="#e5e7eb", fontcolor="#9ca3af",
+             color="#9ca3af",
+             label="v3p  仅 VID 200\n不是 VID 100 的成员\n帧在出站时被丢弃"];
+    }
+
+    out2 [shape=box, style="filled", fillcolor="#fef3c7",
+          label="普通帧\n从 v2p 发出"];
+
+    in -> ingress;
+    ingress -> fdb;
+    fdb -> v2p [color="#16a34a", style=bold];
+    fdb -> v3p [color="#dc2626", style=dashed, label="成员资格\n检查失败"];
+    v2p -> out2 [color="#16a34a", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="转发取决于共享成员资格：仅当两个端口都是帧所属 VID 的成员时，\l帧才会在两个端口间移动。\l将 v2p 移到 VID 200 会在出站成员资格检查处中断连接，\l而不是因 FDB 未命中。\l"];
+    note -> v3p [style=invis];
+}

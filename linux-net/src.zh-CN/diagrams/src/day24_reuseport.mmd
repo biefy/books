@@ -1,0 +1,25 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, sans-serif"}}}%%
+flowchart TD
+    SYN["入站 SYN，目标端口 :80"]
+    Hash["__inet_lookup_listener<br/>+ reuseport_select_sock"]
+    Pick{选择哪个 sock？}
+
+    Listen1["sock1（工作进程 1）<br/>SO_REUSEPORT, bind :80"]
+    Listen2["sock2（工作进程 2）<br/>SO_REUSEPORT, bind :80"]
+    Listen3["sock3（工作进程 3）<br/>SO_REUSEPORT, bind :80"]
+    Listen4["sock4（工作进程 4）<br/>SO_REUSEPORT, bind :80"]
+
+    Note["默认：对四元组做哈希，再对 N 取模<br/>BPF：SO_ATTACH_REUSEPORT_EBPF<br/>让程序以确定性方式作出选择"]
+
+    SYN --> Hash --> Pick
+    Pick --> Listen1
+    Pick --> Listen2
+    Pick --> Listen3
+    Pick --> Listen4
+    Listen1 ~~~ Listen2 ~~~ Listen3 ~~~ Listen4
+    Listen4 -.- Note
+
+    classDef sock fill:#dbeafe,stroke:#2563eb
+    classDef hot fill:#fef3c7,stroke:#d97706
+    class Listen1,Listen2,Listen3,Listen4 sock
+    class Hash,Pick hot

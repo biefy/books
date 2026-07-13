@@ -1,0 +1,33 @@
+digraph sock_vs_skb {
+    rankdir=TB;
+    labelloc=t;
+    label="struct sock 拥有整条链——sk_buff 只是其中一环";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // The long-lived connection object
+    sock [shape=record, style="filled", fillcolor="#dbeafe",
+          label="{struct sock|对端地址 + 路由|序列号|snd_cwnd / snd_wnd|sk_wmem_queued / sk_sndbuf}"];
+
+    // The queue of skbs hanging off it
+    subgraph cluster_wq {
+        label="sk_write_queue（sk_buff_head：skb 双向链表）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", fillcolor="#fef3c7"];
+        s0 [label="skb 0\n[字节]"];
+        s1 [label="skb 1\n[字节]"];
+        s2 [label="skb 2\n[字节]"];
+        s3 [label="skb 3\n[字节]"];
+        s0 -> s1 -> s2 -> s3 [color="#94a3b8", dir=both, arrowhead=normal, arrowtail=normal];
+    }
+
+    sock -> s0 [style=bold, color="#2563eb", label="拥有链表头"];
+
+    drain [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+           label="tcp_sendmsg 在尾部追加\ltcp_write_xmit 从头部排空\l"];
+    s3 -> drain [style=invis];
+
+    note [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=10,
+          label="sk_buff = 一个数据包（第 1 天）\lstruct sock = 拥有整条链\l"];
+    sock -> note [style=invis];
+}

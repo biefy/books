@@ -1,0 +1,47 @@
+digraph netlink_route {
+    rankdir=TB;
+    labelloc=t;
+    label="ip route 是 netlink 客户端：RTM_NEWROUTE -> inet_rtm_newroute -> fib_table_insert 扩展 LC-trie";
+    fontname="Noto Sans CJK SC"; fontsize=13;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    // 用户空间
+    subgraph cluster_user {
+        label="用户空间";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        cmd [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+             label="ip route add 10.99.0.0/16 dev lo"];
+        sock [shape=record, style="filled", fillcolor="#e9d5ff",
+              label="AF_NETLINK socket (NETLINK_ROUTE)|RTM_NEWROUTE|{ rtmsg | RTA_DST | RTA_GATEWAY | RTA_OIF | RTA_TABLE }"];
+        cmd -> sock [color="#7c3aed"];
+
+        show [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+              label="ip route show\n（RTM_GETROUTE 转储）"];
+    }
+
+    // 内核
+    subgraph cluster_kernel {
+        label="内核（net/ipv4/fib_frontend.c）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        newroute [shape=box, style="filled", fillcolor="#dbeafe",
+                  label="inet_rtm_newroute\n（解析属性）"];
+        insert [shape=box, style="filled", fillcolor="#dbeafe",
+                label="fib_table_insert"];
+        dump [shape=box, style="filled", fillcolor="#dbeafe",
+              label="inet_dump_fib\n（为 ip route show 提供数据）"];
+        trie [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+              label="LC-trie\n（新叶节点：10.99.0.0/16 -> lo）"];
+
+        newroute -> insert [color="#16a34a"];
+        insert -> trie [style=bold, color="#16a34a", label="扩展 trie"];
+        trie -> dump [style=dashed, color="#94a3b8"];
+    }
+
+    sock -> newroute [style=bold, color="#7c3aed", label="内核边界\n(RTM_NEWROUTE)"];
+    dump -> show [style=dashed, color="#7c3aed", label="RTM_GETROUTE\n回复"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9, fontname="Noto Sans CJK SC",
+          label="之后：ping 10.99.0.1 -> fib_table_lookup 遍历同一个\ltrie，并命中新插入的叶节点。\l本地表（255）通过同一路径自动填充：\lfib_magic(RTM_NEWROUTE, RTN_LOCAL, ...)。\l"];
+    trie -> note [style=invis];
+}

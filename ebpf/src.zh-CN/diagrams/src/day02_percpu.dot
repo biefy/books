@@ -1,0 +1,45 @@
+digraph percpu {
+    rankdir=TB;
+    labelloc=t;
+    label="每 CPU 哈希：没有会发生竞争的共享槽位；代价转移到读取阶段";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.5; ranksep=0.9;
+
+    key [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+         label="一个键（PID 14392）"];
+
+    // 每 CPU 值单元
+    subgraph cluster_cells {
+        label="每个逻辑 CPU 各有一份独立的值副本";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#7c3aed";
+        c0 [shape=box, style="filled", fillcolor="#fef3c7", label="CPU0 副本\nval = 31"];
+        c1 [shape=box, style="filled", fillcolor="#fef3c7", label="CPU1 副本\nval = 18"];
+        c2 [shape=box, style="filled", fillcolor="#fef3c7", label="CPU2 副本\nval = 27"];
+        c3 [shape=box, style="filled", fillcolor="#fef3c7", label="CPU3 副本\nval = 24"];
+    }
+
+    key -> c0; key -> c1; key -> c2; key -> c3;
+
+    // 无锁写入标签
+    w0 [shape=plaintext, fontname="Noto Sans CJK SC", fontsize=9, fontcolor="#16a34a",
+        label="CPU0 写入\n（无需原子操作）"];
+    w3 [shape=plaintext, fontname="Noto Sans CJK SC", fontsize=9, fontcolor="#16a34a",
+        label="CPU3 写入\n（无需原子操作）"];
+    w0 -> c0 [color="#16a34a", style=bold];
+    w3 -> c3 [color="#16a34a", style=bold];
+
+    // 读取：跨 CPU 求和
+    total [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+           label="总计 = 100\n(31+18+27+24)"];
+    c0 -> total [color="#7c3aed"]; c1 -> total [color="#7c3aed"];
+    c2 -> total [color="#7c3aed"]; c3 -> total [color="#7c3aed"];
+
+    sumlbl [shape=plaintext, fontname="Noto Sans CJK SC", fontsize=9,
+            label="用户空间查找会复制一个数组\n（每个 CPU 一个条目），\n然后跨 CPU 求和"];
+    sumlbl -> total [style=invis];
+
+    note [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+          label="每个 CPU 只访问自己的副本 -> 没有\l共享槽位、原子操作或桶竞争。\l代价转移到读取阶段，且值大小\l受 PCPU_MIN_UNIT_SIZE 限制。\l"];
+    total -> note [style=invis];
+}

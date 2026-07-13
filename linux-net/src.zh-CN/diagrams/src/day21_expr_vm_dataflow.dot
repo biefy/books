@@ -1,0 +1,40 @@
+digraph expr_vm_dataflow {
+    rankdir=TB;
+    labelloc=t;
+    label="'tcp dport 22 accept' 在寄存器虚拟机（nft_do_chain）中的执行过程";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    pkt [shape=box, style="filled", fillcolor="#fef3c7",
+         label="数据包字节\n[ ... TCP hdr ... ]\ndport 字段 = 22"];
+
+    // The three expressions, top to bottom
+    subgraph cluster_exprs {
+        label="规则 = 表达式序列";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", fillcolor="#dbeafe"];
+        payload [label="1. nft_payload\n加载 16 位 dport\n-> reg 1"];
+        cmp [label="2. nft_cmp\nreg 1 == 22 ?\n匹配：保持 NFT_CONTINUE\n未命中：写入 NFT_BREAK"];
+        imm [label="3. nft_immediate\n复制 NF_ACCEPT\n-> 裁决寄存器"];
+        payload -> cmp -> imm [color="#94a3b8"];
+    }
+
+    // The register file
+    regfile [shape=record, style="filled", fillcolor="#e9d5ff", fontsize=9,
+             label="{ struct nft_regs：20 个 32 位暂存槽（NFT_REG32_NUM=20） }|\
+{ <v>裁决\n（与 data[0..3] 重叠） | REG32_00\n=data[4] | REG32_01 | ... | REG32_15\n=data[19] }|\
+{ 4 个裁决槽 + 16 个数据寄存器 = 20 }"];
+
+    pkt -> payload [label="字节", color="#d97706", style=bold];
+    payload -> regfile [label="写入 reg1", color="#2563eb"];
+    cmp -> regfile [label="读取 reg1", color="#2563eb", style=dashed, dir=back];
+    imm -> regfile [label="写入裁决\n= NF_ACCEPT", color="#16a34a", style=bold];
+
+    ret [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+         label="终止 switch：\nNF_ACCEPT 不在 NFT_* 范围内\n-> 向钩子返回 NF_ACCEPT"];
+    regfile:v -> ret [label="裁决寄存器", color="#16a34a", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="前 4 个数据寄存器与 struct nft_verdict 构成 union。\l这种重叠让同一个循环既能携带待比较数据，\l也能携带当前裁决。\l"];
+    regfile -> note [style=invis];
+}

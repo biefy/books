@@ -1,0 +1,52 @@
+digraph ring {
+    rankdir=TB;
+    labelloc=t;
+    label="一个环形队列 = 一个数组 + 两个计数器，无锁（单生产者/单消费者）";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // 由固定位置排成环形的 8 槽循环数组
+    subgraph cluster_ring {
+        label="由 8 个槽组成的循环数组（索引掩码：idx & 7）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=record, style="filled", fillcolor="#dbeafe"];
+
+        s0 [label="槽 0|数据"];
+        s1 [label="槽 1|数据"];
+        s2 [label="槽 2|数据"];
+        s3 [label="槽 3|空闲"];
+        s4 [label="槽 4|空闲"];
+        s5 [label="槽 5|空闲"];
+        s6 [label="槽 6|空闲"];
+        s7 [label="槽 7|空闲"];
+
+        s0 -> s1 -> s2 -> s3 -> s4 -> s5 -> s6 -> s7 [color="#94a3b8", arrowhead=none];
+        s7 -> s0 [color="#94a3b8", style=dashed, constraint=false, label="绕回起点"];
+    }
+
+    // 两个相互追赶的计数器
+    producer [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+              label="生产者索引 = 3\n写入者在此放置下一个条目"];
+    consumer [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+              label="消费者索引 = 0\n读取者在此取走下一个条目"];
+
+    producer -> s3 [color="#7c3aed", style=bold, label="下一次写入"];
+    consumer -> s0 [color="#16a34a", style=bold, label="下一次读取"];
+
+    // 生产者侧协议说明
+    prodproto [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9, fontname="Noto Sans CJK SC",
+               label="生产者侧（写入者）：\l  1. reserve  — 推进缓存的生产者索引\l  2. write    — 填充预留的槽\l  3. submit   — 发布生产者索引（release 屏障）\l"];
+
+    // 消费者侧协议说明（镜像操作）
+    consproto [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9, fontname="Noto Sans CJK SC",
+               label="消费者侧（读取者）——镜像操作：\l  1. peek    — 查看已发布的数量\l  2. read    — 消费这些条目\l  3. release — 发布消费者索引，释放槽\l"];
+
+    // 状态说明
+    state [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9, fontname="Noto Sans CJK SC",
+           label="producer == consumer 时为空\lproducer - consumer == size 时为满\l两个计数器都位于共享的 mmap 内存中：\l推进任一计数器都只是普通写入——无需系统调用。\l"];
+
+    producer -> prodproto [style=invis];
+    consumer -> consproto [style=invis];
+    state -> consproto [style=invis];
+    { rank=same; prodproto; consproto; }
+}

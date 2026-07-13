@@ -1,0 +1,26 @@
+digraph kernfs_id {
+    rankdir=TB;
+    labelloc=t;
+    label="kernfs 64 位 id：使用 64 位 ino 时等于 st_ino；使用 32 位 ino 时打包为 (generation << 32) | inode";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    field [shape=record, style="filled", fillcolor="#dbeafe",
+           label="{ cgrp-\>kn-\>id  (u64) | { <hi> 高 32 位 | <lo> 低 32 位 } }"];
+
+    b64 [shape=note, style="filled", fillcolor="#dcfce7", fontsize=10,
+         label="64 位 ino_t  （x86-64、arm64——实验环境）\lid 就是 inode：kernfs_id_ino(id)=id, gen=1\lst_ino == cgrp-\>kn-\>id，完全相等\l→ stat -c %i 在此处确实可用\l"];
+
+    b32 [shape=note, style="filled", fillcolor="#fee2e2", fontsize=10,
+         label="32 位 ino_t  （32 位内核）\lid 打包 generation（高位）| inode（低位）\lst_ino = 仅低 32 位\l→ 丢弃 generation，可能不匹配\l"];
+
+    nth [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=10,
+         label="name_to_handle_at()  （read_cgroup_id 使用的方法）\lfile_handle 编码全部 64 位\l→ 在两种情形下都得到完整的 cgrp-\>kn-\>id\l→ 这是可移植的选择\l"];
+
+    b64 -> field [color="#16a34a", style=bold, label="完整 id"];
+    b32 -> field:lo [color="#dc2626", style=bold, label="仅低半部分"];
+    nth -> field [color="#7c3aed", style=bold, label="全部 64 位"];
+
+    { rank=same; b64; b32; nth; }
+}

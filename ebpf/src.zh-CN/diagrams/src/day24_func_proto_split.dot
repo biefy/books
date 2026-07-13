@@ -1,0 +1,25 @@
+digraph func_proto_split {
+    rankdir=TB;
+    labelloc=t;
+    label="一个函数在 BTF 中分为两个条目，通过 type_id 相连";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.6; ranksep=0.9;
+
+    func [shape=record, style="filled", fillcolor="#dbeafe", fontsize=10,
+          label="{ FUNC  #98739（kind 12） | name = 'bpf_cpumask_create' | linkage = static | type_id ───▶ }"];
+
+    proto [shape=record, style="filled", fillcolor="#dcfce7", fontsize=10,
+           label="{ FUNC_PROTO  #N（kind 13） | （无名称——只有类型形状） | ret = struct bpf_cpumask * | args = (void) }"];
+
+    func -> proto [label="type_id", color="#dc2626", style=bold,
+                   fontname="Noto Sans CJK SC", fontsize=10];
+
+    rawnote [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+             label="raw 格式的 bpftool btf dump 只打印\l左侧方框——没有参数。\l"];
+    cnote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+           label="format c 会沿箭头继续解析，并打印\l合并后的 C 声明：\l  struct bpf_cpumask *bpf_cpumask_create(void) __ksym;\l"];
+
+    func -> rawnote [style=invis];
+    proto -> cnote [style=invis];
+}

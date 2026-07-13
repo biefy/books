@@ -15,19 +15,21 @@ mathjax-support = false
 no-section-label = false
 fold = { enable = true, level = 1 }
 playground = { editable = false, copyable = true }
-additional-css = ["src/lightbox.css", "src/kernel-source.css"]
-additional-js = ["src/lightbox.js", "src/kernel-source.js"]
+additional-css = [
+  "src/lightbox.css",
+  "src/kernel-source.css",
+  "src/language-switcher.css",
+  "src/pagefind-search.css",
+]
+additional-js = [
+  "src/lightbox.js",
+  "src/kernel-source.js",
+  "src/language-switcher.js",
+  "src/pagefind-search.js",
+]
 
 [output.html.search]
-enable = true
-limit-results = 30
-teaser-word-count = 30
-use-boolean-and = true
-boost-title = 2
-boost-hierarchy = 1
-boost-paragraph = 1
-expand = true
-heading-split-level = 2
+enable = false
 
 [output.html.print]
 enable = true

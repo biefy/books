@@ -1,0 +1,48 @@
+digraph bpf_registers {
+    rankdir=TB;
+    labelloc=t;
+    label="BPF 虚拟 CPU：11 个寄存器 R0-R10";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.3; ranksep=0.35;
+
+    // 寄存器列
+    subgraph cluster_regs {
+        label="寄存器文件（每个寄存器均为 64 位）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+
+        r0  [shape=box, style="filled", fillcolor="#e9d5ff",
+             label="R0   返回值 / 辅助函数返回值"];
+        r1  [shape=box, style="filled", fillcolor="#dbeafe",
+             label="R1   参数/临时寄存器（入口处为 ctx 指针）"];
+        r2  [shape=box, style="filled", fillcolor="#dbeafe",
+             label="R2   参数/临时寄存器"];
+        r3  [shape=box, style="filled", fillcolor="#dbeafe",
+             label="R3   参数/临时寄存器"];
+        r4  [shape=box, style="filled", fillcolor="#dbeafe",
+             label="R4   参数/临时寄存器"];
+        r5  [shape=box, style="filled", fillcolor="#dbeafe",
+             label="R5   参数/临时寄存器"];
+        r6  [shape=box, style="filled", fillcolor="#dcfce7",
+             label="R6   被调用者保存"];
+        r7  [shape=box, style="filled", fillcolor="#dcfce7",
+             label="R7   被调用者保存"];
+        r8  [shape=box, style="filled", fillcolor="#dcfce7",
+             label="R8   被调用者保存"];
+        r9  [shape=box, style="filled", fillcolor="#dcfce7",
+             label="R9   被调用者保存"];
+        r10 [shape=box, style="filled", fillcolor="#fef3c7",
+             label="R10  只读帧指针"];
+
+        r0 -> r1 -> r2 -> r3 -> r4 -> r5 -> r6 -> r7 -> r8 -> r9 -> r10 [style=invis];
+    }
+
+    stack [shape=box, style="filled,rounded", fillcolor="#fde68a",
+           label="512 字节栈\n(MAX_BPF_STACK = 512)"];
+    r10 -> stack [label="指向", color="#d97706", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+
+    // 来自 R0 的破坏点 1 标注
+    break1 [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+            label="破坏点 1 的验证器日志行：\l  R0=mem_or_null(id=2,sz=20)\lR0 保存 bpf_ringbuf_reserve 的返回指针，\l并被标记为可能为 NULL。\l在 NULL 检查前解引用 -> 拒绝。\l"];
+    r0 -> break1 [label="为什么是 R0？", color="#dc2626", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+}

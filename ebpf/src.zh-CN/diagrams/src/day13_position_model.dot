@@ -1,0 +1,39 @@
+digraph position_model {
+    rankdir=TB;
+    labelloc=t;
+    label="环形缓冲区：两个单调递增、相互追赶的位置";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // 固定字节环绘制为一排单元格（通过 offset & mask 回绕）
+    ring [shape=record, style="filled", fillcolor="#fef3c7", fontsize=10,
+          label="{ 空闲 | 空闲 | <c> 已消费 | <u1> 未消费 | <u2> 未消费 | <u3> 未消费 | <p> 已预留 | 空闲 }"];
+
+    // 单元格带下方的位置指针
+    cons [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+          label="consumer_pos\n（已排空字节数，\n单调递增）"];
+    prod [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+          label="producer_pos\n（已预留字节数，\n单调递增）"];
+
+    cons -> ring:u1 [color="#2563eb", style=bold, label="此处"];
+    prod -> ring:p   [color="#2563eb", style=bold, label="此处"];
+
+    // 未消费区间说明
+    gap [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+         label="未消费量 = producer_pos - consumer_pos\l空闲量 = size - (producer_pos - consumer_pos)\l两个计数器都只会递增；环索引 = offset & (size-1)\l"];
+
+    // 新预留若会与未消费区间重叠，就会被拒绝
+    req [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+         label="reserve(len)：new_prod_pos = producer_pos + len"];
+    nullret [shape=box, style="filled", fillcolor="#fee2e2",
+             label="bpf_ringbuf_has_space() == false\nreturn NULL（静默丢弃）"];
+
+    req -> nullret [color="#dc2626", style=bold,
+                    label="new_prod_pos 将追过 consumer_pos"];
+
+    ring -> gap [style=invis];
+    gap -> req [style=invis];
+    cons -> prod [style=invis];
+
+    { rank=same; cons; prod; }
+}

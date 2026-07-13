@@ -1,0 +1,36 @@
+digraph timer_loop {
+    rankdir=TB;
+    labelloc=t;
+    label="central_timerfn：唯一的抢占源";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+    nodesep=0.4; ranksep=0.5;
+
+    fire [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+          label="central_timerfn 触发\n（每 1 ms 一次，位于软中断中）"];
+
+    scan [shape=box, style="filled", fillcolor="#dbeafe",
+          label="扫描所有 CPU\nbpf_for(c, 0, nr_cpu_ids)"];
+
+    check [shape=diamond, style="filled", fillcolor="#fef3c7", fontsize=9,
+           label="非中央 CPU c：\n(now - started_at) >= slice_ns\n且有工作待处理？"];
+
+    kick [shape=box, style="filled", fillcolor="#fee2e2",
+          label="kick CPU c\nSCX_KICK_PREEMPT\n（强制重新调度）"];
+
+    rearm [shape=box, style="filled", fillcolor="#dcfce7",
+           label="重新启动定时器\nbpf_timer_start(TIMER_INTERVAL_NS,\nBPF_F_TIMER_CPU_PIN)"];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="每个任务都以 SCX_SLICE_INF 调度\l（无限时间片，意味着 nohz）。关闭时钟滴答后，\l这个 1 ms 定时器是唯一会执行抢占的机制。\l"];
+
+    fire -> scan;
+    scan -> check;
+    check -> kick [label="是", color="#dc2626", style=bold, fontsize=9];
+    check -> rearm [label="否 / 扫描完成", color="#2563eb", style=bold, fontsize=9];
+    kick -> rearm [color="#2563eb"];
+    rearm -> fire [label="自行重启（单次 -> 周期）", color="#7c3aed", style="bold,dashed", fontsize=9];
+
+    scan -> note [style=invis];
+}

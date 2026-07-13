@@ -1,0 +1,60 @@
+direction: down
+
+title: |md
+  ### IPv6 扩展标头
+  （ipv6hdr 之后的链）
+| {near: top-center; shape: text}
+
+ipv6: "IPv6 基础标头" {
+  style.fill: "#dbeafe"
+  i_body: |md
+    nexthdr 字段说明下一个内容：
+
+    - 6 = TCP
+    - 17 = UDP
+    - 58 = ICMPv6
+    - 0 = HOP-BY-HOP 选项
+    - 43 = Routing 标头（SR、RPL）
+    - 44 = Fragment 标头
+    - 60 = Destination 选项
+    - 50/51 = ESP/AH (IPsec)
+    - 135 = Mobility (RFC 6275)
+  |
+}
+
+chain: "每个扩展标头都有自己的 nexthdr" {
+  style.fill: "#fef3c7"
+  c_body: |md
+    标头链（每个 -> nexthdr）：
+
+    [ipv6 nh=43] ->
+    [routing nh=60] ->
+    [destopt nh=6] ->
+    [TCP]
+
+    - 通过 `ipv6_skip_exthdr()` 遍历
+    - 位于 `net/ipv6/exthdrs.c`
+    - 每一跳处理一个扩展
+    - 有些仅由端主机处理
+    - （HOPOPT 在每处处理）
+  |
+}
+
+risks: "为何这很重要" {
+  style.fill: "#fee2e2"
+  r_body: |md
+    - 长度前缀解析器
+    - 很容易滋生缺陷
+    - （当天作业）
+    - SRv6 给内核带来
+    - 许多 CVE（近期修复：
+    - ipv6 rpl srh OOB write，
+    - kernel 7.0）
+    - 每个扩展都会增大
+    - headroom — 协议栈必须
+    - 为重新压入的标头
+    - 预留 mac_len
+  |
+}
+
+ipv6 -> chain -> risks

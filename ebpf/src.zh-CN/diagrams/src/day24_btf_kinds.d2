@@ -1,0 +1,48 @@
+direction: down
+
+title: |md
+  ## BTF 种类：内核如何描述自身类型
+| {near: top-center; shape: text}
+
+basic: "基本种类" {
+  style.fill: "#dbeafe"
+  b_body: |md
+    - INT — int、char、long
+    - PTR — 指向类型的指针
+    - ARRAY — 固定大小数组
+    - STRUCT — 具名字段
+    - UNION — 联合体变体
+    - ENUM — 带值的枚举
+    - FWD — 前向声明
+    - TYPEDEF — typedef 别名
+    - VOLATILE / CONST / RESTRICT
+  |
+}
+
+func: "函数与声明种类" {
+  style.fill: "#fef3c7"
+  f_body: |md
+    - FUNC_PROTO — 函数签名
+    - FUNC — 实际函数
+    - VAR — 全局变量
+    - DATASEC — 数据段
+    - DATASEC — 数据段
+  |
+}
+
+new: "较新的扩展" {
+  style.fill: "#dcfce7"
+  n_body: |md
+    - FLOAT — 2021 年加入
+    - DECL_TAG — 注解
+    - TYPE_TAG — 类型级标签
+    - ENUM64 — 64 位枚举
+    - ENUM64 — 64 位枚举
+  |
+}
+
+count: "总计约 17 种。检查命令：bpftool btf dump" {shape: text}
+
+basic -> func
+func -> new
+new -> count

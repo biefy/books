@@ -1,0 +1,45 @@
+digraph vruntime {
+    rankdir=TB;
+    labelloc=t;
+    label="vruntime 公平性——以及 vtime=0 如何破坏它";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+    ranksep=0.9; nodesep=0.6;
+
+    subgraph cluster_fair {
+        label="使用 vruntime：调度器始终选择 vruntime 较低的任务";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+
+        a_fair [shape=box, style="filled", fillcolor="#fef3c7",
+                label="任务 A（CPU 密集型）\n运行时间长 -> vruntime 快速增长\nvruntime = 90"];
+        b_fair [shape=box, style="filled", fillcolor="#dbeafe",
+                label="任务 B（交互型）\n等待输入时睡眠 -> vruntime 保持较低\nvruntime = 12"];
+        pick_fair [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+                   label="调度器选择最小的 vruntime"];
+
+        a_fair -> pick_fair [label="过高，\n沉到队尾", color="#d97706", fontcolor="#d97706"];
+        b_fair -> pick_fair [label="最低 -> 运行 B", color="#16a34a", style=bold, fontcolor="#16a34a"];
+    }
+
+    subgraph cluster_broke {
+        label="将 vtime 强制设为 0：排序键失去意义";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#dc2626";
+
+        a_broke [shape=box, style="filled", fillcolor="#fef3c7",
+                 label="任务 A（CPU 密集型）\nvtime = 0"];
+        b_broke [shape=box, style="filled", fillcolor="#dbeafe",
+                 label="任务 B（交互型）\nvtime = 0"];
+        pick_broke [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+                    label="队列无法区分 A 和 B\n-> A（计算资源占用者）独占 CPU，\nB 出现延迟，响应能力崩溃"];
+
+        a_broke -> pick_broke [color="#dc2626", style=bold];
+        b_broke -> pick_broke [color="#dc2626", style=bold];
+    }
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="任务每实际使用一个 CPU 时钟滴答，其 vruntime/vtime 都会增加。\l排序键相等 = 没有公平性：这正是 vtime=0 导致的故障。\l"];
+    pick_broke -> note [style=invis];
+
+    pick_fair -> a_broke [style=invis];
+}

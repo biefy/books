@@ -1,0 +1,38 @@
+digraph two_refcounts {
+    rankdir=TB;
+    labelloc=t;
+    label="两个引用计数：skb->users（描述符）与 dataref（数据缓冲区）";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // Two descriptors, one shared buffer (skb_clone)
+    subgraph cluster_clone {
+        label="skb_clone：新描述符，共享数据（开销低）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+
+        a [shape=box, style="filled", fillcolor="#dbeafe",
+           label="skb A（原始）\nusers = 1"];
+        b [shape=box, style="filled", fillcolor="#dbeafe",
+           label="skb B（克隆）\nusers = 1"];
+        buf [shape=box, style="filled", fillcolor="#fef3c7",
+             label="一个数据缓冲区\n[ 头部 | 载荷 ]"];
+        shinfo [shape=box, style="filled", fillcolor="#dcfce7",
+                label="skb_shared_info\ndataref = 2"];
+
+        a -> buf [label="head"];
+        b -> buf [label="head", color="#16a34a", style=bold];
+        buf -> shinfo [label="位于末尾"];
+    }
+
+    // skb_copy contrast
+    copy [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="skb_copy：同时复制描述符和数据\l→ 第二个缓冲区，dataref = 1。\l速度慢；仅在必须修改载荷时使用。\l"];
+
+    // The two questions
+    q [shape=note, style="filled", fillcolor="#fef9c3", fontsize=9,
+       label="skb_shared(skb)  ⇔  users != 1   （描述符已共享？）\lskb_cloned(skb)  ⇔  (dataref & MASK) != 1   （缓冲区已共享？）\l\ldataref 分为：低 16 位 = 全部引用，\l高 16 位 = 仅载荷（释放头部）引用。\lskb_cloned() 为 true ⇒ 修改头部前执行写时复制。\l"];
+
+    shinfo -> copy [style=invis];
+    shinfo -> q [style=invis];
+    { rank=same; copy; q; }
+}

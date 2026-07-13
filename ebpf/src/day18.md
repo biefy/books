@@ -293,11 +293,11 @@ The lab calls `xsk_umem__create` and `xsk_socket__create` and then admits "libxd
    ```c
    /* include/uapi/linux/if_xdp.h:48 */
    struct sockaddr_xdp {
-   	__u16 sxdp_family;
-   	__u16 sxdp_flags;
-   	__u32 sxdp_ifindex;
-   	__u32 sxdp_queue_id;
-   	__u32 sxdp_shared_umem_fd;
+       __u16 sxdp_family;
+       __u16 sxdp_flags;
+       __u32 sxdp_ifindex;
+       __u32 sxdp_queue_id;
+       __u32 sxdp_shared_umem_fd;
    };
    ```
 

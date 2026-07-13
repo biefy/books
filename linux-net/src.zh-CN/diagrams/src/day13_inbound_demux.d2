@@ -1,0 +1,101 @@
+direction: down
+
+title: |md
+  ### 入站 TCP 解复用：先完整身份，后监听器
+| {near: top-center; shape: text}
+
+pkt: "tcp_v4_rcv：已验证的 TCP 报文段" {
+  style.fill: "#dbeafe"
+  p_body: |md
+    头部提供对端/本地地址和端口。
+
+    `__inet_lookup_skb()` 可能先复用一个
+    预取到 skb 中的套接字；否则它会调用
+    `__inet_lookup()`，并传入命名空间和
+    入站设备身份。
+  |
+}
+
+ehash: "第 1 层：ehash 完整身份查找" {
+  style.fill: "#dcfce7"
+  e_body: |md
+    `__inet_lookup_established()`
+
+    hash(netns, daddr, dport, saddr, sport)
+      → 一个 ehash 桶
+
+    遍历 RCU nulls-list + 精确重新验证：
+    命名空间、地址/端口对、接口
+
+    命中后增加引用计数，结果可能是：
+    - 完整 TCP 套接字
+    - TCP_TIME_WAIT minisock
+    - TCP_NEW_SYN_RECV request sock
+  |
+}
+
+special: "按返回的套接字状态分派" {
+  style.fill: "#ede9fe"
+  s_body: |md
+    TIME_WAIT
+      → tcp_timewait_state_process（第 15 天）
+
+    NEW_SYN_RECV
+      → 监听器/请求完成路径
+
+    LISTEN 或完整连接
+      → 策略/过滤 + tcp_v4_do_rcv
+         （若用户持有完整套接字则进入 backlog）
+  |
+}
+
+listener: "第 2 层：ehash 未命中后查找监听器" {
+  style.fill: "#fef3c7"
+  l_body: |md
+    1. 可选的 BPF SK_LOOKUP 重定向
+    2. lhash2(netns, daddr, dport)
+       对特定地址候选项评分
+    3. lhash2(netns, INADDR_ANY, dport)
+       对通配监听器评分
+
+    使用 `ipv4_portaddr_hash`，而非四元组哈希。
+    SO_REUSEPORT 选择发生在一个候选组内；
+    lhash2 服务所有监听器。
+
+    未命中并不能证明数据包是 SYN。
+  |
+}
+
+miss: "没有匹配的完整身份条目或监听器" {
+  style.fill: "#fee2e2"
+  m_body: |md
+    设置 `SKB_DROP_REASON_NO_SOCKET`。
+
+    经过策略和校验和验证后，
+    若报文段允许则发送复位；
+    随后释放 skb。
+
+    连接尝试会把该 RST 视为
+    ECONNREFUSED，但游离数据包也会走此路径。
+  |
+}
+
+namespace: "表所在的位置" {
+  style.fill: "#fff7ed"
+  n_body: |md
+    查找始终感知命名空间。
+
+    子 netns 可通过 `tcp_child_ehash_entries`
+    请求私有 ehash；否则它会使用共享的
+    全局哈希存储，并将 netns 纳入
+    哈希/匹配身份。
+  |
+}
+
+pkt -> ehash: "查找完整身份"
+ehash -> special: "命中 + 持有引用"
+ehash -> listener: "未命中"
+listener -> special: "已选择监听器"
+listener -> miss: "无候选项"
+namespace -> ehash: "选择 hashinfo + 命名空间身份" {style.stroke-dash: 4}
+namespace -> listener: "命名空间参与查找" {style.stroke-dash: 4}

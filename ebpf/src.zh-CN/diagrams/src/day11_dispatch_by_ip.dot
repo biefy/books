@@ -1,0 +1,23 @@
+digraph G {
+    rankdir=TB;
+    node [shape=box, style="rounded,filled", fontname="Noto Sans CJK SC", fontsize=10];
+
+    legend [label="bpf_get_func_ip(ctx)\n返回触发此多探针的\n函数 IP", fillcolor="#fef3c7", shape=note];
+
+    prog [label="一个 BPF 程序\n  SEC(\"kprobe.multi/...\")\n  int BPF_PROG(p) {\n    __u64 ip = bpf_get_func_ip(ctx);\n    /* dispatch by ip */\n  }", fillcolor="#dbeafe", fontname="Noto Sans Mono CJK SC"];
+
+    f1 [label="已挂载 vfs_read", fillcolor="#dcfce7"];
+    f2 [label="已挂载 vfs_write", fillcolor="#dcfce7"];
+    f3 [label="已挂载 vfs_open", fillcolor="#dcfce7"];
+    f4 [label="……另有 197 个", fillcolor="#dcfce7"];
+
+    f1 -> prog [label="ip = vfs_read+0"];
+    f2 -> prog [label="ip = vfs_write+0"];
+    f3 -> prog [label="ip = vfs_open+0"];
+    f4 -> prog [label="ip = ..."];
+
+    prog -> dispatch [label="在分发表中\n查找 ip"];
+    dispatch [label="每个函数各自的逻辑\n（通常是哈希映射\nip → 行为）", fillcolor="#fef3c7"];
+
+    legend -> prog [style=dashed, color=gray];
+}

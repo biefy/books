@@ -1,0 +1,27 @@
+---
+config:
+  themeVariables:
+    fontFamily: '"Noto Sans CJK SC", "PingFang SC", sans-serif'
+---
+stateDiagram-v2
+    direction TB
+    [*] --> NONE: 已创建
+
+    NONE --> INCOMPLETE: 发送 ARP 请求
+    INCOMPLETE --> REACHABLE: 收到 ARP 回复
+    INCOMPLETE --> FAILED: 超时（尝试 3 次）
+
+    REACHABLE --> STALE: 最近未使用<br/>（reachable_time 已过）
+    STALE --> DELAY: skb 排队，先经 DELAY<br/>再进行探测
+    DELAY --> REACHABLE: 收到确认
+    DELAY --> PROBE: 仍未收到确认
+    PROBE --> REACHABLE: ARP 回复
+    PROBE --> FAILED: 超时
+
+    FAILED --> NONE: gc / 应用重试
+    REACHABLE --> [*]: 足够旧时被 gc
+
+    note right of REACHABLE
+        状态定义来自
+        include/net/neighbour.h
+    end note

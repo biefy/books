@@ -1,0 +1,28 @@
+digraph ethhdr_ruler {
+    rankdir=TB;
+    labelloc=t;
+    label="struct ethhdr — 每个帧最前面的 14 字节";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    ruler [shape=record, style="filled", fillcolor="#dbeafe",
+           label="{ <d> h_dest[6]\n字节 0-5\n目的 MAC | <s> h_source[6]\n字节 6-11\n源 MAC | <t> h_proto[2]\n字节 12-13\nEtherType / 长度 } "];
+
+    before [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+            label="skb->data\n（RX 时，在 skb_pull 之前）\n指向字节 0"];
+
+    after [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+           label="skb->data\n（eth_skb_pull_mac 之后，\nskb_pull ETH_HLEN=14）\n指向字节 14，即 L3 载荷"];
+
+    payload [shape=box, style="filled", fillcolor="#fef3c7",
+             label="L3 载荷（从字节 14 开始）\nIP 标头、IPv6 标头……"];
+
+    before -> ruler:d [color="#d97706", style=bold, label="字节 0"];
+    after -> payload [color="#16a34a", style=bold, label="字节 14"];
+
+    fork [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9, fontname="Noto Sans CJK SC",
+          label="h_proto 分支（eth_proto_is_802_3）：\l  值 >= 0x0600 (1536)  -> EtherType\l     IP 0x0800 / IPv6 0x86DD / VLAN 0x8100\l  值 <= 1500 (ETH_DATA_LEN) -> 长度\l     旧式 802.3 帧，回退到 ETH_P_802_3/802_2\l"];
+    ruler:t -> fork [color="#7c3aed", style=dashed, constraint=false];
+    ruler -> payload [color="#16a34a", style=dashed, label="L3"];
+}

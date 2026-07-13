@@ -1,0 +1,54 @@
+digraph zc_refcount {
+    rankdir=TB;
+    labelloc=t;
+    label="零拷贝发送：ubuf_info.refcnt 跟踪页面固定；0 → F_NOTIF CQE";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC", fontsize=10];
+
+    // User pages (pinned)
+    subgraph cluster_pages {
+        label="用户空间缓冲区页面（已固定——锁在 RAM 中，NIC 从这里执行 DMA）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#d97706";
+        node [shape=box, style="filled", fillcolor="#fef3c7"];
+        pg0 [label="页面 0\n[有效载荷]"];
+        pg1 [label="页面 1\n[有效载荷]"];
+    }
+
+    // The skb with frag pointers
+    skb [shape=record, style="filled", fillcolor="#dbeafe",
+         label="{skb（+ 重传时的克隆）|skb_shinfo:|frag[0] →|frag[1] →|SKBFL_ZEROCOPY_ENABLE}"];
+
+    skb -> pg0 [color="#2563eb", style=bold, label="frag 直接\n指向页面"];
+    skb -> pg1 [color="#2563eb", style=bold];
+
+    // ubuf_info
+    ubuf [shape=record, style="filled", fillcolor="#e9d5ff",
+          label="{ubuf_info（io_notif_data.uarg）|refcnt：页面固定引用计数|ops|flags}"];
+    skb -> ubuf [color="#7c3aed", style=bold, label="msg_ubuf"];
+
+    // refcount walk
+    subgraph cluster_walk {
+        label="引用计数生命周期";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled,rounded"];
+        r1 [fillcolor="#dcfce7", label="refcnt = 1\n（第一个 skb 持有引用）"];
+        r2 [fillcolor="#dcfce7", label="refcnt = 2\n（重传克隆\n使其递增）"];
+        rdots [shape=plaintext, style="", label="… 每释放一个\nskb frag 就递减"];
+        r0 [fillcolor="#fee2e2", label="refcnt = 0\n最后一个引用消失\nrefcount_dec_and_test()\nnotif.c:57"];
+        r1 -> r2 -> rdots -> r0 [color="#94a3b8"];
+    }
+    ubuf -> r1 [style=dashed, color="#7c3aed"];
+
+    // The two CQEs
+    fmore [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+           label="CQE 1：F_MORE\n入队时提交\nres = 交给协议栈的字节数\n（NIC 可能尚未完成）"];
+    fnotif [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+            label="CQE 2：F_NOTIF\nio_tx_ubuf_complete()\n“页面已释放——可安全复用”"];
+
+    skb -> fmore [style=dotted, color="#2563eb", label="较早"];
+    r0 -> fnotif [color="#16a34a", style=bold, label="变为 0 时触发"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="第 3 层生命周期（第 1 天）：\lskb->users  = 描述符引用\ldataref     = 数据缓冲区引用\lubuf_info.refcnt = 页面固定引用\l"];
+}

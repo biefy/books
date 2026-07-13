@@ -1,0 +1,40 @@
+digraph rtt_estimator {
+    rankdir=TB;
+    labelloc=t;
+    label="RTO = srtt + 4*rttvar：平滑均值加上抖动余量";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // 垂直 RTT“坐标轴”表示为堆叠带，顶部 = 最高 RTT。
+    band [shape=record, style="filled", fontsize=10,
+          label="{ <rto> ===== RTO 线 =====\n（带状区域顶部：定时器在此触发） | <hi> +4*rttvar 余量\n（抖动余裕） | <srtt> ---- srtt（平滑均值）----\nEWMA: 7/8*srtt + 1/8*sample | <lo> -4*rttvar 余量 }"];
+
+    // 输入 EWMA 的原始噪声样本
+    samples [shape=box, style="filled,rounded", fillcolor="#fef3c7", fontsize=10,
+             label="原始 RTT 样本（含噪声）\n8ms, 40ms, 11ms, 9ms ...\n一个延迟 ACK 造成高尖峰"];
+    samples -> band:srtt [color="#d97706", style=bold, arrowhead=vee,
+                          label="平滑并计入 srtt"];
+
+    // rttvar 决定带状区域宽度
+    var [shape=box, style="filled,rounded", fillcolor="#dbeafe", fontsize=10,
+         label="rttvar（平滑后的平均偏差）\n稳定 LAN：带状区域很窄\n抖动/无线网络：带状区域很宽"];
+    var -> band:hi [color="#2563eb", style=dashed, arrowhead=vee, label="决定余量大小"];
+    var -> band:lo [color="#2563eb", style=dashed, arrowhead=vee];
+
+    // 事件 1：延迟但未丢失的 ACK 落在带状区域内
+    late [shape=box, style="filled,rounded", fillcolor="#dcfce7", fontsize=10,
+          label="延迟 ACK 落在带状区域内\n-> 低于 RTO 线\n-> 不重传"];
+    band:hi -> late [color="#16a34a", style=bold, arrowhead=vee];
+
+    // 事件 2：真正丢失；定时器越过 RTO 线
+    lost [shape=box, style="filled,rounded", fillcolor="#fee2e2", fontsize=10,
+          label="报文段确实丢失\n定时器越过 RTO 线上方\n-> 定时器触发，重传"];
+    band:rto -> lost [color="#dc2626", style=bold, arrowhead=vee];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="内核形式：RTO = (srtt_us >> 3) + rttvar_us\lsrtt 以 8 倍值存储（因此 >> 3）；4 倍权重已\l计入 rttvar_us。取值限制在 [200ms, 120s]。\l"];
+    band:lo -> note [style=invis];
+
+    { rank=same; samples; var; }
+    { rank=same; late; lost; }
+}

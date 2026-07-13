@@ -1,0 +1,46 @@
+digraph wait_wake {
+    rankdir=TB;
+    labelloc=t;
+    label="recvmsg 等待/唤醒会合：sk_data_ready 跨越通道";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    // Softirq 生产者通道
+    subgraph cluster_softirq {
+        label="softirq 通道（生产者）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#7c3aed";
+        rcv  [shape=box, style="filled", fillcolor="#e9d5ff", label="udp_rcv(skb)"];
+        enq  [shape=box, style="filled", fillcolor="#dbeafe",
+              label="__udp_enqueue_schedule_skb\n计入 truesize，追加到\nsk_receive_queue"];
+        ready [shape=box, style="filled", fillcolor="#dcfce7",
+               label="sk->sk_data_ready(sk)\n= sock_def_readable：\nwake_up_interruptible_sync_poll(\n  &wq->wait, EPOLLIN ...)"];
+        rcv -> enq -> ready [color="#7c3aed"];
+    }
+
+    // 系统调用消费者通道
+    subgraph cluster_syscall {
+        label="系统调用通道（消费者）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        recv [shape=box, style="filled", fillcolor="#dbeafe", label="recvmsg(fd, ...)"];
+        dq   [shape=box, style="filled", fillcolor="#dbeafe",
+              label="__skb_recv_udp：\n查看 sk_receive_queue"];
+        empty [shape=diamond, style="filled", fillcolor="#fef3c7", label="队列为空\n且为阻塞模式？"];
+        park [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+              label="__skb_wait_for_more_packets：\n将任务停放在 sk->sk_wq，\n让出 CPU（睡眠）"];
+        ret  [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+              label="出队 1 个数据报，\n复制到用户空间并返回"];
+        recv -> dq -> empty;
+        empty -> park [label="是"];
+        empty -> ret [label="否"];
+        park -> ret [style=dashed, label="已唤醒"];
+    }
+
+    // 跨通道唤醒
+    ready -> park [color="#dc2626", style=bold, constraint=false,
+                   label="EPOLLIN 唤醒\n（仅能触达已经\n停放的任务）"];
+
+    note [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+          label="只有消费者先于生产者的唤醒进入停放状态，\l会合才能生效。\l尚未阻塞的 recvmsg 会错过唤醒。\l"];
+    park -> note [style=invis];
+}

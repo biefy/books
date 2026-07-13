@@ -1,0 +1,29 @@
+digraph send_buffer_gauge {
+    rankdir=TB;
+    labelloc=t;
+    label="发送缓冲区：sk_wmem_queued 逐渐填充至 sk_sndbuf";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    fill_in [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+             label="tcp_sendmsg 追加 → 填充"];
+
+    // The gauge: HTML table so each band keeps a palette colour
+    gauge [shape=plaintext, label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD PORT="cap" BGCOLOR="#fee2e2">sk_sndbuf（上限）——满载线</TD></TR>
+        <TR><TD BGCOLOR="#ffffff">空闲空间（余量）</TD></TR>
+        <TR><TD PORT="fill" BGCOLOR="#fde68a">sk_wmem_queued（已排队字节数）</TD></TR>
+      </TABLE>
+    >];
+
+    drain_out [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+               label="tcp_write_xmit 排空\nACK 释放出的空间"];
+
+    full [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="达到上限 → 阻塞（sk_stream_wait_memory）\l或返回 EAGAIN（非阻塞套接字）\l"];
+
+    fill_in -> gauge:cap [style=bold, color="#2563eb"];
+    gauge:fill -> drain_out [style=bold, color="#16a34a"];
+    gauge:cap -> full [constraint=false, style=dashed, color="#dc2626"];
+}

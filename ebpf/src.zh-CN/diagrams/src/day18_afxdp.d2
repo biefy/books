@@ -1,0 +1,94 @@
+direction: down
+
+title: |md
+  ## AF_XDP 架构与所有权
+| {near: top-center; shape: text}
+
+umem: "UMEM 注册" {
+  style.fill: "#dbeafe"
+  body: |md
+    **执行：**
+    - 用户空间分配帧
+    - 将帧注册到内核
+
+    **下一步的原因：**
+    - 驱动需要用于 RX 的缓冲区
+
+    **状态：**
+    - FILL 环形队列公布
+    - 空闲 UMEM 帧地址
+  |
+}
+
+driver: "驱动 RX" {
+  style.fill: "#fef3c7"
+  body: |md
+    **执行：**
+    - RX 到驱动缓冲区
+    - 零拷贝 DMA 到 UMEM
+    - 复制模式将数据复制到 UMEM
+
+    **下一步的原因：**
+    - XDP 在协议栈与 AF_XDP 之间选择
+
+    **状态：**
+    - 数据包是 xdp_buff
+  |
+}
+
+xdp: "XDP 重定向" {
+  style.fill: "#fef3c7"
+  body: |md
+    **执行：**
+    - bpf_redirect_map(
+    - &xsks_map, qid, 0)
+    - 查找队列的套接字
+
+    **下一步的原因：**
+    - 仅当套接字已注册时，
+    - 重定向才会将所有权交给
+    - XSK RX 环形队列
+
+    **状态：**
+    - 发往协议栈或发往 XSK
+  |
+}
+
+rings: "AF_XDP 环形队列" {
+  style.fill: "#dcfce7"
+  body: |md
+    **执行：** 描述符在
+    内核 <-> 用户之间移动：
+    - FILL 提供空闲帧
+    - RX 提供收到的数据包
+    - TX 提交发送
+    - COMPLETION 回收 TX
+
+    **状态：**
+    - 快速路径中流转的是描述符，
+    - 而不是数据副本
+  |
+}
+
+user: "用户空间轮询循环" {
+  style.fill: "#dcfce7"
+  body: |md
+    **执行：**
+    - 读取 RX 描述符
+    - 处理 UMEM 数据
+    - 将地址归还给 FILL
+
+    **下一步的原因：**
+    - 如果不回收，RX 会耗尽
+    - 缓冲区并丢包
+
+    **状态：**
+    - 所有权归还内核
+  |
+}
+
+umem -> driver: "空闲帧描述符"
+driver -> xdp: "xdp_buff 中的数据包"
+xdp -> rings: "通过 XSKMAP 执行 XDP_REDIRECT"
+rings -> user: "RX 描述符"
+user -> umem: "回收的帧"

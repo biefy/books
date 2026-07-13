@@ -1,0 +1,35 @@
+digraph sock_common {
+    rankdir=LR;
+    labelloc=t;
+    label="一个 sock_common，三种形态：在 ehash 中统一进行四元组查找";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+    nodesep=0.4; ranksep=1.2;
+
+    subgraph cluster_structs {
+        label="三个结构体，偏移量 0 处的第一个成员完全相同";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+
+        full [shape=record, style="filled", fillcolor="#dbeafe",
+              label="{struct sock（完整，约 2.4 KB）|<c>sock_common（四元组）|队列、锁、回调函数}"];
+        tw [shape=record, style="filled", fillcolor="#dbeafe",
+            label="{struct inet_timewait_sock（约 232 B）|<c>sock_common（四元组）|tw 定时器}"];
+        req [shape=record, style="filled", fillcolor="#dbeafe",
+             label="{struct request_sock / NEW_SYN_RECV|<c>sock_common（四元组）|半开状态}"];
+    }
+
+    // 突出公共块
+    full:c [color="#d97706"];
+
+    bucket [shape=record, style="filled", fillcolor="#fef3c7",
+            label="{ehash 桶|比较 (saddr,sport,daddr,dport)|一条链，三种形态}"];
+
+    full:c -> bucket [color="#d97706", style=bold, label="相同的第一个成员"];
+    tw:c   -> bucket [color="#d97706", style=bold];
+    req:c  -> bucket [color="#d97706", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="sock_common 是这三种结构体的第一个成员，\l因此查找无需知道条目是完整 sock、\lTIME_WAIT 存根还是半开的 req。\l"];
+    bucket -> note [style=invis];
+}

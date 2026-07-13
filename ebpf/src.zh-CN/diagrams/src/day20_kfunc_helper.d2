@@ -1,0 +1,57 @@
+direction: down
+
+title: |md
+  ### 辅助函数与 kfunc（语言层面）
+| {near: top-center; shape: text}
+
+helper: "调用辅助函数" {
+  style.fill: "#fef3c7"
+  h_body: |md
+    ```c
+    #include <bpf/bpf_helpers.h>
+
+    /* header declares it as a fn-pointer
+       constant at a fixed enum offset:
+       (void *)BPF_FUNC_map_lookup_elem */
+    void *p =
+      bpf_map_lookup_elem(&map, &key);
+    ```
+    - 固定的 UAPI 列表（约 230 项）
+    - 编译为 `call`，immediate = 枚举值
+    - 验证器从 `bpf_func_proto` 读取原型
+  |
+}
+
+kfunc: "调用 kfunc" {
+  style.fill: "#dcfce7"
+  k_body: |md
+    ```c
+    extern struct task_struct *
+    bpf_task_acquire(
+      struct task_struct *) __ksym;
+
+    extern void
+    bpf_task_release(
+      struct task_struct *) __ksym;
+
+    struct task_struct *t =
+      bpf_task_acquire(cur);
+    if (!t) return 0;
+    /* ... */
+    bpf_task_release(t);
+    ```
+    - 位于内核源码树中，不是固定的 UAPI
+    - 编译为普通符号引用
+    - 加载时依据内核 BTF 解析
+    - 验证器从 BTF 检查原型
+    - 强制执行生命周期（acquire/release）
+  |
+}
+
+verdict: |md
+  - **新的 BPF 功能以 kfunc 形式提供。**
+  - 辅助函数不再增加；现有列表保持固定。
+  - 看到 `__ksym`，就是 kfunc。
+| {near: bottom-center; shape: text}
+
+helper -> kfunc -> verdict

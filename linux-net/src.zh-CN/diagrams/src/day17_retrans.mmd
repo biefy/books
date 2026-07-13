@@ -1,0 +1,25 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, PingFang SC, sans-serif"}}}%%
+flowchart TD
+    Send["数据包已发送；<br/>加入 sk_write_queue"]
+    Track["packets_out++<br/>tcp_clock_stamp"]
+
+    Wait["等待 ACK"]
+    Ack{"收到 ACK？"}
+    Done["正常：清除重传状态，推进 snd_una"]
+
+    Tick["RTO 定时器触发<br/>（或触发快速重传）"]
+    Detect{"3 个 dup ACK 或<br/>RACK 判定乱序？"}
+    Recover["进入 Recovery<br/>将 cwnd 减半，设置 ssthresh"]
+    Retx["重传丢失的报文段"]
+    Newack["新 ACK 清除 Recovery 状态"]
+
+    Send --> Track --> Wait --> Ack
+    Ack -->|是| Done
+    Ack -->|否，超时| Tick --> Retx
+    Ack -->|dup ACK| Detect
+    Detect -->|是| Recover --> Retx --> Newack
+
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    class Tick,Recover,Retx bad
+    class Done,Newack ok

@@ -1,0 +1,49 @@
+direction: down
+
+title: |md
+  ## NAPI：协作式轮询 RX
+| {near: top-center; shape: text}
+
+before: "纯 IRQ 时代（NAPI 之前）" {
+  style.fill: "#fee2e2"
+  b_body: |md
+    - 每个数据包 → 一次 IRQ
+    - 驱动在 IRQ 上下文运行 RX
+
+    **高数据包速率下的问题：**
+    - 1 Mpps = 1M IRQs/s
+    - 接收活锁
+    - CPU 的时间全部耗在 IRQ 上
+    - 其他工作饥饿
+  |
+}
+
+napi: "NAPI 混合模式（现代）" {
+  style.fill: "#dcfce7"
+  n_body: |md
+    - 第一个数据包 → IRQ
+    - napi_schedule() 触发软中断
+    - 驱动禁用后续 IRQ
+    - 轮询直至预算耗尽
+
+    **收益：**
+    - 每轮突发一次 IRQ，而非每个数据包一次
+    - 工作量有界：
+    - `napi->poll(napi, budget)`
+    - 调用方（软中断）达到预算时让出 CPU
+    - 无更多工作时重新启用 IRQ
+  |
+}
+
+budget: |md
+  **预算机制：**
+  - 默认值：`net.core.netdev_budget = 300`
+  - 每次软中断运行处理 300 个数据包
+  - `netdev_budget_usecs = 2000`
+  - 每次软中断运行最长 2ms
+  - 达到任一限制 → 提前返回
+  - 重新调度，在下一次软中断时继续
+| {style.fill: "#fef3c7"}
+
+before -> napi: "演进为" {style.stroke-dash: 4}
+napi -> budget

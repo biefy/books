@@ -1,0 +1,32 @@
+direction: down
+
+title: |md
+  ## 哈希与 LPM：按查找模式选择
+| {near: top-center; shape: text}
+
+hash: "BPF_MAP_TYPE_HASH\n\n适用于精确匹配的键：\n- {tcp_flow_5tuple} → 状态\n- {pid} → 计数器\n- {socket_cookie} → 元数据\n\n查找：O(1) 哈希 + 桶遍历\n内存：O(N) 个条目\n\n无法匹配前缀。" {
+  style.fill: "#dbeafe"
+}
+
+lpm: "BPF_MAP_TYPE_LPM_TRIE\n\n适用于前缀键：\n- {prefixlen=24, 192.168.1.0} → 操作\n- {prefixlen=64, IPv6 net} → 操作\n\n查找：O(prefix_len) 位遍历\n内存：树节点占 O(N + total_bits)\n\n返回最长匹配前缀。\nIPv4：最多 32 跳；通常 < 5\nIPv6：最多 128 跳；通常 < 16" {
+  style.fill: "#dcfce7"
+}
+
+key_struct: "LPM 的键结构：" {
+  style.fill: "#fef3c7"
+  ks_body: |md
+    ```c
+    struct ipv4_key {
+        __u32 prefixlen; // ALWAYS first
+        __u32 addr;      // big-endian
+    };
+    ```
+  |
+  ks_note: "prefixlen 在最前面：内核会读取它。\naddr = 大端序网络地址。" {
+    style.fill: "#fef9e7"
+  }
+  ks_body -> ks_note
+}
+
+hash -> lpm: "精确匹配键" {style.stroke-dash: 4}
+lpm -> key_struct: "前缀 + 值键" {style.stroke-dash: 4}

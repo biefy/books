@@ -20,6 +20,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
       - name: Install mdbook
         run: |
           mkdir -p $HOME/.local/bin
@@ -27,22 +32,19 @@ jobs:
             | tar -xz -C $HOME/.local/bin
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Build linux-net book
-        run: |
-          cd linux-net
-          mdbook build
+      - name: Install pinned frontend tools
+        run: npm ci --ignore-scripts
 
-      - name: Build ebpf book
-        run: |
-          cd ebpf
-          mdbook build
+      - name: Validate translations
+        run: python3 scripts/check-i18n.py check
 
-      - name: Assemble site
+      - name: Build bilingual site and Pagefind index
+        run: ./scripts/build-site.sh
+
+      - name: Smoke-test links, assets, and multilingual search
         run: |
-          mkdir -p _site
-          cp index.html _site/
-          cp -r linux-net/book _site/linux-net
-          cp -r ebpf/book _site/ebpf
+          python3 scripts/check-site.py _site
+          node scripts/check-search.mjs _site
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

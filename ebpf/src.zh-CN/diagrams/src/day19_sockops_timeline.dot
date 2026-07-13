@@ -1,0 +1,38 @@
+digraph sockops_timeline {
+    rankdir=TB;
+    labelloc=t;
+    label="同一个 sock_ops 程序在 TCP 状态机的每一步重新进入，并按 op 分派";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.4; ranksep=0.9;
+
+    // 顶部从左到右的 TCP 时间线
+    subgraph cluster_timeline {
+        label="TCP 连接生命周期（从左到右）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#d97706";
+        rank=same;
+
+        syn   [shape=box, style="filled", fillcolor="#fef3c7", label="SYN"];
+        synack[shape=box, style="filled", fillcolor="#fef3c7", label="SYN-ACK"];
+        ack   [shape=box, style="filled", fillcolor="#fef3c7", label="ACK"];
+        data  [shape=box, style="filled", fillcolor="#fef3c7", label="数据\n(RTT 样本)"];
+        fin   [shape=box, style="filled", fillcolor="#fef3c7", label="FIN"];
+
+        syn -> synack -> ack -> data -> fin [color="#d97706", style=bold];
+    }
+
+    // 下方的单个程序框
+    prog [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=11,
+          label="SEC(\"sockops\") tcp_tune(struct bpf_sock_ops *skops)\nswitch (skops->op) { ... }"];
+
+    // 每个时间点都有一条按 op 标注的箭头落入同一程序
+    syn    -> prog [label="TCP_CONNECT_CB",            color="#2563eb", fontname="Noto Sans Mono CJK SC", fontsize=9];
+    synack -> prog [label="ACTIVE_ESTABLISHED_CB",     color="#2563eb", fontname="Noto Sans Mono CJK SC", fontsize=9];
+    ack    -> prog [label="PASSIVE_ESTABLISHED_CB",    color="#2563eb", fontname="Noto Sans Mono CJK SC", fontsize=9];
+    data   -> prog [label="RTT_CB",                    color="#2563eb", fontname="Noto Sans Mono CJK SC", fontsize=9];
+    fin    -> prog [label="STATE_CB",                  color="#2563eb", fontname="Noto Sans Mono CJK SC", fontsize=9];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9, fontname="Noto Sans CJK SC",
+          label="同一个程序，多次进入。内核在每个 TCP 事件上用不同的\lskops->op 重新进入程序。程序是一个巨大的 switch；\l本实验在套接字可用后设置一次 BBR。\l"];
+    prog -> note [style=invis];
+}

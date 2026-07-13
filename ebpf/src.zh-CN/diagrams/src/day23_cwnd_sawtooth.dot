@@ -1,0 +1,53 @@
+digraph cwnd_sawtooth {
+    rankdir=TB;
+    labelloc=t;
+    label="cwnd 锯齿：慢启动（x2/RTT）-> 拥塞避免（+1/RTT）-> 丢包削减 -> 再次爬升";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.35; ranksep=0.95;
+
+    // ---- cwnd curve points (blue descriptors), time = RTTs left to right ----
+    c0 [shape=record, style="filled", fillcolor="#dbeafe", label="RTT 0|cwnd = 10|起点（初始窗口）"];
+    c1 [shape=record, style="filled", fillcolor="#dbeafe", label="RTT 1|cwnd = 20"];
+    c2 [shape=record, style="filled", fillcolor="#dcfce7", label="RTT 2|cwnd = 40|= ssthresh（换挡点）"];
+    c3 [shape=record, style="filled", fillcolor="#dbeafe", label="RTT 3|cwnd = 41"];
+    c4 [shape=record, style="filled", fillcolor="#dbeafe", label="RTT 4|cwnd = 42|峰值（ECN 标记 / 丢包）"];
+    c5 [shape=record, style="filled", fillcolor="#fee2e2", label="RTT 5|cwnd = 21|削减：新 ssthresh = 21"];
+    c6 [shape=record, style="filled", fillcolor="#dbeafe", label="RTT 6|cwnd = 22|恢复爬升"];
+
+    c0 -> c1 [label="x2 / RTT（慢启动：每个 ACK +1）", color="#2563eb", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+    c1 -> c2 [label="x2 / RTT", color="#2563eb", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+    c2 -> c3 [label="cwnd >= ssthresh：+1 / RTT（拥塞避免）", color="#16a34a", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+    c3 -> c4 [label="+1 / RTT", color="#16a34a", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+    c4 -> c5 [label="ECN 标记 / 丢包  ->  削减 cwnd 和 ssthresh", color="#dc2626", style="bold,dashed", fontname="Noto Sans CJK SC", fontsize=9];
+    c5 -> c6 [label="+1 / RTT（锯齿的下一个齿）", color="#16a34a", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+
+    // ---- in_flight (amber data) hugging just under each cwnd ----
+    f0 [shape=box, style="filled", fillcolor="#fef3c7", label="in_flight = 9"];
+    f1 [shape=box, style="filled", fillcolor="#fef3c7", label="in_flight = 19"];
+    f2 [shape=box, style="filled", fillcolor="#fef3c7", label="in_flight = 39"];
+    f3 [shape=box, style="filled", fillcolor="#fef3c7", label="in_flight = 40"];
+    f4 [shape=box, style="filled", fillcolor="#fef3c7", label="in_flight = 41"];
+    f5 [shape=box, style="filled", fillcolor="#fef3c7", label="in_flight = 20"];
+    f6 [shape=box, style="filled", fillcolor="#fef3c7", label="in_flight = 21"];
+
+    { rank=same; c0; f0; }
+    { rank=same; c1; f1; }
+    { rank=same; c2; f2; }
+    { rank=same; c3; f3; }
+    { rank=same; c4; f4; }
+    { rank=same; c5; f5; }
+    { rank=same; c6; f6; }
+
+    f0 -> f1 -> f2 -> f3 -> f4 -> f5 -> f6 [color="#d97706", style=dotted, label="in_flight 紧贴在 cwnd 下方", fontname="Noto Sans CJK SC", fontsize=9];
+
+    // ---- ssthresh reference note ----
+    ssth [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="ssthresh = 换挡点\lcwnd <  ssthresh：慢启动（每个 RTT 翻倍）\lcwnd >= ssthresh：拥塞避免（每个 RTT +1）\l丢包/ECN 会同时降低 cwnd 和 ssthresh\l"];
+    c2 -> ssth [style=invis];
+
+    // ---- telemetry link: one ACK -> in_ack_event -> ringbuf ----
+    tele [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+          label="每个 ACK 都让时钟滴答一次：\lin_ack_event -> bpf_dctcp_update_alpha\lbpf_ringbuf_reserve -> {ts, cwnd, in_flight, srtt} -> submit\l这就是读取器记录的逐 ACK 事件。\l回环环境注意事项：没有丢包 => 没有锯齿，只有爬升。\l"];
+    c1 -> tele [label="一个 ACK 到达", color="#7c3aed", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+}

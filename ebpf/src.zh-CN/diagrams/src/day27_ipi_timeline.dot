@@ -1,0 +1,36 @@
+digraph ipi_timeline {
+    rankdir=TB;
+    labelloc=t;
+    label="经由中央调度的一次唤醒：每次 kick 都是异步 IPI";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+    nodesep=0.4; ranksep=0.55;
+
+    wake [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+          label="任务 T 被唤醒\nselect_cpu -> central_cpu"];
+
+    enq [shape=box, style="filled", fillcolor="#dbeafe",
+         label="central_enqueue（在 central 上）\n将 pid 压入 central_q\nkick central, SCX_KICK_PREEMPT"];
+
+    disp [shape=box, style="filled", fillcolor="#dbeafe",
+          label="central_dispatch（在 central 上）\n从 central_q 弹出 pid\n通过 bpf_task_from_pid() 解析\n插入 SCX_DSQ_LOCAL_ON | 5"];
+
+    cpu5 [shape=box, style="filled", fillcolor="#dbeafe",
+          label="CPU 5 中断处理程序\nresched_curr -> 重新调度\n从本地 DSQ 取出 T 并运行"];
+
+    buf [shape=record, style="filled", fillcolor="#fef3c7", fontsize=9,
+         label="{ 调度缓冲区 | 槽位 | 槽位 | 槽位 | （随 central 扇出而排空） }"];
+
+    async [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+           label="kick 是异步的：scx_bpf_kick_cpu 只记录请求，\l然后将真正的 IPI 转交 kick_cpus_irq_workfn()，\l以免 rq 锁发生嵌套。kick 会稍后到达，而非内联执行。\l"];
+
+    wake -> enq [label="PREEMPT（异步 IPI）", color="#dc2626", style=bold, fontsize=9];
+    enq -> disp [label="central 获得其时间槽", color="#2563eb", style=bold, fontsize=9];
+    disp -> cpu5 [label="IDLE（异步 IPI）", color="#dc2626", style=bold, fontsize=9];
+
+    disp -> buf [label="检查槽位", color="#d97706", style=bold, fontsize=9];
+    buf -> disp [label="为空？kick 自身 PREEMPT，重试", color="#7c3aed", style="bold,dashed", fontsize=9];
+
+    enq -> async [style=invis];
+}

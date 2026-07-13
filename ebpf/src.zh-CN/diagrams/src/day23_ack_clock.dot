@@ -1,0 +1,27 @@
+digraph ack_clock {
+    rankdir=TB;
+    labelloc=t;
+    label="ACK 时钟：每个返回的 ACK 释放一个窗口槽位，并允许再发送约 1 个报文段（受 in_flight < cwnd 限制）";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.5; ranksep=1.2;
+
+    sender [shape=record, style="filled", fillcolor="#dbeafe",
+            label="发送方|snd_cwnd = 10（上限）|in_flight = 已发送但尚未确认"];
+    gate [shape=diamond, style="filled", fillcolor="#fef3c7", fontsize=10,
+          label="in_flight\n<\ncwnd ?"];
+    receiver [shape=record, style="filled", fillcolor="#dbeafe",
+              label="接收方|对收到的字节发送 ACK"];
+
+    sender -> gate [label="希望发送", color="#2563eb", style=bold, fontname="Noto Sans CJK SC", fontsize=10];
+    gate -> receiver [label="是：发送报文段  ->  in_flight++", color="#d97706", style=bold, fontname="Noto Sans CJK SC", fontsize=10];
+    receiver -> sender [label="ACK 返回  ->  in_flight--，释放一个槽位", color="#16a34a", style=bold, fontname="Noto Sans CJK SC", fontsize=10];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=10,
+          label="自定速：\l最慢的链路决定 ACK 返回的速率，\l因此连接会自然地按该链路的速度发送。\l每个 ACK = 时钟的一次滴答 = 窗口略微打开。\l"];
+    receiver -> note [style=invis];
+
+    hook [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=10,
+          label="为什么在此观测：\l每个返回的 ACK 都会触发 in_ack_event\l（= bpf_dctcp_update_alpha）。该回调就是\l本章其余内容记录的逐滴答钩子。\l"];
+    sender -> hook [style=invis];
+}

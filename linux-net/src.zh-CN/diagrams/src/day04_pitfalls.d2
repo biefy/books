@@ -1,0 +1,63 @@
+direction: down
+
+title: |md
+  ## 卸载何时会带来问题
+| {near: top-center; shape: text}
+
+bpf: "BPF (XDP, tc-bpf)" {
+  style.fill: "#fee2e2"
+  b_body: |md
+    GRO 开启：程序看到一个大 skb，\
+    而非原始线路报文段。
+
+    影响：
+    - 逐数据包延迟跟踪 → 错误
+    - 数据包计数指标 → 偏低
+    - 逐报文段 flags 丢失
+
+    许多 BPF 程序会在所跟踪的 NIC 上\
+    禁用 GRO。
+  |
+}
+
+tcp: "TCP 时序测量" {
+  style.fill: "#fef3c7"
+  t_body: |md
+    GRO 会短暂保留报文段以便\
+    合并。在突发流量中增加 10-100 µs\
+    延迟。在应用层通常\
+    不可见。
+
+    对于延迟敏感型工作负载\
+    （HFT、RDMA），应关闭 GRO。
+  |
+}
+
+cap: "数据包捕获 / IDS" {
+  style.fill: "#dbeafe"
+  c_body: |md
+    RX 上的 tcpdump 位于协议栈前——\
+    因此也会观察到 GRO\
+    超级数据包！如果需要线路级保真捕获，\
+    `ethtool -K eth0 gro off`\
+    请使用上述命令。
+
+    或者通过 XDP 透传在驱动接收\
+    之前捕获。
+  |
+}
+
+verdict: "使用 ethtool -K 切换" {
+  style.fill: "#dcfce7"
+  v_body: |md
+    现代 Linux 的默认设置：
+    - GRO 开启
+    - GSO 开启
+    - TSO 开启（若硬件支持）
+
+    按需禁用：\
+    `sudo ethtool -K eth0 gro off`
+  |
+}
+
+bpf -> tcp -> cap -> verdict

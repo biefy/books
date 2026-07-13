@@ -1,0 +1,25 @@
+---
+config:
+  themeVariables:
+    fontFamily: '"Noto Sans CJK SC", "PingFang SC", sans-serif'
+---
+flowchart TD
+    Pkt["skb 进入 ip_rcv_finish<br/><b>作用：</b>携带 L3 标头<br/>和流键<br/><b>下一步原因：</b>在本地/转发决策前<br/>skb 需要 dst<br/><b>状态：</b>尚无可用 skb_dst"]
+    Cache{"dst 已缓存？<br/><b>作用：</b>检查之前处理时<br/>留下的 skb_dst<br/><b>下一步原因：</b>缓存的 dst 可以<br/>跳过 FIB 工作<br/><b>状态：</b>快速路径或<br/>需要查找"}
+    Lookup["ip_route_input_noref<br/><b>作用：</b>从 src/dst/iif/tos/mark<br/>构建 flowi 键<br/><b>下一步原因：</b>fib_rules 选择由哪个<br/>表处理此键<br/><b>状态：</b>路由查找请求"]
+    Rules["fib_rules<br/><b>作用：</b>按优先级顺序遍历<br/>策略规则<br/><b>下一步原因：</b>匹配的规则指定<br/>路由表/操作<br/><b>状态：</b>已选择表 ID<br/>或继续后续规则"]
+    Table["fib_table_lookup<br/><b>作用：</b>在 trie 中执行<br/>最长前缀匹配<br/><b>下一步原因：</b>构建 dst 需要<br/>下一跳/type/metrics<br/><b>状态：</b>fib_result"]
+    Rtable["构建 rtable<br/><b>作用：</b>将 fib_result 转换为 dst<br/>操作和可缓存路由<br/><b>下一步原因：</b>skb 将 dst 携带到<br/>协议栈后续阶段<br/><b>状态：</b>带 input/output 回调函数的<br/>struct rtable"]
+    Set["skb_dst_set<br/><b>作用：</b>将路由引用<br/>挂载到 skb<br/><b>下一步原因：</b>dst->input 告诉 IP<br/>应把数据包送往何处<br/><b>状态：</b>skb 拥有路由决策"]
+    Input["dst->input<br/><b>作用：</b>调用 ip_local_deliver<br/>或 ip_forward<br/><b>状态：</b>已选择本地或转发<br/>路径"]
+
+    Pkt --> Cache
+    Cache -->|是：路由已知| Input
+    Cache -->|否：需要 FIB| Lookup --> Rules --> Table --> Rtable --> Set --> Input
+
+    classDef key fill:#dbeafe,stroke:#2563eb
+    classDef decision fill:#fef3c7,stroke:#d97706
+    classDef out fill:#dcfce7,stroke:#16a34a
+    class Pkt,Lookup key
+    class Cache,Rules,Table decision
+    class Rtable,Set,Input out

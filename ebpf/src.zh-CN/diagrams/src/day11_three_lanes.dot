@@ -1,0 +1,64 @@
+digraph three_lanes {
+    rankdir=TB;
+    labelloc=t;
+    label="在 N 个函数上放置探针的三种方式";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=9];
+    compound=true;
+
+    // 路径 1：kprobe 循环
+    subgraph cluster_kprobe {
+        label="路径 1：kprobe 循环（N 个 int3 + N 个对象 + N 个 link）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#dc2626";
+        k_link [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+                label="N 个独立的\nbpf_link 对象"];
+        k1 [shape=box, style="filled", fillcolor="#dbeafe", label="fn_1\nint3 字节 + kprobe 对象"];
+        k2 [shape=box, style="filled", fillcolor="#dbeafe", label="fn_2\nint3 字节 + kprobe 对象"];
+        kn [shape=box, style="filled", fillcolor="#dbeafe", label="fn_N\nint3 字节 + kprobe 对象"];
+        k_link -> k1; k_link -> k2; k_link -> kn;
+        knote [shape=note, style="filled", fillcolor="#fef3c7", fontsize=8,
+               label="每次命中 = int3 陷阱\l（昂贵的异常）\l"];
+        kn -> knote [style=invis];
+    }
+
+    knote -> f1 [style=invis, weight=100];
+
+    // 路径 2：fentry
+    subgraph cluster_fentry {
+        label="路径 2：fentry（每个目标各有一个 BPF 跳板，共 N 个）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#7c3aed";
+        f1 [shape=box, style="filled", fillcolor="#e9d5ff", label="trampoline_1\n（一个函数）"];
+        f2 [shape=box, style="filled", fillcolor="#e9d5ff", label="trampoline_2\n（一个函数）"];
+        fn [shape=box, style="filled", fillcolor="#e9d5ff", label="trampoline_N\n（一个函数）"];
+        ff1 [shape=box, style="filled", fillcolor="#dbeafe", label="fn_1（NOP 修补）"];
+        ff2 [shape=box, style="filled", fillcolor="#dbeafe", label="fn_2（NOP 修补）"];
+        ffn [shape=box, style="filled", fillcolor="#dbeafe", label="fn_N（NOP 修补）"];
+        ff1 -> f1; ff2 -> f2; ffn -> fn;
+        fnote [shape=note, style="filled", fillcolor="#fef3c7", fontsize=8,
+               label="没有陷阱，但每个目标\l都有一个跳板\l"];
+        fn -> fnote [style=invis];
+    }
+
+    fnote -> m_link [style=invis, weight=100];
+
+    // 路径 3：kprobe.multi / fprobe
+    subgraph cluster_multi {
+        label="路径 3：kprobe.multi / fprobe（一次共享注册）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+        m_link [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+                label="一个 bpf_link +\n一个 struct fprobe"];
+        m_ftrace [shape=box, style="filled", fillcolor="#dcfce7",
+                  label="ftrace 共享操作\n(register_fprobe_ips)"];
+        m_arr [shape=record, style="filled", fillcolor="#fef3c7",
+               label="{ 已排序的 addr[] | addr_1 | addr_2 | ... | addr_N }"];
+        m_link -> m_ftrace;
+        m_ftrace -> m_arr [label="一个批次"];
+        mf1 [shape=box, style="filled", fillcolor="#dbeafe", label="fn_1"];
+        mf2 [shape=box, style="filled", fillcolor="#dbeafe", label="fn_2"];
+        mfn [shape=box, style="filled", fillcolor="#dbeafe", label="fn_N"];
+        m_arr -> mf1; m_arr -> mf2; m_arr -> mfn;
+        mnote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=8,
+               label="并非 N 个跳板——\l一次共享的 ftrace 注册，\l没有 int3 陷阱\l"];
+        mfn -> mnote [style=invis];
+    }
+}

@@ -1,0 +1,41 @@
+digraph inflight_accounting {
+    rankdir=TB;
+    labelloc=t;
+    label="packets_in_flight = packets_out - (sacked_out + lost_out) + retrans_out";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // 将整个重传队列表示为一根堆叠条。
+    bar [shape=record, style="filled", fontsize=10,
+         label="{ packets_out  （整个重传队列） | {<s> sacked_out\n（绿色：已接收，\n位于空洞之后） | <l> lost_out\n（灰色：推定\n已丢失） | <o> 剩余部分\n（蓝色：确实\n仍未确认） } }"];
+
+    // 颜色图例框（DOT 的 record 无法为单个单元格着色）
+    key_s [shape=box, style="filled", fillcolor="#dcfce7", fontsize=9,
+           label="sacked_out\n已离开网络\n（已接收）-> 减去"];
+    key_l [shape=box, style="filled", fillcolor="#e5e7eb", fontsize=9,
+           label="lost_out\n已离开网络\n（已消失）-> 减去"];
+    key_o [shape=box, style="filled", fillcolor="#dbeafe", fontsize=9,
+           label="剩余部分\n仍在线路上，\n仍待确认"];
+
+    key_s -> bar:s [style=dashed, color="#16a34a", arrowhead=none];
+    key_l -> bar:l [style=dashed, color="#6b7280", arrowhead=none];
+    key_o -> bar:o [style=dashed, color="#2563eb", arrowhead=none];
+
+    // retrans_out 的加回箭头
+    retx [shape=box, style="filled,rounded", fillcolor="#fef3c7", fontsize=10,
+          label="+ retrans_out\n重传的报文段确实\n重新回到线路上"];
+    retx -> bar:o [color="#d97706", style=bold, arrowhead=vee, label="加回"];
+
+    // 汇总括号 -> 单个数值
+    pif [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=11,
+         label="packets_in_flight\nTCP 对当前位于\n网络中的字节数估计"];
+    bar -> pif [color="#7c3aed", style=bold, arrowhead=vee, label="汇总"];
+
+    // 与 cwnd 比较
+    cwnd [shape=box, style="filled,rounded", fillcolor="#fee2e2", fontsize=11,
+          label="cwnd\n拥塞窗口上限。\nRTO 将整个窗口标记为丢失\n-> in_flight ~ 0\n-> cwnd = in_flight + 1 ~ 1 MSS"];
+    pif -> cwnd [color="#dc2626", style=dashed, arrowhead=vee, label="与其比较"];
+
+    { rank=same; key_s; key_l; key_o; }
+    { rank=same; pif; retx; }
+}

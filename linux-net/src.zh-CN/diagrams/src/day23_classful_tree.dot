@@ -1,0 +1,38 @@
+digraph classful_tree {
+    rankdir=TB;
+    labelloc=t;
+    label="tc 有类树：根 qdisc 1:、各个类，以及用于引导数据包的 u32 过滤器";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // The tree
+    root [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+          label="根 qdisc 1:\n（HTB，默认 30）"];
+    c1 [shape=box, style="filled", fillcolor="#dbeafe",
+        label="class 1:1\nrate 100mbit\n（持有全部容量）"];
+    c10 [shape=box, style="filled", fillcolor="#dbeafe",
+         label="class 1:10\nrate 30mbit"];
+    c20 [shape=box, style="filled", fillcolor="#dbeafe",
+         label="class 1:20\nrate 50mbit"];
+    c30 [shape=box, style="filled", fillcolor="#dbeafe",
+         label="class 1:30\nrate 20mbit\n（默认）"];
+
+    root -> c1;
+    c1 -> c10;
+    c1 -> c20;
+    c1 -> c30;
+
+    // The filter
+    pkt [shape=circle, style="filled", fillcolor="#fef3c7", width=0.6,
+         label="入站\n数据包"];
+    filter [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+            label="过滤器（u32）\n匹配 ip dport 22\n0xffff -> flowid 1:10"];
+
+    pkt -> filter [color="#2563eb"];
+    filter -> c10 [label="dport 22 匹配", color="#16a34a", style=bold];
+    filter -> c30 [label="默认 30（未匹配）", color="#94a3b8", style=dashed];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="handle major:minor\lminor 0（1:）= qdisc 本身\l非零 minor（1:10）= 一个类\l"];
+    c30 -> note [style=invis];
+}

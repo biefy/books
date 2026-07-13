@@ -1,0 +1,48 @@
+digraph epoll_flow {
+    rankdir=TB;
+    labelloc=t;
+    label="epoll 端到端：数据到达 → ep_poll_callback → rdllist → epoll_wait 返回";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // 左列：唤醒链
+    subgraph cluster_chain {
+        label="1. 唤醒链（背景 2）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#7c3aed";
+        arrive [shape=box, style="filled", fillcolor="#fef3c7",
+                label="数据包到达\nudp/tcp rcv 将 skb 入队"];
+        sdr [shape=box, style="filled", fillcolor="#e9d5ff",
+             label="sk_data_ready =\nsock_def_readable()"];
+        wk [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="wake_up_*_poll(EPOLLIN)\n遍历套接字等待队列"];
+        arrive -> sdr -> wk [style=bold, color="#7c3aed"];
+    }
+
+    // 三个 eventpoll 结构
+    subgraph cluster_ep {
+        label="struct eventpoll（epoll 实例）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        skq [shape=record, style="filled", fillcolor="#dbeafe",
+             label="{FD 等待队列|sk_sleep(sk)|epoll 条目：\n.func = ep_poll_callback}"];
+        rbr [shape=record, style="filled", fillcolor="#dbeafe",
+             label="{rbr（红黑树）|每个已 ADD 的 FD|O(log N) 注册表}"];
+        rdl [shape=record, style="filled", fillcolor="#dcfce7",
+             label="{rdllist（就绪链表）|已触发的 epitem|由 epoll_wait 排空}"];
+        wq [shape=record, style="filled", fillcolor="#e9d5ff",
+            label="{wq|epoll_wait() 调用者\n休眠的位置}"];
+    }
+
+    cb [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+        label="ep_poll_callback() 运行\nlist_add_tail(&epi->rdllink, &ep->rdllist)\n然后唤醒 ep->wq"];
+
+    wait [shape=box, style="filled", fillcolor="#fef3c7",
+          label="epoll_wait() 被唤醒 →\nep_send_events() 将\n就绪 FD 复制到 epoll_event[]"];
+
+    wk -> skq [style=bold, color="#7c3aed", label="2. 调用 epoll 的 .func"];
+    skq -> cb [style=bold, color="#16a34a", label="3."];
+    rbr -> skq [style=dashed, color="#94a3b8", label="ADD 注册了\n该条目"];
+    cb -> rdl [style=bold, color="#16a34a", label="追加 epitem"];
+    cb -> wq [style=bold, color="#16a34a", label="唤醒休眠者"];
+    wq -> wait [style=bold, color="#16a34a", label="4."];
+    rdl -> wait [style=dashed, color="#16a34a", label="复制到用户空间"];
+}

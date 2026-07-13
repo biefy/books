@@ -1,0 +1,39 @@
+digraph rmem_budget {
+    rankdir=TB;
+    labelloc=t;
+    label="接收内存预算：sk_rmem_alloc (truesize) 与 sk_rcvbuf";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    // 以堆叠记录表示预算计量条：已用部分 + 剩余空间
+    subgraph cluster_meter {
+        label="sk_rcvbuf——完整预算条";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        meter [shape=record, style="filled", fontsize=9,
+               label="{ <a> skb A truesize\n（载荷 + 开销） | <b> skb B truesize\n（载荷 + 开销） | <c> skb C truesize\n（载荷 + 开销） | <free> 剩余空间 }"];
+    }
+
+    legend [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+            label="sk_rmem_alloc = 已排队的 skb->truesize 之和\ltruesize = 载荷 + 头部 + sk_buff 开销 + 页面余量\l因此，大量小数据报会在远低于\l“rcvbuf 字节载荷”时耗尽预算。\l"];
+
+    // 到达关卡的入站数据包
+    incoming [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+              label="入站 skb\n(truesize = size)"];
+
+    gate [shape=diamond, style="filled", fillcolor="#dbeafe",
+          label="rmem + size\n> rcvbuf ?"];
+
+    accept [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+            label="接受：\natomic_add(size, &sk_rmem_alloc)\n然后由 sk_data_ready 唤醒\n（空队列始终接受一个）"];
+
+    drop [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+          label="goto drop：\nRcvbufErrors++ / sk_drops++\n（ss -uam 中的 d<N>）"];
+
+    incoming -> gate;
+    gate -> drop [color="#dc2626", style=bold, label="是\n（且 rmem != 0）"];
+    gate -> accept [color="#16a34a", style=bold, label="否"];
+    accept -> meter:free [color="#16a34a", style=dashed, label="占用预算", constraint=false];
+
+    meter -> legend [style=invis];
+}

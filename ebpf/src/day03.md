@@ -113,8 +113,8 @@ This is why your Day 1 program's `BPF_PROG(on_unlink, int dfd, struct filename *
 >
 > Your Day 1 and Day 2 programs read `bpf_get_current_pid_tgid() >> 32` to get the PID. That doesn't go through CO-RE — there's no struct field involved. But the BPF program still has to know it's running on Linux x86_64 vs ARM64. What handles that abstraction?
 >
-> .  
-> .  
+> .\
+> .\
 > .
 >
 > **Answer:** the helper itself. `bpf_get_current_pid_tgid` is implemented in `kernel/bpf/helpers.c` and is called the same way regardless of arch. Architecture-specific work happens *inside* the kernel implementation. CO-RE is for accessing kernel data structures whose *layout* differs across kernel versions, not for arch-portable helper calls.

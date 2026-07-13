@@ -1,0 +1,47 @@
+digraph rtt_queue {
+    rankdir=BT;
+    labelloc=t;
+    label="常驻队列增长时，srtt 会升至平坦的最小 RTT 基线之上";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=9, shape=box, style="filled", width=1.3, height=0.34];
+
+    // 固定的传播延迟基线（琥珀色）——每个样本都相同
+    b0 [label="传播延迟\n(min_rtt)", fillcolor="#fef3c7"];
+    b1 [label="传播延迟\n(min_rtt)", fillcolor="#fef3c7"];
+    b2 [label="传播延迟\n(min_rtt)", fillcolor="#fef3c7"];
+    b3 [label="传播延迟\n(min_rtt)", fillcolor="#fef3c7"];
+    { rank=same; b0; b1; b2; b3; }
+    b0 -> b1 -> b2 -> b3 [style=invis];
+
+    // 不断增长的常驻队列（绿色），堆叠在每个基线之上
+    q1a [label="队列", fillcolor="#dcfce7"];
+    q2a [label="队列", fillcolor="#dcfce7"];
+    q2b [label="队列", fillcolor="#dcfce7"];
+    q3a [label="队列", fillcolor="#dcfce7"];
+    q3b [label="队列", fillcolor="#dcfce7"];
+    q3c [label="队列", fillcolor="#dcfce7"];
+
+    b1 -> q1a [arrowhead=none];
+    b2 -> q2a -> q2b [arrowhead=none];
+    b3 -> q3a -> q3b -> q3c [arrowhead=none];
+
+    // srtt 上限 = 每列顶部（基线 + 队列）
+    node [shape=plaintext, style="", fillcolor=none, fontsize=9];
+    s0 [label="srtt ≈ min_rtt"];
+    s1 [label="srtt"];
+    s2 [label="srtt"];
+    s3 [label="srtt"];
+    b0  -> s0 [arrowhead=none, color="#94a3b8"];
+    q1a -> s1 [arrowhead=none, color="#94a3b8"];
+    q2b -> s2 [arrowhead=none, color="#94a3b8"];
+    q3c -> s3 [arrowhead=none, color="#94a3b8"];
+
+    // 基线下方的时间轴标签
+    t [shape=plaintext, fontname="Noto Sans CJK SC", fontsize=10,
+       label="时间 / 负载增加  ->"];
+    t -> b0 [style=invis];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontname="Noto Sans CJK SC", fontsize=9,
+          label="差值 (srtt - min_rtt) = 常驻队列\lBBR 监视这个差值；带宽保持不变时，该差值会不断增长。\l"];
+    s3 -> note [style=invis];
+}

@@ -1,0 +1,81 @@
+direction: down
+
+title: |md
+  ## VLAN 标记（802.1Q）
+| {near: top-center; shape: text}
+
+untagged: "无标记帧" {
+  style.fill: "#dbeafe"
+  u_body: |md
+    布局：
+    [目的 MAC] [源 MAC]
+
+    [type=0x0800 IP]
+    [载荷]
+
+    14 字节以太网
+    标头。
+  |
+}
+
+tagged: "VLAN 标记帧（802.1Q）" {
+  style.fill: "#fef3c7"
+  t_body: |md
+    布局：
+    [目的 MAC] [源 MAC]
+
+    [type=0x8100] [TCI:16]
+    [innertype] [载荷]
+
+    TCI = priority(3) +
+    DEI(1) + vlan_id(12)。
+
+    18 字节标头。
+
+    type=0x8100 表示：“VLAN
+    标记，后面是真实类型”。
+  |
+}
+
+hwaccel: "硬件 VLAN 加速" {
+  style.fill: "#dcfce7"
+  h_body: |md
+    NIC 去除标记，
+    存入 skb->vlan_tci
+
+    + skb->vlan_proto。
+    协议栈看到无标记
+
+    帧 + 元数据。
+    省去 4 字节解析。
+
+    若硬件在此处去除标记，
+    则设置 skb_vlan_tag_present(skb)。
+  |
+}
+
+vlan_dev: "VLAN 设备" {
+  style.fill: "#fef3c7"
+  v_body: |md
+    ip link add link eth0
+    name eth0.100 type
+
+    vlan id 100
+
+    创建一个虚拟
+    netdev，其行为：
+
+    - RX：筛选 vlan_id=100，
+      去除标记并向上传递
+
+    - TX：添加标记，
+      通过 eth0 发送
+
+    代码：
+    net/8021q/vlan_dev.c
+  |
+}
+
+untagged -> tagged: "vlan_id=100"
+tagged -> hwaccel: "NIC 去除标记" {style.stroke-dash: 4}
+hwaccel -> vlan_dev: "软件路径" {style.stroke-dash: 4}

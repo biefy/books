@@ -1,0 +1,24 @@
+%%{init: {'themeVariables': {'fontFamily': 'Noto Sans CJK SC, sans-serif'}}}%%
+flowchart TD
+    App["<b>1. 用户空间 → 套接字</b><br/>send/write 将 fd 解析为套接字<br/><b>交接：</b> TCP sendmsg 接管流字节<br/><b>状态：</b> 已锁定 sock + 消息迭代器"]
+
+    TCP["<b>2. TCP 写队列</b><br/>复制/零拷贝用户字节到 skb<br/><b>交接：</b> 推送策略与窗口允许发送<br/><b>状态：</b> skb 已有序列号"]
+
+    Segment["<b>3. TCP 发送决策</b><br/>应用 cwnd、rwnd、Nagle、节奏控制、SACK/丢包处理<br/><b>交接：</b> 选定的报文段可进入 IP<br/><b>状态：</b> TCP 头部/校验和元数据就绪"]
+
+    IP["<b>4. IP + Netfilter</b><br/>路由查找、LOCAL_OUT、POST_ROUTING、NAT/过滤<br/><b>交接：</b> 接受的 skb 已有 dst 和下一跳<br/><b>状态：</b> rtable、marks、MTU、网关已知"]
+
+    L2["<b>5. 邻居 + 设备队列</b><br/>解析 ARP/ND 并构造 L2 头部<br/><b>交接：</b> 完整帧可被调度<br/><b>状态：</b> 输出设备 + L2 目的地址"]
+
+    Dev["<b>6. qdisc → 驱动 → NIC</b><br/>tcx/tc、整形、出队、DMA 描述符<br/><b>交接：</b> NIC 门铃接管 TX 描述符<br/><b>状态：</b> 字节发出；完成后释放 skb"]
+
+    App --> TCP --> Segment --> IP --> L2 --> Dev
+
+    classDef us fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+    classDef tcp fill:#fef3c7,stroke:#d97706,stroke-width:2px
+    classDef ip fill:#dcfce7,stroke:#16a34a,stroke-width:2px
+    classDef dev fill:#e0e7ff,stroke:#6366f1,stroke-width:2px
+    class App us
+    class TCP,Segment tcp
+    class IP,L2 ip
+    class Dev dev

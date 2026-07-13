@@ -1,0 +1,70 @@
+direction: down
+
+title: |md
+  ## BPF_PROG 如何解包跳板参数
+| {near: top-center; shape: text}
+
+src: "你编写的源代码" {
+  style.fill: "#dbeafe"
+  src_code: |md
+    ```c
+    SEC("fexit/vfs_read")
+    int BPF_PROG(on_exit,
+        struct file *f,
+        char *buf,
+        size_t count,
+        loff_t *pos,
+        ssize_t ret)
+    {
+        /* use args + ret directly */
+    }
+    ```
+  |
+}
+
+ctx: "跳板 ctx 数组" {
+  style.fill: "#fef3c7"
+  body: |md
+    **作用：**
+    - 将原始函数的每个参数
+    - 存入一个 `u64` 槽。
+
+    **下一步的原因：**
+    - BPF 程序 ABI 是
+    - `int (*)(u64 *ctx)`，但学习者
+    - 希望使用有类型的 C 参数。
+
+    ```
+    ctx[0] = struct file *
+    ctx[1] = char *buf
+    ctx[2] = size_t count
+    ctx[3] = loff_t *pos
+    ctx[4] = ssize_t ret   // fexit only
+    ```
+  |
+}
+
+expanded: "生成的包装器" {
+  style.fill: "#dcfce7"
+  body: |md
+    **作用：**
+    - `BPF_PROG` 创建一个接收 ctx 的
+    - 外层函数和一个有类型的内层函数。
+
+    **状态变化：**
+    - 位置槽变为验证器可见的
+    - 类型化参数。
+
+    ```c
+    return ____on_exit(ctx,
+        (void *)ctx[0],
+        (void *)ctx[1],
+        (void *)ctx[2],
+        (void *)ctx[3],
+        (void *)ctx[4]);
+    ```
+  |
+}
+
+src -> ctx
+ctx -> expanded

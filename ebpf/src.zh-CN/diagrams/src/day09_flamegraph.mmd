@@ -1,0 +1,17 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, Microsoft YaHei, sans-serif"}}}%%
+flowchart TD
+    Sample["BPF 采样点<br/><b>作用：</b>为内核栈/用户栈调用 bpf_get_stackid<br/><b>下一步的原因：</b>热路径存储紧凑 ID，不做符号化<br/><b>状态：</b>栈映射中已有帧数组；返回 stackid"]
+    Hist["直方图映射<br/><b>作用：</b>递增 stackid 或 stackid 对的计数<br/><b>下一步的原因：</b>用户空间聚合，避免逐事件洪泛<br/><b>状态：</b>stackid -> count"]
+    Read["用户空间快照<br/><b>作用：</b>读取直方图映射和栈映射<br/><b>下一步的原因：</b>符号信息位于验证器/快速路径之外<br/><b>状态：</b>原始 IP 数组及计数"]
+    Sym["符号化<br/><b>作用：</b>通过 kallsyms 解析内核 IP，通过 PID maps/ELF 解析用户 IP<br/><b>下一步的原因：</b>火焰图需要名称和折叠栈<br/><b>状态：</b>具名调用链"]
+    Fold["折叠栈<br/><b>作用：</b>格式化为 'a;b;c count' 行<br/><b>下一步的原因：</b>渲染器消费折叠格式输入<br/><b>状态：</b>带权重的栈字符串"]
+    Render["火焰图 / speedscope<br/><b>作用：</b>将权重转化为可视宽度<br/><b>状态：</b>较宽的帧表示时间累积之处"]
+
+    Sample --> Hist --> Read --> Sym --> Fold --> Render
+
+    classDef bpf fill:#dbeafe,stroke:#2563eb
+    classDef user fill:#dcfce7,stroke:#16a34a
+    classDef out fill:#fef3c7,stroke:#d97706
+    class Sample,Hist bpf
+    class Read,Sym,Fold user
+    class Render out

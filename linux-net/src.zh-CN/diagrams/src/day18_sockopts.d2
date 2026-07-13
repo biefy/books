@@ -1,0 +1,27 @@
+direction: down
+
+title: |md
+  ## Sockopt：每套接字调节项
+| {near: top-center; shape: text}
+
+generic: "通用（SOL_SOCKET）" {
+  style.fill: "#dbeafe"
+  g_body: "- SO_RCVBUF / SO_SNDBUF（缓冲区）\n- SO_REUSEADDR / SO_REUSEPORT\n- SO_KEEPALIVE\n- SO_LINGER\n- SO_BINDTODEVICE\n- SO_PRIORITY（用于 tc/qdisc）\n- SO_MARK（在 tx 时设置 fwmark）"
+}
+
+ip: "IP（SOL_IP / SOL_IPV6）" {
+  style.fill: "#fef3c7"
+  ip_body: "- IP_TOS, IP_TTL\n- IP_MULTICAST_*\n- IP_FREEBIND\n- IP_PKTINFO（接收辅助信息）\n- IP_TRANSPARENT（TPROXY）"
+}
+
+tcp: "TCP（SOL_TCP）" {
+  style.fill: "#dcfce7"
+  tcp_body: "- TCP_NODELAY（禁用 Nagle）\n- TCP_CORK（批量发送）\n- TCP_QUICKACK\n- TCP_CONGESTION（算法名称）\n- TCP_FASTOPEN\n- TCP_USER_TIMEOUT\n- TCP_INFO（读取 TCP 统计信息）\n- TCP_TX_DELAY（BBR 节奏调节）"
+}
+
+bpf: "BPF 可通过 sock_ops 设置大多数选项" {
+  style.fill: "#fef3c7"
+  b_body: "bpf_setsockopt(skops, SOL_TCP,\n               TCP_CONGESTION, \"bbr\", 3);\n允许每 cgroup 或每流策略\n覆盖应用默认值。"
+}
+
+generic -> ip -> tcp -> bpf

@@ -1,0 +1,94 @@
+direction: down
+
+title: |md
+  ### TCP 所有权与 TSQ：保留的原始 skb 与下游克隆
+| {near: top-center; shape: text}
+
+writeq: "TCP 写队列" {
+  style.fill: "#dbeafe"
+  w_body: |md
+    新数据 skb 起始于 `sk_write_queue`。
+
+    TCP 创建/追加 skb 时计入
+    `sk_wmem_queued`。
+
+    tcp_write_xmit 检查 cwnd、rwnd、
+    Nagle、TSO 和节奏控制约束。
+  |
+}
+
+rtxq: "TCP 重传树" {
+  style.fill: "#ede9fe"
+  r_body: |md
+    首次成功发送后，
+    `tcp_event_new_data_sent()` 移动
+    原始 skb：
+
+    `sk_write_queue` → `tcp_rtx_queue`
+
+    `sk_wmem_queued` 记账会一直保留，
+    直至 ACK/释放（`tcp_wmem_free_skb`）。
+  |
+}
+
+check: "再次发送前的 TSQ 门控" {
+  style.fill: "#fef3c7"
+  c_body: |md
+    `tcp_small_queue_check()` 将
+    `sk_wmem_alloc` 与下式比较：
+
+    min(max(2 × skb->truesize,
+            pacing_rate >> pacing_shift),
+        tcp_limit_output_bytes)
+
+    通常下限为两个 skb，或约 1 ms 的
+    每套接字节奏速率字节数。
+  |
+}
+
+clone: "下游发送克隆" {
+  style.fill: "#dcfce7"
+  cl_body: |md
+    `tcp_transmit_skb()` 通常克隆
+    保留的 TCP skb 用于输出。
+
+    克隆计入 `sk_wmem_alloc`，
+    并设置析构函数 `tcp_wfree`。
+
+    它可占用 IP/qdisc/设备队列；
+    它并非保留在重传树中的原始 skb。
+  |
+}
+
+throttle: "超过限制：TSQ_THROTTLED" {
+  style.fill: "#fee2e2"
+  t_body: |md
+    停止发送下一个 skb。
+
+    尚未发送的原始 skb 留在写
+    队列；已发送的原始 skb 留在
+    重传树。
+
+    这会限制单个套接字在 TCP 下游的
+    占用量，而非跨流的总积压量。
+  |
+}
+
+free: "下游释放：tcp_wfree" {
+  style.fill: "#fff7ed"
+  f_body: |md
+    移除克隆的 `sk_wmem_alloc` 记账。
+
+    如果 TSQ 限制了此套接字，将其加入
+    每 CPU BH 工作队列，使 tcp_write_xmit 可在
+    qdisc 锁上下文之外重试。
+  |
+}
+
+writeq -> check: "考虑下一个未发送 skb"
+check -> clone: "低于限制：发送克隆"
+clone -> rtxq: "首次成功发送后保留原始 skb"
+check -> throttle: "仍超过限制" {style.stroke-dash: 4}
+clone -> free: "qdisc/设备释放克隆"
+free -> check: "唤醒并继续尝试" {style.stroke: "#16a34a"}
+throttle -> free: "等待先前克隆排空" {style.stroke-dash: 4}

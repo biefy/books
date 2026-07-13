@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>biefy / books / 简体中文</title>
+<style>
+  :root {
+    --bg: #1f2226;
+    --fg: #e6e6e6;
+    --accent: #ffb454;
+    --muted: #98a3ad;
+    --card: #292c33;
+    --card-hover: #34383f;
+    --border: #3a3f47;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #fafafa;
+      --fg: #2a2a2a;
+      --accent: #d6730e;
+      --muted: #6a6a6a;
+      --card: #ffffff;
+      --card-hover: #f0f0f0;
+      --border: #e0e0e0;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.7;
+  }
+  main {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 4rem 1.5rem;
+  }
+  h1 {
+    font-size: 2.2rem;
+    margin: 0 0 0.5rem;
+    font-weight: 600;
+  }
+  .tagline {
+    color: var(--muted);
+    margin: 0 0 0.5rem;
+    font-size: 1.1rem;
+  }
+  .language {
+    margin: 0 0 3rem;
+    font-size: 0.95rem;
+  }
+  .language a { color: var(--accent); text-decoration: none; }
+  .language a:hover { text-decoration: underline; }
+  .book {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.6rem 1.8rem;
+    margin-bottom: 1.2rem;
+    transition: background 0.15s, transform 0.15s, border-color 0.15s;
+  }
+  .book:hover {
+    background: var(--card-hover);
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+  .book h2 {
+    margin: 0 0 0.4rem;
+    color: var(--accent);
+    font-size: 1.35rem;
+  }
+  .book p {
+    margin: 0;
+    color: var(--muted);
+  }
+  .book .meta {
+    margin-top: 0.6rem;
+    font-size: 0.9rem;
+    color: var(--muted);
+  }
+  .order {
+    background: rgba(255, 180, 84, 0.1);
+    border-left: 3px solid var(--accent);
+    padding: 1rem 1.2rem;
+    margin: 2.5rem 0 0;
+    font-size: 0.95rem;
+    border-radius: 0 6px 6px 0;
+  }
+  footer {
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<main>
+  <h1>biefy / books</h1>
+  <p class="tagline">通过动手实验学习 Linux 内核原理。</p>
+  <p class="language"><a href="../" lang="en" hreflang="en">English</a></p>
+
+  <a class="book" href="../linux-net/zh-CN/">
+    <h2>Linux 网络子系统 30 天</h2>
+    <p>从 <code>sk_buff</code> 到 MPTCP，系统学习内核网络协议栈：RX/TX 路径、netfilter、conntrack、流量控制、kTLS 与现代网络特性。每天都指向具体的内核文件和函数。</p>
+    <div class="meta">30 天 · 164 幅图 · 约 15 万字 · 已基于 Linux 7.1 验证</div>
+  </a>
+
+  <a class="book" href="../ebpf/zh-CN/">
+    <h2>30 天 eBPF 实战</h2>
+    <p>在 Linux 7.1 上学习现代 eBPF：libbpf + CO-RE 工作流、验证器、fentry/fexit 跟踪、网络 BPF、kfunc、struct_ops 与 sched_ext。不使用 bcc 和旧式接口。</p>
+    <div class="meta">30 天 · 140 幅图 · 约 13 万字 · 第 30 天完成综合项目</div>
+  </a>
+
+  <div class="order">
+    <strong>阅读顺序：</strong>先读网络子系统，再读 eBPF。BPF 一书默认你已经理解内核网络协议栈，因为 BPF 程序正是挂载在这些路径上。
+  </div>
+
+  <footer>
+    源码托管于 <a href="https://github.com/biefy/books">GitHub</a>。使用 <a href="https://rust-lang.github.io/mdBook/">mdBook</a> 构建。内容采用 CC BY-SA 4.0 许可。
+  </footer>
+</main>
+</body>
+</html>

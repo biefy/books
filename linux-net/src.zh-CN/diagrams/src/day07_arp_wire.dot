@@ -1,0 +1,31 @@
+digraph arp_wire {
+    rankdir=TB;
+    labelloc=t;
+    label="以太网上的 ARP 帧：逐字段比较 REQUEST 与 REPLY";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    // 以太网标头 + arphdr 图例，共用布局
+    legend [shape=record, style="filled", fillcolor="#e9d5ff",
+            label="{ 以太网标头 | { 目的 MAC (6) | 源 MAC (6) | ethertype = 0x0806 (ETH_P_ARP) } }"];
+
+    hdr [shape=record, style="filled", fillcolor="#dbeafe",
+         label="{ struct arphdr | { ar_hrd=1 (Ethernet) | ar_pro=0x0800 (IPv4) | ar_hln=6 | ar_pln=4 | ar_op } }"];
+
+    // REQUEST 行
+    req [shape=record, style="filled", fillcolor="#fef3c7",
+         label="{ ARPOP_REQUEST (op=1)  -- 广播到 ff:ff:ff:ff:ff:ff | { SHA = 发送方 MAC | SIP = 发送方 IP | THA = 00:00:00:00:00:00（未知！） | TIP = 正在询问的目标 IP } }"];
+
+    // REPLY 行
+    rep [shape=record, style="filled", fillcolor="#dcfce7",
+         label="{ ARPOP_REPLY (op=2)  -- 单播返回询问方 | { SHA = 本机 MAC | SIP = 本机 IP | THA = 询问方 MAC（已填入） | TIP = 询问方 IP } }"];
+
+    legend -> hdr [label="帧布局", color="#94a3b8"];
+    hdr -> req [label="ar_op = 1", color="#94a3b8"];
+    hdr -> rep [label="ar_op = 2", color="#94a3b8"];
+
+    grat [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9, fontname="Noto Sans CJK SC",
+          label="免费 ARP = TIP == SIP 的 REQUEST\l（“现在此 IP 归我所有”）-- 广播，不期待回复。\l"];
+    req -> grat [style=dashed, color="#16a34a", label="若 TIP==SIP"];
+}

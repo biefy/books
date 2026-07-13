@@ -1,0 +1,39 @@
+digraph umem_lifecycle {
+    rankdir=TB;
+    labelloc=t;
+    label="UMEM 帧生命周期：一个块在四个环形队列中的旅程（每个 addr 都是字节偏移量）";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // UMEM 条：N 个等大块，其中一个高亮
+    subgraph cluster_umem {
+        label="UMEM：一个按页对齐的缓冲区，被划分为相等的 FRAME_SIZE 块";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#d97706";
+        umem [shape=record, style="filled", fillcolor="#fef3c7",
+              label="帧 0\n偏移 0|帧 1\n偏移 2048|<hot>帧 2\n偏移 4096|帧 3\n偏移 6144|帧 4\n偏移 8192|…|帧 N-1"];
+    }
+
+    // 高亮块说明
+    hot [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9, fontname="Noto Sans CJK SC",
+         label="帧 2 = 偏移 4096 = 2 * FRAME_SIZE\l这是偏移量，而不是指针。指针 = buffer + offset\l通过 xsk_umem__get_data(buffer, addr) 获取\l"];
+    umem:hot -> hot [style=dashed, color="#7c3aed"];
+
+    // 生命周期步骤
+    fill [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+          label="1. FILL 环形队列（用户 -> 内核）\n用户写入偏移 4096\n现在由驱动持有该帧"];
+    dma [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+         label="2. 驱动 DMA\nNIC 将数据包字节写入\n偏移 4096（仍由驱动持有，现已填充）"];
+    rx [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+        label="3. RX 环形队列（内核 -> 用户）\n内核交回偏移 4096 + 实际 len\n现在由用户空间持有"];
+    proc [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+          label="4. 用户空间读取\nbuffer + 4096 -> 数据包字节\n原地处理（零拷贝）"];
+
+    fill -> dma [color="#7c3aed", style=bold, label="偏移量"];
+    dma -> rx [color="#16a34a", style=bold, label="偏移量 + len"];
+    rx -> proc [color="#2563eb", style=bold, label="偏移量"];
+    proc -> fill [color="#dc2626", style=bold, label="5. 将同一个偏移量归还 FILL 环形队列\n（闭合循环）", constraint=false];
+
+    breaks [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9, fontname="Noto Sans CJK SC",
+            label="跳过步骤 1（从不填充） -> 故障 1：RX 环形队列为空\l不归还给 FILL -> 故障 2：驱动耗尽缓冲区，rx_dropped++\l"];
+    proc -> breaks [style=invis];
+}

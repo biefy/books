@@ -1,0 +1,33 @@
+digraph task_states {
+    rankdir=LR;
+    labelloc=t;
+    label="任务的三种情形——以及哪些边会触发 sched_ext 回调函数";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+    nodesep=0.7; ranksep=1.4;
+
+    running [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+             label="运行中\n（当前正在 CPU 上）\nTASK_RUNNING"];
+    runnable [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+              label="可运行\n（已就绪，正在等待 CPU）\nTASK_RUNNING"];
+    blocked [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+             label="已阻塞 / 睡眠\n（等待 IO、锁或定时器）\nTASK_[UN]INTERRUPTIBLE"];
+
+    // blocked -> runnable：唤醒，触发 enqueue
+    blocked -> runnable [color="#16a34a", style=bold, fontcolor="#16a34a",
+                         label="唤醒\n触发 enqueue()"];
+    // runnable -> running：调度
+    runnable -> running [color="#2563eb", style=bold, fontcolor="#2563eb",
+                         label="调度\n触发 dispatch()"];
+    // running -> runnable：时间片到期 / 抢占
+    running -> runnable [color="#d97706", fontcolor="#d97706",
+                         label="时间片到期 /\n抢占\n（再次触发 enqueue()）"];
+    // running -> blocked：因 IO 阻塞
+    running -> blocked [color="#dc2626", fontcolor="#dc2626",
+                        label="因 IO / 锁 /\n睡眠而阻塞"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="“运行中”和“可运行”属于同一个内核状态（TASK_RUNNING）。\l调度器会完全忽略已阻塞的任务，直到它被唤醒。\lenqueue() = 任务进入可运行池；dispatch() = CPU 需要工作。\l"];
+    blocked -> note [style=invis];
+}

@@ -1,0 +1,51 @@
+digraph pagecache_cow {
+    rankdir=TB;
+    labelloc=t;
+    label="一个 inode，共享执行页：挂载时通过 COW 拆分 PID-A；PID-B 仍映射干净页";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+    nodesep=0.5; ranksep=0.8;
+    compound=true;
+
+    // ---- The page cache (shared, keyed by inode+offset) ----
+    subgraph cluster_pc {
+        label="页缓存——以 (inode, file-offset) 为键";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+
+        inode [shape=record, style="filled", fillcolor="#dcfce7", fontname="Noto Sans Mono CJK SC",
+               label="inode = /usr/bin/bash"];
+
+        shared [shape=record, style="filled", fillcolor="#fef3c7",
+                label="共享执行页\n(bash-inode, .text offset)\n原始字节：0x48 ...\n只读 / 可执行"];
+
+        inode -> shared [label="作为后备", color="#16a34a", fontname="Noto Sans CJK SC", fontsize=9];
+    }
+
+    // ---- PID-A: COW-split private copy with int3 ----
+    subgraph cluster_a {
+        label="bash PID-A（已挂载 uprobe -> COW 被打破）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#7c3aed";
+
+        priv_a [shape=record, style="filled", fillcolor="#e9d5ff",
+                label="私有匿名页（可写副本）\n字节已修补：0xCC (int3)\n其余字节不变"];
+    }
+
+    // ---- PID-B: still mapping the clean shared page ----
+    subgraph cluster_b {
+        label="bash PID-B（尚未修补）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+
+        map_b [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+               label="映射干净的共享页\n只读 / 可执行\n无断点"];
+    }
+
+    shared -> priv_a [label="打破 COW (FOLL_WRITE)：\l创建私有副本，然后写入 int3", color="#dc2626",
+        style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+    shared -> map_b [label="仍映射干净页，\l直到它也被修补", color="#2563eb",
+        style=dashed, fontname="Noto Sans CJK SC", fontsize=9];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="断点是 INODE 的属性，而不是进程的属性。\l修补 inode 的页一次 -> 每个正在运行和以后运行的 bash 都会被覆盖，\l每次通过一个私有 COW 副本实现。绝不会弄脏磁盘上的文件。\l"];
+    map_b -> note [style=invis];
+}

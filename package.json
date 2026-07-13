@@ -1,0 +1,14 @@
+{
+  "name": "biefy-books-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "./scripts/build-site.sh",
+    "check:i18n": "python3 scripts/check-i18n.py check",
+    "check:search": "node scripts/check-search.mjs _site",
+    "pagefind": "pagefind"
+  },
+  "devDependencies": {
+    "pagefind": "1.5.2"
+  }
+}

@@ -1,0 +1,39 @@
+digraph trace_event_macro {
+    rankdir=TB;
+    labelloc=t;
+    label="一个 TRACE_EVENT(sched_switch)，三个部分 -> 三种挂载界面";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+    nodesep=0.5; ranksep=1.1;
+
+    // Lane 1: TP_PROTO
+    proto [shape=box, style="filled", fillcolor="#dbeafe",
+           label="TP_PROTO（通道 1）\nbool preempt\nstruct task_struct *prev\nstruct task_struct *next\nunsigned int prev_state"];
+    proto_out [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+               label="tp_btf 参数 / 原始 args[]\n（有类型的实时指针，\n零拷贝）"];
+
+    // Lane 2: TP_STRUCT__entry
+    entry [shape=box, style="filled", fillcolor="#dbeafe",
+           label="TP_STRUCT__entry（通道 2）\nchar prev_comm[16]\npid_t prev_pid\nint prev_prio\nlong prev_state\nchar next_comm[16]\n..."];
+    entry_out [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+               label="format 文件（字节偏移）\n+ tracepoint/ 复制的结构体\nprev_comm@8, prev_pid@24, ..."];
+
+    // Lane 3: TP_fast_assign
+    assign [shape=box, style="filled", fillcolor="#dbeafe",
+            label="TP_fast_assign（通道 3）\nmemcpy(__entry->prev_comm, prev->comm, 16)\n__entry->prev_pid = prev->pid\n...每个字段一次赋值..."];
+    assign_out [shape=box, style="filled,rounded", fillcolor="#fee2e2", fontname="Noto Sans CJK SC",
+                label="填充扁平结构体的复制操作\n仅在存在常规跟踪点\n（/ftrace/perf）监听器时运行"];
+
+    proto  -> proto_out  [label="原始路径传递", color="#16a34a", style=bold, fontsize=9];
+    entry  -> entry_out  [label="声明布局", color="#d97706", style=bold, fontsize=9];
+    assign -> assign_out [label="填充副本", color="#dc2626", style=bold, fontsize=9];
+
+    // keep lanes stacked
+    proto -> entry [style=invis];
+    entry -> assign [style=invis];
+
+    note [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9, fontname="Noto Sans CJK SC",
+          label="一个宏，两种界面。\l偏移来自 TP_STRUCT__entry，\l字节来自 TP_fast_assign。\ltp_btf 借助 TP_PROTO -> 可访问每个\ltask_struct 字段（例如 prev->mm）。\l"];
+    assign_out -> note [style=invis];
+}

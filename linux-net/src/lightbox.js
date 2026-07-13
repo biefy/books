@@ -36,9 +36,12 @@
     var content = document.querySelector(".content");
     if (!content) return;
 
+    var isChinese = document.documentElement.lang.toLowerCase().indexOf("zh") === 0;
+    var zoomTitle = isChinese ? "点击放大" : "Click to zoom";
+    var closeLabel = isChinese ? "关闭" : "Close";
     var imgs = content.querySelectorAll("img");
     imgs.forEach(function (img) {
-      img.title = "Click to zoom";
+      img.title = zoomTitle;
       if (img.complete && img.naturalWidth) {
         classify(img);
       } else {
@@ -56,7 +59,7 @@
       overlay = document.createElement("div");
       overlay.id = "lightbox-overlay";
       overlay.innerHTML =
-        '<button class="lightbox-close" aria-label="Close">×</button>' +
+        '<button class="lightbox-close" aria-label="' + closeLabel + '">×</button>' +
         '<div class="lightbox-content">' +
         '<img class="lightbox-img" alt="">' +
         '<div class="lightbox-caption"></div>' +

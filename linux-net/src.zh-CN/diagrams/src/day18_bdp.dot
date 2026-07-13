@@ -1,0 +1,33 @@
+digraph bdp {
+    rankdir=TB;
+    labelloc=t;
+    label="带宽时延积：管道必须容纳一个 BDP 的传输中数据";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // “水管”：带宽 = 宽度，RTT = 长度
+    subgraph cluster_pipe {
+        label="管道（链路）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+
+        sender [shape=box, style="filled", fillcolor="#dbeafe",
+                label="发送方\n发送缓冲区\n(sk_sndbuf)"];
+        water  [shape=box, style="filled", fillcolor="#fef3c7",
+                label="传输中字节数 = BDP\n= 带宽 x RTT\n（已发送，尚未确认）"];
+        receiver [shape=box, style="filled", fillcolor="#dbeafe",
+                  label="接收方\n通告窗口\n(<= sk_rcvbuf)"];
+
+        sender -> water [label="带宽 = 有多宽", fontname="Noto Sans CJK SC", fontsize=9, color="#d97706", penwidth=3];
+        water -> receiver [label="RTT = 有多长", fontname="Noto Sans CJK SC", fontsize=9, color="#2563eb", penwidth=2];
+        receiver -> sender [label="ACK 在 1 个 RTT 后返回", fontname="Noto Sans CJK SC", fontsize=9, style=dashed, constraint=false];
+    }
+
+    example [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+             label="示例：10 Gbps x 100 ms RTT\l  BDP = 10e9/8 x 0.1 ~= 125 MB\l发送方在必须停下来等待 ACK 之前，\l最多可有一个 BDP 的数据尚未确认。\l"];
+
+    warn [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="注意：如果缓冲区/窗口 < BDP，\l发送方会因等待 ACK 而停顿，\l链路处于空闲状态——无论链路多快，吞吐量都会受限。\l"];
+
+    receiver -> example [style=invis];
+    water -> warn [style=invis];
+}

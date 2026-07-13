@@ -1,0 +1,71 @@
+direction: down
+
+title: |md
+  ## 多个 FIB 表
+| {near: top-center; shape: text}
+
+rules: "fib_rules：先查哪个表？" {
+  style.fill: "#fef3c7"
+  ru_body: |md
+    - **作用：**按优先级
+    - 顺序遍历规则。
+    - **下一步原因：**第一个匹配
+    - 的规则选择一个 FIB 表。
+    - **状态：**查找已有表 ID。
+    - 默认值：
+    - 0：lookup local
+    - 32766：lookup main
+    - 32767：lookup default
+  |
+}
+
+local: "local (id 255)" {
+  style.fill: "#fef3c7"
+  l_body: |md
+    - **作用：**匹配本机
+    - 自身的地址。
+    - **为何最先：**本地交付
+    - 必须优先于转发。
+    - **所有者：**由内核维护。
+  |
+}
+
+main: "main (id 254)" {
+  style.fill: "#dbeafe"
+  m_body: |md
+    - **作用：**普通的用户/
+    - 管理员路由。
+    - **为何随后：**未指定表时，
+    - `ip route add` 的路由
+    - 会放入这里。
+  |
+}
+
+default: "default (id 253)" {
+  style.fill: "#dcfce7"
+  d_body: |md
+    - **作用：**最终回退表。
+    - **为何最后：**出于历史
+    - 兼容性；现代主机上
+    - 很少填充。
+  |
+}
+
+custom: "自定义表（u32 ID）" {
+  style.fill: "#dbeafe"
+  c_body: |md
+    - **作用：**为策略路由
+    - 提供独立 FIB。
+    - **选择原因：**源 IP、
+    - fwmark、iif/oif、UID、端口
+    - 匹配了某条规则。
+    - **注意：**示例使用 100/200，
+    - 但表 ID 的上限
+    - 并非 252。
+  |
+}
+
+rules -> local: "priority 0"
+local -> main: "回退"
+main -> default: "最后一条默认规则"
+default -> custom: "自定义规则匹配"

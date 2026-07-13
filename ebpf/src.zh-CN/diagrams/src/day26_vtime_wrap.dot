@@ -1,0 +1,26 @@
+digraph vtime_wrap {
+    rankdir=TB;
+    labelloc=t;
+    label="u64 vtime：大幅递减会下溢越过 0，并回绕到接近 2^64（最后调度）";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    line [shape=record, style="filled", fillcolor="#dbeafe",
+          label="{ 0  （最先运行） | 较小的 vtime | ... | 接近 2^64  （最后运行 / 永不运行） }"];
+
+    start [shape=note, style="filled", fillcolor="#dcfce7", fontsize=10,
+           label="任务 vtime = 较小的值\l例如 5,000,000\l"];
+
+    bad [shape=note, style="filled", fillcolor="#fee2e2", fontsize=10,
+         label="vtime -= 1,000,000,000   (b > a)\lu64 没有负数：\la - b + 2^64\l→ 回绕到约 18.4×10^18\l→ DSQ 将其排在最后，任务饥饿\l→ watchdog 在约 30s 后逐出调度器\l"];
+
+    good [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=10,
+          label="修复方法：限制递减幅度\l保留足够余量，使 vtime >= 0\l或使用独立的 PRIO_DSQ 通道\l"];
+
+    start -> line:w [color="#16a34a", style=bold, label="之前"];
+    bad -> line:e [color="#dc2626", style=bold, label="之后"];
+
+    { rank=same; start; bad; }
+    bad -> good [style=dashed];
+}

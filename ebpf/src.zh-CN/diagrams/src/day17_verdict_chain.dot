@@ -1,0 +1,57 @@
+digraph verdict_chain {
+    rankdir=TB;
+    labelloc=t;
+    label="tcx-ingress 链：TCX_NEXT 沿链向下运行，任何终止判决都会停止";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.6; ranksep=0.55;
+
+    entry [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+           label="数据包命中 eth0 上的 tcx-ingress"];
+
+    // 竖直的程序链（蓝色 = 结构体/程序）
+    p1 [shape=box, style="filled", fillcolor="#dbeafe",
+        label="程序 #1  (counter)"];
+    p2 [shape=box, style="filled", fillcolor="#dbeafe",
+        label="程序 #2  (firewall)"];
+    p3 [shape=box, style="filled", fillcolor="#dbeafe",
+        label="程序 #3  (log)"];
+
+    // 终止判决（右侧共用）
+    accept [shape=box, style="filled", fillcolor="#dcfce7",
+            label="TCX_PASS / TC_ACT_OK (0)\n接受，停止该链"];
+    drop [shape=box, style="filled", fillcolor="#fee2e2",
+          label="TCX_DROP / TC_ACT_SHOT (2)\n丢弃，停止该链"];
+    redir [shape=box, style="filled", fillcolor="#e9d5ff",
+           label="TCX_REDIRECT (7)\n重定向，停止该链"];
+
+    // 经典 tc 的继续路径（琥珀色 = 数据/落点）
+    tcrun [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+           label="经典 tc_run() 过滤器\n(TCX_NEXT 越过最后一个程序\n= TC_ACT_UNSPEC -1：无人做出判决)"];
+
+    // 主链：仅在 TCX_NEXT 时前进
+    entry -> p1 [arrowhead=normal];
+    p1 -> p2 [label="TCX_NEXT (-1)\n继续向下", color="#2563eb", fontsize=9, fontname="Noto Sans CJK SC"];
+    p2 -> p3 [label="TCX_NEXT (-1)\n继续向下", color="#2563eb", fontsize=9, fontname="Noto Sans CJK SC"];
+    p3 -> tcrun [label="TCX_NEXT (-1 = TC_ACT_UNSPEC)\n继续进入旧版 tc", color="#2563eb", fontsize=9, fontname="Noto Sans CJK SC"];
+
+    // 侧向出口：任何终止判决都会使链短路
+    p1 -> accept [constraint=false, color="#16a34a", style=dashed, fontsize=8];
+    p1 -> drop   [constraint=false, color="#dc2626", style=dashed, fontsize=8];
+    p1 -> redir  [constraint=false, color="#7c3aed", style=dashed, fontsize=8];
+    p2 -> accept [constraint=false, color="#16a34a", style=dashed, fontsize=8];
+    p2 -> drop   [constraint=false, color="#dc2626", style=dashed, fontsize=8];
+    p2 -> redir  [constraint=false, color="#7c3aed", style=dashed, fontsize=8];
+    p3 -> accept [constraint=false, color="#16a34a", style=dashed, fontsize=8];
+    p3 -> drop   [constraint=false, color="#dc2626", style=dashed, fontsize=8];
+    p3 -> redir  [constraint=false, color="#7c3aed", style=dashed, fontsize=8];
+
+    // 将判决框堆叠在右侧
+    { rank=same; p1; accept; }
+    { rank=same; p2; drop; }
+    { rank=same; p3; redir; }
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9, fontname="Noto Sans CJK SC",
+          label="虚线 = 终止判决：!=TCX_NEXT，因此 tcx_run() 在此中断。\l蓝色实线 = TCX_NEXT，唯一能让链继续前进的代码。\l"];
+    tcrun -> note [style=invis];
+}

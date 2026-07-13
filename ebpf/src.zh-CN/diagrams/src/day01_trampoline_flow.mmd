@@ -1,0 +1,20 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif"}}}%%
+flowchart TD
+    Patch["<b>1. 已修补的函数入口</b><br/>架构的 ftrace/BPF 机制将<br/>NOP 空间转换为入口调用路径<br/><b>交接：</b>跳板先于函数体运行<br/><b>状态：</b>原始参数仍然可用"]
+
+    Tramp["<b>2. BPF 跳板</b><br/>保存参数寄存器并构造<br/>BPF 调用约定<br/><b>交接：</b>验证器批准的程序<br/>需要类型化参数/ctx<br/><b>状态：</b>BPF 可见参数已就绪"]
+
+    Prog["<b>3. fentry 程序</b><br/>在 unlink 逻辑运行前观察<br/>filename_unlinkat 参数<br/><b>交接：</b>return 0 使内核<br/>继续执行<br/><b>状态：</b>可选事件数据已准备"]
+
+    Event["<b>4. 跟踪副作用</b><br/>通过 ringbuf 或映射更新向<br/>用户空间公开观测结果<br/><b>交接：</b>跳板可以恢复<br/>正常执行<br/><b>状态：</b>记录事件而不<br/>改变系统调用行为"]
+
+    Body["<b>5. 原始函数体</b><br/>恢复寄存器，filename_unlinkat<br/>执行查找、权限检查和 unlink<br/><b>状态：</b>调用者看到正常的<br/>内核返回值"]
+
+    Patch --> Tramp --> Prog --> Event --> Body
+
+    classDef hot fill:#ffe5b4,stroke:#d97706,stroke-width:2px
+    classDef bpf fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+    classDef kern fill:#e5e7eb,stroke:#374151,stroke-width:2px
+    class Patch,Tramp hot
+    class Prog,Event bpf
+    class Body kern

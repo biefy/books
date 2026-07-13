@@ -1,0 +1,23 @@
+direction: down
+
+title: |md
+  ## 套接字写入路径：字节流向何处
+| {near: top-center; shape: text}
+
+write: "send() / write()\n\n用户空间将字节放入系统调用参数。\n内核执行：sock_sendmsg → tcp_sendmsg" {
+  style.fill: "#dbeafe"
+}
+
+queue: "sk_write_queue（每套接字）\n\ntcp_sendmsg 将用户字节复制到内核 skb，\n并追加至 sk->sk_write_queue。\n\n约束：\n- sk->sk_sndbuf 限制排队字节数\n- Cgroup 内存记账\n- 为提高效率，skb 可合并" {
+  style.fill: "#fef3c7"
+}
+
+cwnd: "tcp_write_xmit 决定现在发送什么\n\n遍历队列，逐 skb 判断：\n- 拥塞窗口是否开放？（tcp_cwnd_test）\n- 发送窗口是否开放？（tcp_snd_wnd_test）\n- 是否满足 Nagle 条件？\n- TSO 报文段大小？\n\n尽可能发送；其余留待稍后处理\n（下一次 ACK、RTO、应用推送等）" {
+  style.fill: "#dcfce7"
+}
+
+xmit: "tcp_transmit_skb → ip_queue_xmit → ...\n\n构造头部、IP 输出、邻居解析、\nqdisc 入队、驱动发送。\n\n参见完整 TX 流程底部。" {
+  style.fill: "#fee2e2"
+}
+
+write -> queue -> cwnd -> xmit

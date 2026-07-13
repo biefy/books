@@ -1,0 +1,53 @@
+digraph udp_hashtables {
+    rankdir=TB;
+    labelloc=t;
+    label="__udp4_lib_lookup：按最具体优先顺序遍历 struct udp_table";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    // 三个哈希数组，从最通用到最具体
+    subgraph cluster_tables {
+        label="struct udp_table——三个桶数组";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=record, style="filled", fillcolor="#dbeafe"];
+        hash  [label="hash（仅端口）\n旧版主表 | 桶 | 桶 | 桶"];
+        hash2 [label="hash2 = hslot2（端口 + 地址）\nudp_hslot_main + hash4_cnt | 桶 | 桶 | 桶"];
+        hash4 [label="hash4（完整四元组）\n已连接套接字 | 桶 | 桶 | 桶"];
+        hash -> hash2 -> hash4 [style=invis];
+    }
+
+    entry [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+           label="数据报 (saddr, sport, daddr, dport)\nhash2 = ipv4_portaddr_hash(daddr, hnum)"];
+
+    s1 [shape=box, style="filled", fillcolor="#dcfce7",
+        label="1. udp_has_hash4(hslot2)?\nudp4_lib_lookup4——完整四元组"];
+    s2 [shape=box, style="filled", fillcolor="#dcfce7",
+        label="2. 在 hslot2 上调用 udp4_lib_lookup2\n当 sk_state==TCP_ESTABLISHED 时接受"];
+    s3 [shape=box, style="filled", fillcolor="#dcfce7",
+        label="3. 通配 INADDR_ANY hslot2\n未连接的 0.0.0.0:port 绑定"];
+    s4 [shape=box, style="filled", fillcolor="#dcfce7",
+        label="4. 仅端口的主哈希\n针对重新哈希竞态的窄范围后备路径"];
+
+    found [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+           label="返回 struct sock\n=> udp_queue_rcv_skb"];
+    miss [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+          label="未命中：NoPorts++\nicmp_send(PORT_UNREACH)"];
+
+    entry -> s1 [label="开始"];
+    s1 -> s2 [label="未命中", color="#94a3b8"];
+    s2 -> s3 [label="未命中", color="#94a3b8"];
+    s3 -> s4 [label="未命中", color="#94a3b8"];
+
+    s1 -> found [color="#16a34a", style=bold, label="命中"];
+    s2 -> found [color="#16a34a", style=bold, label="命中"];
+    s3 -> found [color="#16a34a", style=bold, label="命中"];
+    s4 -> found [color="#16a34a", style=bold, label="命中"];
+    s4 -> miss [color="#dc2626", style=bold, label="没有套接字"];
+
+    // 将步骤连接到其读取的数组
+    s1 -> hash4 [style=dotted, color="#2563eb", constraint=false, label="读取"];
+    s2 -> hash2 [style=dotted, color="#2563eb", constraint=false, label="读取"];
+    s3 -> hash2 [style=dotted, color="#2563eb", constraint=false];
+    s4 -> hash  [style=dotted, color="#2563eb", constraint=false, label="读取"];
+}

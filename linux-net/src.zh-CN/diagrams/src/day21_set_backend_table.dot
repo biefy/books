@@ -1,0 +1,24 @@
+digraph set_backend_table {
+    rankdir=TB;
+    labelloc=t;
+    label="哪个内核模块支撑 nft set：由 key + flags 选择后端";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    decide [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="add set ... { type KEY ; flags ... ; }\n集合选择逻辑只选取一个后端"];
+
+    // The decision table
+    table [shape=record, style="filled", fillcolor="#dbeafe", fontsize=10,
+           label="{ 键 / 标志 | 后端模块 | 复杂度 | 支持的操作 }|\
+{ 精确键，无标志\n集合包含 10.0.0.1、10.0.0.2 | nft_set_hash.c\n(rhashtable) | O(1) | 点查找：\n这个精确键是否存在？ }|\
+{ flags interval\n（CIDR 5.6.7.0/24） | nft_set_rbtree.c\n(rb_root) | O(log N) | 范围 / CIDR：\naddr 是否落在某个范围内？ }|\
+{ 拼接范围\n（saddr 范围、dport 范围） | nft_set_pipapo.c\n(pipapo) | 次线性 | 一次完成多字段\n范围匹配 }|\
+{ 很小的键空间\n（一个端口字节） | nft_set_bitmap.c\n(bitmap) | O(1) | 在小型稠密域中\n判断成员关系 }}"];
+
+    decide -> table [style=invis];
+
+    why [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+         label="为什么哈希无法处理 CIDR：\l哈希只能确认某个精确键存在；\l它无法回答“位于哪个范围内？”\l有序树通过二分搜索端点\l-> 这次遍历的复杂度就是 O(log N)。\l"];
+    table -> why [style=invis];
+}

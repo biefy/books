@@ -1,0 +1,22 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, Microsoft YaHei, sans-serif"}}}%%
+flowchart TD
+    Call["调用<br/>trace_sched_switch(<br/>preempt, prev, next)<br/>作用：到达<br/>TRACE_EVENT 位置<br/>状态：有类型的<br/>参数可用"]
+    Gate["跟踪点<br/>分派<br/>作用：检查已挂载的<br/>监听器系列<br/>下一步的原因：跳过<br/>未使用的接口<br/>状态：静态键<br/>选择路径"]
+    Copy["常规<br/>跟踪点<br/>路径<br/>作用：将字段<br/>复制到<br/>trace_event_<br/>raw_sched_<br/>switch<br/>下一步的原因：<br/>获得稳定结构体<br/>状态：ctx =<br/>复制的字节"]
+    Raw["raw_<br/>tracepoint<br/>路径<br/>作用：参数位于<br/>原始 u64 槽中<br/>下一步的原因：<br/>按索引<br/>解包<br/>状态：<br/>ctx->args[N]"]
+    BTF["tp_btf<br/>路径<br/>作用：将 BTF<br/>参数传给<br/>跳板<br/>包装器<br/>下一步的原因：<br/>BPF_PROG<br/>类型化参数<br/>状态：回调中<br/>具有类型"]
+    Return["返回<br/>调度器<br/>作用：程序结束后<br/>恢复执行<br/>状态：副作用<br/>已完成"]
+
+    Call --> Gate
+    Gate -->|tracepoint 监听器| Copy --> Return
+    Gate -->|raw_tracepoint 监听器| Raw --> Return
+    Gate -->|tp_btf 监听器| BTF --> Return
+
+    classDef kern fill:#fef3c7,stroke:#d97706
+    classDef regular fill:#fee2e2,stroke:#dc2626
+    classDef raw fill:#fde68a,stroke:#d97706
+    classDef btf fill:#dcfce7,stroke:#16a34a
+    class Call,Gate,Return kern
+    class Copy regular
+    class Raw raw
+    class BTF btf

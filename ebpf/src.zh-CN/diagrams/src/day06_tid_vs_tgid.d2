@@ -1,0 +1,28 @@
+direction: down
+
+title: "TID 与 TGID 对比\n为进行中跟踪选择正确的键" {near: top-center; shape: text; style.font-size: 26}
+
+proc: "进程 firefox（TGID = 13421）" {
+  style.fill: "#fef3c7"
+  t1: "线程 1\nTID 13421\n（也是 TGID 组长）" {style.fill: "#dbeafe"}
+  t2: "线程 2\nTID 13422" {style.fill: "#dbeafe"}
+  t3: "线程 3\nTID 13423" {style.fill: "#dbeafe"}
+  t4: "线程 4\nTID 13424" {style.fill: "#dbeafe"}
+  t1 -> t2 -> t3 -> t4
+}
+
+scenario: "场景：4 个线程同时调用 vfs_read" {shape: text; style.font-size: 20}
+
+wrong: "错误：以 TGID 为键\n\n映射：{ 13421 → ts1 }\n\n线程 1 进入 → 存储 ts1，键 13421\n线程 2 进入 → 覆盖为 ts2，键 13421\n线程 3 进入 → 覆盖为 ts3，键 13421\n线程 4 进入 → 覆盖为 ts4，键 13421\n线程 1 退出 → 读取 ts4\n  （最近一次覆盖的值）\n\n→ 延迟 = exit_time(t1) − entry_time(t4)\n→ 无意义的值：有时极大，\n  有时为负" {
+  style.fill: "#fee2e2"
+}
+
+right: "正确：以 TID 为键\n\n映射：{ 13421→ts1, 13422→ts2,\n       13423→ts3, 13424→ts4 }\n\n每个线程都有自己的槽\n每次退出都取得对应的进入时间戳\n不会冲突\n\n→ 延迟 = exit(tN) − entry(tN)\n  对每个线程分别计算\n→ 得到正确的单次调用时长" {
+  style.fill: "#dcfce7"
+}
+
+proc -> scenario
+scenario -> wrong: "4 个线程命中同一映射槽"
+wrong -> right: "每个线程使用自己的槽"
+
+note: "规则：同步的每线程跟踪应以 TID 为键。\nTID = bpf_get_current_pid_tgid() 的低 32 位。\nTGID = 高 32 位 = 用户空间所称的“PID”。" {near: bottom-center; shape: text}

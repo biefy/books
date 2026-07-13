@@ -1,0 +1,16 @@
+digraph G {
+    rankdir=TB;
+    node [shape=box, style="rounded,filled", fontname="Noto Sans CJK SC", fontsize=10];
+
+    pkt [label="驱动程序缓冲区中的原始数据包\n（头部 + 载荷，连续字节）", fillcolor="#dbeafe"];
+
+    md [label="struct xdp_md（你的 ctx）{\n  __u32 data;            // pointer to first byte\n  __u32 data_end;        // pointer one-past-last\n  __u32 data_meta;       // optional metadata area\n  __u32 ingress_ifindex; // which iface\n  __u32 rx_queue_index;  // RX queue\n  __u32 egress_ifindex;  // for redirect\n}", fillcolor="#fef3c7", fontname="Noto Sans Mono CJK SC"];
+
+    code [label="// canonical bounds-check pattern\nvoid *data = (void*)(long)ctx->data;\nvoid *end  = (void*)(long)ctx->data_end;\n\nstruct ethhdr *eth = data;\nif (eth + 1 > end)\n    return XDP_PASS;   // not enough bytes\n\nstruct iphdr *ip = (void*)(eth + 1);\nif (ip + 1 > end)\n    return XDP_PASS;\n\n// now safe to access eth->h_proto, ip->protocol", fillcolor="#dcfce7", fontname="Noto Sans Mono CJK SC"];
+
+    rule [label="验证器规则：\n访问每个字节时，\n都必须能证明它\n小于 data_end。", fillcolor="#fee2e2", shape=note];
+
+    pkt -> md [label="ctx 指向\n数据包"];
+    md -> code [label="用户空间\n边界检查"];
+    code -> rule [style=dashed];
+}

@@ -1,0 +1,47 @@
+digraph mark {
+    rankdir=TB;
+    labelloc=t;
+    label="数据包标记：由 netfilter 或套接字写入，由路由规则读取";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    // 两个写入方
+    subgraph cluster_writers {
+        label="写入方 — 某处设置标记（标记初始为 0）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#7c3aed";
+        nft [shape=box, style="filled", fillcolor="#e9d5ff",
+             label="nftables / iptables 钩子\nmeta mark set 0x42\n-j MARK --set-mark 0x42"];
+        sock [shape=box, style="filled", fillcolor="#e9d5ff",
+              label="发起连接的套接字\nsetsockopt(SO_MARK, 0x42)\n(SO_MARK = 36)"];
+    }
+
+    // 携带标记的 skb
+    subgraph cluster_skb {
+        label="skb（只存在于此内核中）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        skb [shape=record, style="filled", fillcolor="#dbeafe",
+             label="{struct sk_buff|<m> __u32 mark = 0x42|... 数据包字节 ...}"];
+    }
+
+    nft -> skb:m [label="写入", color="#7c3aed", style=bold];
+    sock -> skb:m [label="写入", color="#7c3aed", style=bold];
+
+    // 写入查找键
+    flowi [shape=box, style="filled", fillcolor="#dbeafe",
+           label="struct flowi4\nflowi4_mark = 0x42\n（路由时复制）"];
+    skb:m -> flowi [label="复制到查找键", color="#dc2626", style=bold];
+
+    // 掩码比较
+    cmp [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+         label="掩码比较（net/core/fib_rules.c:292）\n(rule->mark ^ fl->flowi_mark) & rule->mark_mask\n== 0 表示匹配"];
+    flowi -> cmp;
+
+    rule [shape=box, style="filled", fillcolor="#dcfce7",
+          label="fib_rule（只读）\nmark      = 0x42\nmark_mask = 0xff\nip rule add fwmark 0x42/0xff"];
+    rule -> cmp [label="读取", color="#16a34a", style=bold];
+
+    wire [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9, fontname="Noto Sans CJK SC",
+          label="绝不会出现在网络线路上：标记不是 IP/以太网字段。\l远程主机永远看不到它。它只是本地临时标签。\l"];
+    skb -> wire [style=invis];
+}

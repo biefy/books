@@ -1,0 +1,24 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif"}}}%%
+flowchart TD
+    CLI["用户空间添加前缀<br/><b>操作：</b>将 CIDR 转换为<br/>LPM 键 {prefixlen, addr}<br/><b>为何继续：</b>映射更新为运行中的<br/>XDP 程序持久保存策略<br/><b>状态：</b>规范的键字节"]
+    Update["bpf_map_update_elem<br/><b>操作：</b>插入/更新<br/>LPM trie 节点<br/><b>为何继续：</b>后续查找会<br/>立即看到新策略<br/><b>状态：</b>trie 中含有前缀和值"]
+    Packet["XDP 处的数据包<br/><b>操作：</b>将源/目标<br/>地址提取到查找键<br/><b>为何继续：</b>由映射驱动<br/>策略决策<br/><b>状态：</b>用于最长前缀查找的<br/>完整长度键"]
+    Lookup["LPM trie 查找<br/><b>操作：</b>从宽泛前缀遍历到<br/>最具体匹配项<br/><b>为何继续：</b>返回的值<br/>决定处理结果<br/><b>状态：</b>最佳匹配或未命中"]
+    Verdict{"策略值？"}
+    Drop["XDP_DROP<br/><b>操作：</b>在分配 skb 前<br/>消费数据包<br/><b>状态：</b>被拒绝的前缀已拦截"]
+    Pass["XDP_PASS<br/><b>操作：</b>将数据包交给<br/>正常协议栈<br/><b>状态：</b>未命中拒绝规则<br/>或值为允许"]
+
+    CLI --> Update
+    Update -. 共享映射状态 .-> Lookup
+    Packet --> Lookup --> Verdict
+    Verdict -->|拒绝| Drop
+    Verdict -->|未命中/允许| Pass
+
+    classDef us fill:#dbeafe,stroke:#2563eb
+    classDef bpf fill:#fef3c7,stroke:#d97706
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    class CLI,Update us
+    class Packet,Lookup,Verdict bpf
+    class Pass ok
+    class Drop bad

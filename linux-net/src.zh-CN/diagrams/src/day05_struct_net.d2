@@ -1,0 +1,64 @@
+direction: down
+
+title: |md
+  ## struct net——每个 netns 一个
+| {near: top-center; shape: text}
+
+netns: "struct net (net_namespace.h:62)" {
+  style.fill: "#dbeafe"
+  n_body: |md
+    每个网络命名空间一个。
+    保存每命名空间的**所有内容**：
+
+    - dev_base_head——net_devices
+    - rtnl——netlink 套接字
+    - ipv4.fib_main——路由
+    - ipv4.tcp_death_row——timewait
+    - ipv4.fib_notifier_ops
+    - ipv6.fib6_main_tbl
+    - nft_state——nftables 规则
+    - ct.count, ct.htable
+    - sysctls——每命名空间表
+    - proc_net——/proc/net
+    - ns——nsfs 句柄
+  |
+}
+
+usage: "逐调用分派" {
+  style.fill: "#fef3c7"
+  u_body: |md
+    函数将 `struct net *net` 作为
+    第一个参数。例如：
+
+    - ip_rcv() 调用 dev_net(dev)
+      用于设备所属命名空间。
+    - fib_lookup(net, &fl, &res)
+      ——每命名空间结果。
+    - nf_hook(proto, hook, net)
+      ——每命名空间链。
+
+    net 是参数，而不是
+    全局变量。
+  |
+}
+
+shared: "不按命名空间隔离的内容" {
+  style.fill: "#fee2e2"
+  s_body: |md
+    - 硬件（NIC）
+    - Slab 缓存
+      (skbuff_head_cache)
+    - 路由缓存 slab
+    - 大多数 BPF 映射
+      （除非按命名空间隔离）
+    - 内核定时器
+    - 进程调度器
+
+    NIC 初始位于 init_net；
+    可使用以下命令移动：
+    ip link set IF netns NS
+  |
+}
+
+netns -> usage
+usage -> shared

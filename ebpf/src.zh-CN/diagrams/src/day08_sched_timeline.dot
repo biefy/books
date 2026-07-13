@@ -1,0 +1,43 @@
+digraph sched_timeline {
+    rankdir=LR;
+    labelloc=t;
+    label="一个 CPU 同一时刻只运行一个任务：sched_switch 完成交接，wait_ns = B 的离 CPU 间隔";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    // The run queue feeds the "next" slot of each switch
+    rq [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+        label="运行队列（struct rq）\n可运行任务在此等待\n轮到自己使用此 CPU"];
+
+    // Timeline cells, left to right
+    a1   [shape=box, style="filled", fillcolor="#fef3c7", label="A 正在运行"];
+    sw1  [shape=box, style="filled", fillcolor="#dbeafe", fontname="Noto Sans Mono CJK SC",
+          label="sched_switch\nprev=A  next=B"];
+    b1   [shape=box, style="filled", fillcolor="#fef3c7", label="B 正在运行"];
+    sw2  [shape=box, style="filled", fillcolor="#dbeafe", fontname="Noto Sans Mono CJK SC",
+          label="sched_switch\nprev=B  next=A\n（B 因 I/O 阻塞）"];
+    a2   [shape=box, style="filled", fillcolor="#fef3c7", label="A 正在运行"];
+    sw3  [shape=box, style="filled", fillcolor="#dbeafe", fontname="Noto Sans Mono CJK SC",
+          label="sched_switch\nprev=A  next=B"];
+    b2   [shape=box, style="filled", fillcolor="#fef3c7", label="B 再次运行"];
+
+    // The CPU timeline (one rank, strict left-to-right)
+    a1 -> sw1 -> b1 -> sw2 -> a2 -> sw3 -> b2
+        [color="#1d4ed8", style=bold, arrowsize=0.7];
+    { rank=same; a1; sw1; b1; sw2; a2; sw3; b2; }
+
+    // Run queue feeds the "next" slot of each switch
+    rq -> sw1 [label="选择 next=B", color="#16a34a", style=dashed, fontsize=9];
+    rq -> sw3 [label="选择 next=B", color="#16a34a", style=dashed, fontsize=9];
+
+    // Bracket B's off-CPU gap: from when B switched out (sw2) until B runs again (b2)
+    gap [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=10,
+         label="实验测量的 wait_ns\lB 在 sw2 与 b2 之间离开 CPU\l报告为 now - last_run[B]\l"];
+    sw2 -> gap [style=invis];
+    gap -> b2  [label="离 CPU 间隔", color="#7c3aed", style=bold, fontsize=9];
+
+    note [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+          label="一个 CPU 同一时刻只运行一个任务。\l每次交接都是一次 sched_switch，\l此时 prev（换出）和 next（换入）均已选定。\l"];
+    rq -> note [style=invis];
+}

@@ -1,0 +1,26 @@
+%%{init: {'themeVariables': {'fontFamily': 'Noto Sans CJK SC, Noto Sans SC, sans-serif'}}}%%
+flowchart TD
+    Send["sendmsg(fd, buf)<br/><b>作用：</b>将数据报交给 UDP 套接字<br/><b>为何进入下一步：</b>UDP 为每个数据报构建一个 skb<br/><b>状态：</b>用户字节 + 目的地址"]
+    UdpSend["udp_sendmsg<br/><b>作用：</b>验证大小、corking、<br/>校验和模式和路由<br/><b>为何进入下一步：</b>IP 输出负责 L3 + 路由<br/><b>状态：</b>带 UDP 头/载荷的 skb"]
+    IpOut["ip_send_skb / ip_local_out<br/><b>作用：</b>LOCAL_OUT、路由输出、<br/>POST_ROUTING<br/><b>为何进入下一步：</b>skb 可排队到设备<br/><b>状态：</b>dst、标记、NAT/校验和"]
+    Wire["线路<br/><b>状态：</b>独立数据报；<br/>无流状态"]
+    UdpRcv["udp_rcv<br/><b>作用：</b>验证校验和 + UDP 头<br/><b>为何进入下一步：</b>查找决定所有者或 ICMP<br/><b>状态：</b>skb 已准备好进行 UDP 解复用"]
+    Lookup["__udp4_lib_lookup<br/><b>作用：</b>按端口/地址和<br/>复用规则进行哈希<br/><b>为何进入下一步：</b>匹配项获得接收队列<br/><b>状态：</b>已选定 sk 或没有监听器"]
+    Found{"找到监听器？"}
+    Drop["ICMP 端口不可达 / 丢弃<br/><b>作用：</b>若策略允许，报告没有所有者<br/><b>状态：</b>skb 已消费"]
+    Queue["套接字接收队列<br/><b>作用：</b>将 skb 入队并计入 sk 内存<br/><b>为何进入下一步：</b>通知睡眠中的读取方<br/><b>状态：</b>完整数据报等待处理"]
+    Wake["sk_data_ready<br/><b>作用：</b>唤醒 poll/recvmsg 等待方<br/><b>为何进入下一步：</b>应用复制一个数据报<br/><b>状态：</b>用户空间就绪"]
+    Recv["recvmsg(fd)<br/><b>作用：</b>出队一个 skb，复制载荷<br/><b>状态：</b>按标志完整交付或截断"]
+
+    Send --> UdpSend --> IpOut --> Wire --> UdpRcv --> Lookup --> Found
+    Found -->|否| Drop
+    Found -->|是| Queue --> Wake --> Recv
+
+    classDef tx fill:#dbeafe,stroke:#2563eb
+    classDef rx fill:#dcfce7,stroke:#16a34a
+    classDef decision fill:#fef3c7,stroke:#d97706
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    class Send,UdpSend,IpOut tx
+    class UdpRcv,Lookup,Queue,Wake,Recv rx
+    class Found decision
+    class Drop bad

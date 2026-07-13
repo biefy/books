@@ -1,0 +1,30 @@
+direction: down
+
+title: "内核栈与用户栈遍历对比" {shape: text; style.font-size: 28; near: top-center}
+
+kstack: "内核栈\n`bpf_get_stackid(ctx, m, 0)`" {
+  style.fill: "#dbeafe"
+  ks_what: "使用以下方式遍历内核 ip 帧：\n- ORC 栈展开器（自 4.14 起为 x86_64 默认方式）\n- 或帧指针（CONFIG_FRAME_POINTER）\n\n✅ 在内核上下文中始终可用\n✅ 通过 /proc/kallsyms 符号化\n✅ 开销低（约 1µs）\n\n帧格式：内核虚拟地址数组" {
+    style.fill: "#eff6ff"
+  }
+}
+
+ustack: "用户栈\n`bpf_get_stackid(`\n`  ctx, m, BPF_F_USER_STACK)`" {
+  style.fill: "#fef3c7"
+  us_what: "遍历当前任务的用户空间栈：\n- 用户二进制文件需要 CONFIG_FRAME_POINTER，\n  或具有 DWARF 栈展开信息\n  （速度更慢，内核无法使用）\n\n⚠️ 用户空间栈通常缺少\n    帧指针（amd64 上 gcc 默认使用\n    -fomit-frame-pointer）\n⚠️ JIT 语言（JS、Java）\n    需要额外的符号信息\n\n✅ 通过 /proc/PID/maps\n    + ELF 符号进行符号化\n✅ 揭示“应用中的哪个函数\n    调用了 read()”\n\n帧格式：用户虚拟地址数组" {
+    style.fill: "#fffbeb"
+  }
+}
+
+both: "同时捕获两者\n`bpf_get_stack(ctx, buf, sz, 0)`\n+ `bpf_get_stack(ctx, buf, sz, USER)`" {
+  style.fill: "#dcfce7"
+  both_what: "使用两次独立调用来捕获混合的\n内核栈和用户栈（内核帧位于系统调用入口上方，\n用户帧位于下方）。\n\n在符号化之前于用户空间中合并。" {
+    style.fill: "#f0fdf4"
+  }
+}
+
+flag: "标志：\n- 0（内核）\n- BPF_F_USER_STACK\n- BPF_F_FAST_STACK_CMP\n- BPF_F_REUSE_STACKID" {
+  style.fill: "#f3f4f6"
+}
+
+kstack -> ustack -> both -> flag {style.stroke-dash: 4}

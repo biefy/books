@@ -1,0 +1,106 @@
+direction: down
+
+title: |md
+  ### 常见 RX 路径：DMA 页 → skb 视图 → 释放/回收
+| {near: top-center; shape: text}
+
+ring: "NIC RX 描述符环" {
+  style.fill: "#dbeafe"
+  r_body: |md
+    固定大小的循环数组。
+
+    每个描述符都指向一个支持 DMA 的
+    驱动所提供的缓冲区。
+
+    本例中，驱动从页池获取页，
+    随后将其借给 NIC，供接收
+    DMA 使用。
+  |
+}
+
+page: "驱动拥有的 DMA 页" {
+  style.fill: "#fef3c7"
+  p_body: |md
+    NIC 通过 DMA 将帧写入此处。
+
+    [ 头部空间 ][ 帧字节 ][ shinfo ]
+
+    驱动决定具体布局，并且使用 build_skb
+    时必须为 `skb_shared_info` 留出
+    对齐的尾部空间。
+  |
+}
+
+xdp: "可选的原生 XDP" {
+  style.fill: "#ede9fe"
+  x_body: |md
+    在 skb 尚未存在时，运行于原始接收
+    缓冲区上（需驱动支持）。
+
+    DROP / TX / REDIRECT 可能消费该缓冲区。
+    PASS 则继续构造 skb。
+  |
+}
+
+skb: "struct sk_buff 视图" {
+  style.fill: "#dcfce7"
+  s_body: |md
+    build_skb / napi_build_skb:
+
+    - 分配一个 skb 描述符
+    - 让 head/data 指向调用方存储区
+    - 对页支持的 head 设置 `head_frag`
+
+    页池驱动还会单独调用
+    `skb_mark_for_recycle()` → `pp_recycle`.
+    此分支不复制载荷。
+  |
+}
+
+alternate: "其他有效的驱动路径" {
+  style.fill: "#fff7ed"
+  a_body: |md
+    - 分配 skb + 复制（copybreak）
+    - 使用其他 RX 缓冲区管理器
+    - 创建 skb 后运行通用 XDP
+
+    build_skb/页池很常见，
+    但并非通用 RX 契约。
+  |
+}
+
+stack: "网络协议栈" {
+  style.fill: "#ede9fe"
+  st_body: |md
+    ip_rcv → 路由 → TCP
+
+    skb 指针描述包装缓冲区中的字节，
+    直至最后一个数据引用
+    被释放。
+  |
+}
+
+release: "最后一个引用释放" {
+  style.fill: "#fee2e2"
+  rc_body: |md
+    `head_frag` → 页片段释放路径
+
+    已设置 `pp_recycle` 且页符合条件
+      → 将其归还页池
+
+    否则
+      → 通过普通页路径释放
+
+    用符合条件的缓冲区补充环；
+    仍有效的字节绝不会被复用。
+  |
+}
+
+ring -> page: "NIC 填充描述符缓冲区"
+page -> xdp: "轮询完成项"
+xdp -> skb: "XDP_PASS"
+page -> alternate: "驱动选择其他路径" {style.stroke-dash: 4}
+skb -> stack: "包装的字节向上传递"
+alternate -> stack: "普通 skb 路径"
+stack -> release: "dataref 归零"
+release -> ring: "符合条件的页可被复用"

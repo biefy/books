@@ -1,0 +1,49 @@
+vars: {
+  d2-config: {
+    layout-engine: elk
+  }
+}
+
+direction: down
+
+title: |md
+  ## BPF_MAP_TYPE_HASH 内部结构
+| {near: top-center; shape: text}
+
+key: "键（PID = 13421）" {shape: parallelogram; style.fill: "#dbeafe"}
+hash: "jhash(key)" {shape: hexagon; style.fill: "#fef3c7"}
+buckets: "buckets[]\n（大小为 2 的幂，\n由 max_entries\n向上取整）" {
+  shape: rectangle
+  style.fill: "#f9fafb"
+  b0: "bucket[0]" {shape: rectangle}
+  b1: "bucket[1]" {shape: rectangle}
+  bN: "bucket[N]\n（hash 对 size 取模）" {shape: rectangle; style.fill: "#fef3c7"}
+  bM: "bucket[M]" {shape: rectangle}
+  b0 -> b1 -> bN -> bM
+}
+
+bucket_chain: "该桶的 hlist\n（链表）" {
+  shape: rectangle
+  style.fill: "#fef3c7"
+  e0: "{ key=8888, val=2 }" {shape: rectangle}
+  e1: "{ key=13421, val=5 }" {shape: rectangle; style.fill: "#dcfce7"}
+  e2: "{ key=99999, val=1 }" {shape: rectangle}
+  e0 -> e1 -> e2: "next"
+}
+
+found: "值指针\n→ &val（就地，\n实时映射内存）" {shape: oval; style.fill: "#dcfce7"}
+
+key -> hash -> buckets.bN
+buckets.bN -> bucket_chain: "遍历链，\n比较键"
+bucket_chain.e1 -> found: "匹配"
+
+note: |md
+  - **键 + 值**以*副本*形式存于映射中；\
+    查找返回指向映射内存的指针。
+  - **原子性**：对值指针执行 `__sync_fetch_and_add`\
+    = 原子更新。无需加锁，不会发生竞态。
+  - **`max_entries`** 限制元素数量；映射已满时，\
+    `bpf_map_update_elem` 返回 `-E2BIG`。
+  - **`BPF_MAP_TYPE_PERCPU_HASH`** 结构相同，\
+    但值按 CPU 分开——无需原子操作。
+| {near: bottom-center; shape: text}

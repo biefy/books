@@ -1,0 +1,49 @@
+direction: down
+
+title: |md
+  ## XDP 与 tc——何时选择哪一个
+| {near: top-center; shape: text}
+
+xdp: "XDP" {
+  style.fill: "#fef3c7"
+  x_body: |md
+    - 位置：驱动中，分配 skb 之前
+    - 速度：约 10 ns + 你的逻辑
+    - 可见内容：原始帧字节（data、data_end）
+    - 方向：仅入站
+    - 修改：可以（需谨慎——此时还没有 skb
+      元数据）
+    - 辅助函数：bpf_redirect、
+      bpf_xdp_adjust_head、...
+
+    **最适合：** 丢弃、转发、简单解析
+  |
+}
+
+tc: "tc / tcx" {
+  style.fill: "#dcfce7"
+  t_body: |md
+    - 位置：分配 skb 之后（入站），或
+      驱动发送之前（出站）
+    - 速度：约 50 ns + 你的逻辑
+    - 可见内容：__sk_buff（完整的内核元数据）
+    - 方向：**入站和出站**
+    - 修改：可以，使用 skb 辅助函数
+    - 辅助函数：bpf_skb_*、bpf_csum_diff、
+      bpf_redirect_peer、...
+
+    **最适合：** 策略、mark、NAT、封装、出站处理
+  |
+}
+
+both: "两者并用" {
+  style.fill: "#dbeafe"
+  b_body: |md
+    Cilium 风格：XDP 用于快速路径上的
+    丢弃/负载均衡，tc 用于感知 skb 的
+    过滤和出站整形。二者在**不同位置**
+    运行——不会冲突，而是相互配合。
+  |
+}
+
+xdp -> tc -> both

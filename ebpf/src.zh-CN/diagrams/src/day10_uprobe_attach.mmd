@@ -1,0 +1,22 @@
+%%{init: {"sequence": {"actorMargin": 20, "width": 90, "noteMargin": 6, "messageMargin": 18, "wrap": true}, "themeVariables": {"fontFamily": "Noto Sans CJK SC, Microsoft YaHei, sans-serif"}}}%%
+sequenceDiagram
+    participant USER as 用户进程<br/>（目标二进制文件）
+    participant K as 内核<br/>uprobes
+    participant BPF as BPF<br/>程序
+    participant LD as libbpf<br/>挂载阶段
+
+    Note over USER,LD: 一次性挂载
+    LD->>K: 打开 /usr/bin/bash<br/>查找符号 readline<br/>在偏移 0x4f200 处
+    LD->>K: 在 inode+offset 处<br/>注册 uprobe
+    K->>K: 通过 /proc/self/mem-style 写入<br/>在第一条指令处<br/>插入断点 (int3)
+    Note over K: 所有加载 /usr/bin/bash 的进程<br/>都会获得该断点<br/>（首次执行时通过写时复制实现）
+
+    Note over USER,BPF: 运行时——每次调用 readline()
+    USER->>USER: bash 调用<br/>readline(prompt)
+    USER->>USER: int3 陷阱触发！
+    USER->>K: 内核处理陷阱
+    K->>BPF: 使用 pt_regs 调用<br/>uprobe BPF 程序
+    BPF->>BPF: 通过 bpf_probe_read_user_str<br/>从 RDI 读取 prompt
+    BPF-->>K: 返回
+    K->>K: 模拟执行<br/>原始指令
+    K-->>USER: 恢复 readline()

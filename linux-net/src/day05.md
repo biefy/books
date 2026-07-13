@@ -221,14 +221,14 @@ Where does a subsystem *put* its state? There are two strategies, and the chapte
    /* net/core/net_namespace.c:120 */
    static int ops_init(const struct pernet_operations *ops, struct net *net)
    {
-   	void *data = NULL;
-   	if (ops->id) {
-   		data = kzalloc(ops->size, GFP_KERNEL);          /* allocate the room */
-   		err = net_assign_generic(net, *ops->id, data);  /* :131 — stash pointer in net->gen */
-   	}
-   	/* ... */
-   	if (ops->init)
-   		err = ops->init(net);                            /* then furnish it */
+       void *data = NULL;
+       if (ops->id) {
+           data = kzalloc(ops->size, GFP_KERNEL);          /* allocate the room */
+           err = net_assign_generic(net, *ops->id, data);  /* :131 — stash pointer in net->gen */
+       }
+       /* ... */
+       if (ops->init)
+           err = ops->init(net);                            /* then furnish it */
    }
    ```
 

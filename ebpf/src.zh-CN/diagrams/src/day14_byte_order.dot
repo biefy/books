@@ -1,0 +1,29 @@
+digraph byte_order {
+    rankdir=TB;
+    labelloc=t;
+    label="网络字节序：0x0800 在 x86 与线路上的排列，以及 bpf_htons 为何要交换字节";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    value [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+        label="ETH_P_IP = 0x0800\n（一个 16 位值）"];
+
+    host [shape=record, style="filled", fillcolor="#dbeafe",
+        label="{主机内存（x86，小端序）|{ 字节 0 | 字节 1 }|{ 0x00 | 0x08 }}"];
+
+    wire [shape=record, style="filled", fillcolor="#fef3c7",
+        label="{线路顺序（大端序，MSB 在前）|{ 字节 0 | 字节 1 }|{ 0x08 | 0x00 }}"];
+
+    value -> host [label="编译器先存储低字节", fontname="Noto Sans CJK SC", fontsize=9];
+
+    host -> wire [label="bpf_htons()  交换字节", dir=both,
+        color="#7c3aed", style=bold, fontname="Noto Sans CJK SC", fontsize=10];
+
+    mismatch [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+        label="将原始 16 位字段与原始常量比较：\l00 08  与  08 00  -> 永远不匹配！\l程序会误以为所有数据包都不是 IP，却不发出任何提示。\l"];
+    host -> mismatch [style=invis];
+
+    onebyte [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+        label="ip->protocol 是 1 字节 -> 无需交换\l（单个字节没有字节序）\l"];
+    wire -> onebyte [style=invis];
+}

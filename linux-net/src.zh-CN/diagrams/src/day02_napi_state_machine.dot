@@ -1,0 +1,42 @@
+digraph napi_state_machine {
+    rankdir=TB;
+    labelloc=t;
+    label="NAPI 周期：调度 → 轮询 → 完成，以及两层预算";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    irq [shape=box, style="filled", fillcolor="#e9d5ff",
+         label="IRQ 触发\n（一轮突发的第一个数据包）"];
+
+    sched [shape=box, style="filled", fillcolor="#dbeafe",
+           label="napi_schedule()\n• 设置 NAPI_STATE_SCHED\n• 屏蔽此队列的硬件 IRQ\n• 将 napi 添加到每 CPU poll_list\n• 触发 NET_RX_SOFTIRQ"];
+
+    poll [shape=box, style="filled", fillcolor="#fef3c7",
+          label="net_rx_action → ->poll(napi, weight=64)\n驱动从 RX 环中取出\n已完成的描述符 → skb"];
+
+    decide [shape=diamond, style="filled", fillcolor="#dcfce7", fontsize=9,
+            label="处理量 <\nweight (64)？\n环已排空？"];
+
+    complete [shape=box, style="filled", fillcolor="#dcfce7",
+              label="napi_complete_done()\n• 清除 NAPI_STATE_SCHED\n• 重新启用硬件 IRQ\n恢复中断驱动"];
+
+    repoll [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+            label="达到 weight，环仍为满：\n留在 poll_list，\nIRQ 继续屏蔽，\n再次轮询"];
+
+    irq -> sched [style=bold, color="#7c3aed"];
+    sched -> poll [style=bold, color="#d97706"];
+    poll -> decide;
+    decide -> complete [label="是：突发结束", style=bold, color="#16a34a"];
+    decide -> repoll [label="否：仍忙碌", color="#dc2626"];
+    repoll -> poll [color="#dc2626", constraint=false];
+    complete -> irq [label="下一轮突发", style=dashed, color="#94a3b8", constraint=false];
+
+    // The nested budgets
+    budgets [shape=record, style="filled", fillcolor="#dbeafe", fontsize=9,
+             label="{两层嵌套预算|<i>内层：weight = 64\n（一次 -\>poll 调用）|<o>外层：netdev_budget = 300\n（整个 net_rx_action 运行期间，\n由所有 napi 共享）}"];
+    poll -> budgets [style=dotted, color="#2563eb", arrowhead=none, constraint=false];
+
+    squeeze [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+             label="budget <= 0 或达到时间限制，\l且仍有工作待处理：\ltime_squeeze++，将剩余 napi\l留待稍后处理\l（或转交 ksoftirqd）\l"];
+    budgets:o -> squeeze [style=dashed, color="#dc2626"];
+}

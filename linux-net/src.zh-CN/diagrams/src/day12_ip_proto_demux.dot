@@ -1,0 +1,51 @@
+digraph ip_proto_demux {
+    rankdir=TB;
+    labelloc=t;
+    label="L3 协议解复用：ip_protocol_deliver_rcu 使用 IPv4 Protocol 字节索引 inet_protos[]\n（与第 2 天的 L2 EtherType 表采用相同模式，只是上移一层）";
+    fontname="Noto Sans CJK SC"; fontsize=13;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    // 两张上下堆叠的表并排放置，以表达“相同模式”
+    skb [shape=record, style="filled", fillcolor="#fef3c7",
+         label="{发往本地主机的 IPv4 数据包|ip_hdr(skb)-\>protocol = N (8-bit)}"];
+
+    // 第 2 天回顾表（L2）——淡化绘制以体现对应关系
+    subgraph cluster_l2 {
+        label="第 2 天：L2 解复用（回顾，用于对照）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=record, style="filled", fillcolor="#dbeafe"];
+        l2tab [label="{ptype_base[]\n以 16-bit EtherType 为键|ETH_P_IP → ip_rcv|ETH_P_ARP → arp_rcv|ETH_P_IPV6 → ipv6_rcv}"];
+    }
+
+    local [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+           label="ip_local_deliver_finish()\nip_protocol_deliver_rcu(net, skb, proto)\nipprot = inet_protos[protocol]"];
+    skb -> local [style=bold, color="#d97706"];
+
+    // L3 表：直接按协议字节索引的平面数组
+    subgraph cluster_l3 {
+        label="L3 解复用：inet_protos[256]，直接按协议字节索引";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        node [shape=record, style="filled", fillcolor="#dbeafe"];
+        l3tab [label="{inet_protos[]|<p4>[4]  IPPROTO_IPIP|<p6>[6]  IPPROTO_TCP|<p17>[17] IPPROTO_UDP|<p41>[41] IPPROTO_IPV6|<p47>[47] IPPROTO_GRE}"];
+    }
+    local -> l3tab [style=bold, color="#2563eb", label="inet_protos[N]-\>handler"];
+
+    // 处理程序
+    tunnel4 [shape=box, style="filled", fillcolor="#e9d5ff", label="tunnel4_rcv / tunnel64_rcv\n（net/ipv4/tunnel4.c 占用槽位 4 和 41）\n遍历 xfrm_tunnel 处理程序链表"];
+    ipip   [shape=box, style="filled", fillcolor="#dcfce7", label="ipip_rcv / 6in4\n（通过 xfrm4_tunnel_register 加入链表）"];
+    tcp    [shape=box, style="filled", fillcolor="#dcfce7", label="tcp_v4_rcv"];
+    udp    [shape=box, style="filled", fillcolor="#fde68a", label="udp_rcv\n（VXLAN/GENEVE 经由此处：\n在 encap_rcv 进行第二次解复用）"];
+    gre    [shape=box, style="filled", fillcolor="#dcfce7", label="gre_rcv\n（直接占用槽位 47，随后\n按 GRE 版本二次分派：v0 / v1）"];
+
+    l3tab:p4  -> tunnel4 [style=bold, color="#16a34a"];
+    l3tab:p41 -> tunnel4 [color="#16a34a"];
+    tunnel4   -> ipip    [style=bold, color="#7c3aed", label="第二跳"];
+    l3tab:p6  -> tcp    [color="#16a34a"];
+    l3tab:p17 -> udp    [style=bold, color="#d97706"];
+    l3tab:p47 -> gre    [style=bold, color="#16a34a"];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="只有 GRE 直接占用自己的 inet_protos[] 槽位 (47)。\l槽位 4 和 41 由 tunnel4.c 的 tunnel4_rcv/tunnel64_rcv 占用，后者\l通过第二级 xfrm_tunnel 链表分派给 ipip_rcv / 6in4。\l基于 UDP 的隧道（VXLAN、GENEVE）没有槽位——它们经由槽位 17 (UDP)，\l并在更深一层的 UDP 套接字处进行第二次解复用。\l"];
+    udp -> note [style=invis];
+}

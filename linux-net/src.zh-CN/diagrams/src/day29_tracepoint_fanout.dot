@@ -1,0 +1,46 @@
+digraph tracepoint_fanout {
+    rankdir=TB;
+    labelloc=t;
+    label="一个 skb:kfree_skb 跟踪点扇出到三个独立订阅者";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC", fontsize=10];
+
+    // The call site that fires the hook
+    callsite [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+              label="kfree_skb_reason(skb, REASON)\n（丢弃路径调用点）"];
+
+    // The tracepoint itself
+    tp [shape=box, style="filled", fillcolor="#fef3c7",
+        label="skb:kfree_skb 跟踪点\n（静态键：关闭时为空操作）"];
+
+    // The fixed payload record carried to every listener
+    payload [shape=record, style="filled", fillcolor="#dbeafe",
+             label="{固定有效载荷记录|skbaddr|location|protocol|rx_sk|reason}"];
+
+    callsite -> tp [style=bold, color="#7c3aed", label="触发"];
+    tp -> payload [label="复制"];
+
+    // Three independent subscribers
+    perf [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+          label="perf trace\n（实时打印每个事件）"];
+
+    dm [shape=box, style="filled", fillcolor="#dbeafe",
+        label="drop_monitor 探针\n(trace_drop_common)"];
+    nl [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+        label="netlink 流"];
+    dw [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+        label="dropwatch\n（按 reason+location 聚合）"];
+
+    bpf [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+         label="eBPF 程序\ntracepoint:skb:kfree_skb\n（内核中聚合）"];
+
+    payload -> perf [color="#16a34a", label="1"];
+    payload -> dm [color="#16a34a", label="2"];
+    dm -> nl -> dw;
+    payload -> bpf [color="#16a34a", label="3"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="reason 是结构化枚举字段，而不是日志字符串，\l因此可以机器聚合丢包（按 reason 计数）。\l"];
+    payload -> note [style=invis];
+}

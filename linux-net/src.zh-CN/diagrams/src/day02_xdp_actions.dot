@@ -1,0 +1,50 @@
+digraph xdp_actions {
+    rankdir=TB;
+    labelloc=t;
+    label="XDP：在 sk_buff 存在前对原始帧执行五种动作";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    dma [shape=box, style="filled", fillcolor="#fef3c7",
+         label="DMA 帧\n（驱动 RX 页中的原始字节）"];
+
+    xdpbuff [shape=record, style="filled", fillcolor="#dbeafe",
+             label="{xdp_buff （栈上分配的视图）|data|data_end|data_meta|data_hard_start}"];
+
+    prog [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+          label="XDP BPF 程序\n在驱动轮询中、skb 前运行"];
+
+    dma -> xdpbuff [label="包装（4 个指针）"];
+    xdpbuff -> prog [style=bold, color="#7c3aed"];
+
+    // Consuming actions
+    subgraph cluster_consume {
+        label="消费该帧——始终不会构造 skb";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#dc2626";
+        aborted [shape=box, style="filled", fillcolor="#fee2e2", label="XDP_ABORTED\n丢弃 + tracepoint"];
+        drop [shape=box, style="filled", fillcolor="#fee2e2", label="XDP_DROP\n在驱动内释放"];
+        tx [shape=box, style="filled", fillcolor="#fee2e2", label="XDP_TX\n从同一 NIC 发回"];
+        redir [shape=box, style="filled", fillcolor="#fee2e2", label="XDP_REDIRECT\n其他设备 / CPU / AF_XDP"];
+    }
+
+    pass [shape=box, style="filled", fillcolor="#dcfce7",
+          label="XDP_PASS\n唯一会构造\n真实数据包的动作"];
+
+    prog -> aborted;
+    prog -> drop;
+    prog -> tx;
+    prog -> redir;
+    prog -> pass [style=bold, color="#16a34a"];
+
+    buildskb [shape=box, style="filled", fillcolor="#fef3c7",
+              label="build_skb()\n包装 DMA 页（零拷贝）"];
+    stack [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+           label="→ 普通协议栈\n（eth_type_trans、GRO、ip_rcv……）"];
+    pass -> buildskb [style=bold, color="#16a34a"];
+    buildskb -> stack [style=bold, color="#16a34a"];
+
+    // Inset contrast
+    contrast [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+              label="xdp_buff：4 个栈指针，无引用计数，\lXDP 返回时即丢弃。\lsk_buff：slab 描述符 + users/dataref\l引用计数 + 头部空间机制。\l"];
+    xdpbuff -> contrast [style=invis];
+}

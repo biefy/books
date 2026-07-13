@@ -1,0 +1,56 @@
+digraph rx_ring {
+    rankdir=LR;
+    labelloc=t;
+    label="NIC RX 描述符环 → DMA 页 → sk_buff";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // The NIC
+    nic [shape=box, style="filled", fillcolor="#e9d5ff", label="NIC\n（DMA 引擎）"];
+
+    // The ring: a cluster of descriptors
+    subgraph cluster_ring {
+        label="RX 环（主机 RAM 中的描述符循环数组）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=record, style="filled", fillcolor="#dbeafe"];
+        d0 [label="<f>desc 0|bus_addr|DONE=1"];
+        d1 [label="<f>desc 1|bus_addr|DONE=1"];
+        d2 [label="<f>desc 2|bus_addr|DONE=0"];
+        d3 [label="<f>desc 3|bus_addr|DONE=0"];
+        d0 -> d1 -> d2 -> d3 [color="#94a3b8", arrowhead=none];
+        d3 -> d0 [color="#94a3b8", style=dashed, constraint=false, label="回绕"];
+    }
+
+    // Pre-allocated DMA pages
+    subgraph cluster_pages {
+        label="驱动预分配的页";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", fillcolor="#fef3c7"];
+        p0 [label="页 0\n[帧字节]"];
+        p1 [label="页 1\n[帧字节]"];
+        p2 [label="页 2\n（空）"];
+        p3 [label="页 3\n（空）"];
+    }
+
+    d0:f -> p0 [label="DMA 地址"];
+    d1:f -> p1 [label="DMA 地址"];
+    d2:f -> p2 [color="#94a3b8"];
+    d3:f -> p3 [color="#94a3b8"];
+
+    nic -> p0 [style=bold, color="#7c3aed", label="1. DMA 写入\n帧"];
+    nic -> d0 [style=dashed, color="#7c3aed", label="2. 设置 DONE"];
+
+    // What the driver does in NAPI poll
+    napi [shape=box, style="filled", fillcolor="#dcfce7",
+          label="驱动 NAPI 轮询\n（第 2 天）：遍历环，\n查找 DONE 描述符"];
+    d0 -> napi [style=bold, color="#16a34a", label="3. 处理"];
+
+    small [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+           label="小数据包：\n将字节复制到一个\n新的小 skb，\n回收页 → 环"];
+    big [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+         label="大数据包：\nbuild_skb() 包装该页\nskb->head 指向页内\n（零拷贝）"];
+
+    napi -> small [label="4a"];
+    napi -> big [label="4b", style=bold, color="#16a34a"];
+    p0 -> big [style=dashed, color="#16a34a", label="同一页", constraint=false];
+}

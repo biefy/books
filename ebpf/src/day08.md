@@ -257,8 +257,8 @@ Common families you should know about:
 >
 > Which gives you the cleanest data with least friction?
 >
-> .  
-> .  
+> .\
+> .\
 > .
 >
 > **Answer:** (3). `__schedule` runs for many reasons; you'd have to figure out which calls are switches (and as we saw, `__schedule` is the *single* function behind every voluntary and preemptive switch — one function, many reasons). Raw `sched_switch` gives you the right event but only copied fields (no access to e.g. `prev->mm`). tp_btf gives you live `task_struct *prev, *next` — read whatever you want.

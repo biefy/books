@@ -1,0 +1,32 @@
+---
+config:
+  themeVariables:
+    fontFamily: '"Noto Sans CJK SC", "PingFang SC", sans-serif'
+---
+flowchart TD
+    Key["<b>数据包 / 流键</b><br/>src、dst、mark、TOS、<br/>输入/输出接口"]
+
+    Scan["<b>按优先级顺序扫描规则</b><br/>优先级数值最小者优先<br/>某个操作返回路由时停止"]
+
+    Rule["<b>每条规则 = 谓词 + 目标</b><br/><b>谓词：</b>from 10.99.0.0/24<br/><b>目标：</b>lookup table 100"]
+
+    Table["<b>选中的路由表</b><br/>在 local、main、default<br/>或自定义表中执行最长前缀查找"]
+
+    Result["<b>fib_result</b><br/>路由 type、下一跳、scope、<br/>metrics、首选源地址"]
+
+    Miss["<b>不匹配 / 无路由</b><br/>继续下一条规则；<br/>若都未产生路由，则查找失败"]
+
+    Key --> Scan --> Rule --> Table --> Result
+    Table -. 查找未命中 .-> Miss -. 下一条规则 .-> Scan
+
+    Defaults["<b>默认规则顺序</b><br/>0 → local table<br/>32766 → main table<br/>32767 → default table"]
+    Scan -. 典型内置规则 .-> Defaults
+
+    classDef key fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+    classDef rule fill:#fef3c7,stroke:#d97706,stroke-width:2px
+    classDef out fill:#dcfce7,stroke:#16a34a,stroke-width:2px
+    classDef miss fill:#fee2e2,stroke:#dc2626,stroke-width:2px
+    class Key key
+    class Scan,Rule,Defaults rule
+    class Table,Result out
+    class Miss miss

@@ -1,0 +1,37 @@
+digraph sawtooth {
+    rankdir=TB;
+    labelloc=t;
+    label="cwnd 锯齿：慢启动、拥塞避免、丢包驱动的削减";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // 坐标轴
+    yaxis [shape=plaintext, label="cwnd\n（报文段）"];
+    xaxis [shape=plaintext, label="时间（RTT）->"];
+
+    // 用从左到右的带标签阶段流水线描述各个阶段。
+    subgraph cluster_curve {
+        label="一个 Reno 锯齿周期";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", fillcolor="#dbeafe"];
+
+        ss   [label="慢启动\n每个 RTT 中 cwnd 翻倍\n（指数增长）\n直到 cwnd >= ssthresh"];
+        ca   [label="拥塞避免\n每个 RTT +1 个报文段\n（线性爬升）", fillcolor="#dcfce7"];
+        loss [label="丢包\n（数据包被丢弃）", shape=box, style="filled", fillcolor="#fee2e2"];
+        cut  [label="乘性减小\nssthresh = cwnd/2\n削减 cwnd", fillcolor="#fef3c7"];
+        repeat [label="再次爬升\n（下一个锯齿）", fillcolor="#dbeafe"];
+
+        ss -> ca [label="越过 ssthresh"];
+        ca -> loss [label="探测过度"];
+        loss -> cut;
+        cut -> repeat [label="从 ssthresh 恢复"];
+    }
+
+    yaxis -> ss [style=invis];
+    xaxis -> repeat [style=invis];
+
+    // CUBIC 对比说明
+    cubic [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+           label="CUBIC 保留相同的 AIMD 骨架，但用三次曲线替代\l笔直的线性爬升：削减后快速增长，接近之前的最大值时\l进入平台期，随后继续向上探测。Reno = 直线，CUBIC = 曲线。\l"];
+    ca -> cubic [style=dashed, color="#7c3aed", constraint=false, label="对比"];
+}

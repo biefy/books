@@ -1,4 +1,6 @@
 book/
+book.zh-CN/
+_site/
 .DS_Store
 node_modules/
 *.log

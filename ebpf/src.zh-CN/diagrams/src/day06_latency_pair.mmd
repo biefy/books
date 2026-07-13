@@ -1,0 +1,25 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, Microsoft YaHei, sans-serif"}}}%%
+sequenceDiagram
+    autonumber
+    participant CALLER as 调用方
+    participant TR as BPF 跳板
+    participant ENTRY as fentry 程序
+    participant FN as vfs_read 函数体
+    participant EXIT as fexit 程序
+    participant MAP as starts 映射<br/>(tid → 时间戳)
+    participant RB as ringbuf
+
+    CALLER->>TR: vfs_read(file, buf, count, pos)
+    Note over TR: 保存原始参数，fentry 在函数体之前运行
+    TR->>ENTRY: 来自 BTF 的类型化参数
+    ENTRY->>MAP: 存储 tid + ktime_get_ns()
+    Note over MAP: 状态：此 TID 有一次正在进行的读取
+    ENTRY-->>TR: 返回 0，跟踪副作用完成
+    TR->>FN: 调用原始 vfs_read
+    FN-->>TR: ssize_t ret
+    Note over TR: fexit ctx = 原始参数 + 末尾槽中的 ret
+    TR->>EXIT: file, buf, count, pos, ret
+    EXIT->>MAP: 查找并删除 tid
+    Note over EXIT: 删除可防止复用 TID 时出现陈旧条目
+    EXIT->>RB: 提交 duration、ret、comm
+    TR-->>CALLER: 返回原始 ret

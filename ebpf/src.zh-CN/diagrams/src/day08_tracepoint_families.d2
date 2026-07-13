@@ -1,0 +1,37 @@
+direction: down
+
+title: "常见跟踪点系列" {near: top-center; shape: text; style.font-size: 24; style.bold: true}
+
+sched: "sched/*" {
+  style.fill: "#dbeafe"
+  sched_list: "- sched_switch\n- sched_wakeup, wakeup_new\n- sched_process_exec\n- sched_process_exit\n- sched_process_fork\n- sched_migrate_task" {shape: text}
+}
+
+block: "block/*" {
+  style.fill: "#dcfce7"
+  block_list: "- block_rq_issue\n- block_rq_complete\n- block_bio_queue\n- block_bio_complete" {shape: text}
+}
+
+net: "net/* skb/*" {
+  style.fill: "#fef3c7"
+  net_list: "- net_dev_xmit\n- netif_rx, napi_*\n- skb_copy_datagram_iovec" {shape: text}
+}
+
+syscalls: "syscalls/*" {
+  style.fill: "#fee2e2"
+  syscalls_list: "- sys_enter_xxx\n- sys_exit_xxx\n- 每个系统调用一个 tp（自动生成）\n\n⚠️ 比 raw_syscalls 上的 fentry 慢\n优先使用 fentry/__x64_sys_xxx" {shape: text}
+}
+
+mm: "kmem/* writeback/*" {
+  style.fill: "#e0e7ff"
+  mm_list: "- kmem_cache_alloc\n- kmalloc, kfree\n- mm_page_alloc\n- writeback_dirty_page" {shape: text}
+}
+
+fs: "filemap/* ext4/*" {
+  style.fill: "#fce7f3"
+  fs_list: "- filemap_fault\n- ext4_da_write_begin\n- file_check_and_advance_wb_err" {shape: text}
+}
+
+sched -> block -> net -> syscalls -> mm -> fs: {style.opacity: 0}
+
+note: "查看你的内核上有哪些可用项：\n\n  ls /sys/kernel/tracing/events/\n  cat /sys/kernel/tracing/events/sched/sched_switch/format\n\n每个文件都有一个 format，用于展示原始结构体布局。\n对于 tp_btf，使用相同名称：tp_btf/sched_switch。" {near: bottom-center; shape: text}

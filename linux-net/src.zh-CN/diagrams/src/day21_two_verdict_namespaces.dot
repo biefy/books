@@ -1,0 +1,42 @@
+digraph two_verdict_namespaces {
+    rankdir=LR;
+    labelloc=t;
+    label="两个裁决命名空间；nft_immediate 是二者之间的桥梁";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // Lane 1: internal nft verdicts
+    subgraph cluster_internal {
+        label="通道 1：nft 内部裁决——引导链遍历，始终不离开 nft_do_chain";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        node [shape=box, style="filled", fillcolor="#dbeafe"];
+        cont   [label="NFT_CONTINUE (-1)\n继续求值"];
+        brk    [label="NFT_BREAK (-2)\n放弃当前规则"];
+        jmp    [label="NFT_JUMP (-3)\n压入链并跳转"];
+        goto_  [label="NFT_GOTO (-4)\n跳转但不压栈"];
+        ret    [label="NFT_RETURN (-5)\n弹出跳转栈"];
+    }
+
+    // Lane 2: terminal Netfilter verdicts
+    subgraph cluster_nf {
+        label="通道 2：终止型 Netfilter 裁决——返回钩子（第 20 天）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+        node [shape=box, style="filled", fillcolor="#dcfce7"];
+        accept [label="NF_ACCEPT"];
+        drop   [label="NF_DROP"];
+        queue  [label="NF_QUEUE"];
+        stolen [label="NF_STOLEN"];
+    }
+
+    // The bridge
+    bridge [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="nft_immediate\n（规则指定 'accept' / 'drop'）\n将 NF_* 值写入\n裁决寄存器"];
+
+    cont -> bridge [style=invis];
+    bridge -> accept [label="转入通道 2", color="#7c3aed", style=bold];
+    bridge -> drop [color="#7c3aed", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="该值不在 NFT_* 范围内，\l因此循环的终止 switch 会返回它，\l链随即停止。\l"];
+    bridge -> note [style=invis];
+}

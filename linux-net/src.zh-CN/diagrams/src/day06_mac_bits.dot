@@ -1,0 +1,34 @@
+digraph mac_bits {
+    rankdir=TB;
+    labelloc=t;
+    label="MAC 第一个八位组：两个标志位决定 RX 分类";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    octet [shape=record, style="filled", fillcolor="#dbeafe",
+           label="{ b7 | b6 | b5 | b4 | b3 | b2 | <ul> b1\nU/L | <ig> b0\nI/G }"];
+
+    ig [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9, fontname="Noto Sans CJK SC",
+        label="位 0 (LSB) = I/G\l  0 = 单播（由一个 NIC 拥有）\l  1 = 组播（一个组）\l  全 FF = 广播\l  检测：0x01 & addr[0]\l"];
+    ul [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9, fontname="Noto Sans CJK SC",
+        label="位 1 = U/L\l  0 = 全局（IEEE OUI，烧录）\l  1 = 本地（由管理员/OS 选择）\l  检测：0x02 & addr[0]\l"];
+
+    octet:ig -> ig [color="#16a34a", style=bold];
+    octet:ul -> ul [color="#7c3aed", style=bold];
+
+    subgraph cluster_ex {
+        label="三个地址的解码结果";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=record, style="filled"];
+        e1 [fillcolor="#dbeafe",
+            label="00:22:48:7c:b3:ef | octet0 = 0x00 = 0000 0000 | I/G=0  U/L=0 | 全局单播（OUI 00:22:48）"];
+        e2 [fillcolor="#fee2e2",
+            label="ff:ff:ff:ff:ff:ff | octet0 = 0xff = 1111 1111 | I/G=1  U/L=1 | 广播（链路上的所有设备）"];
+        e3 [fillcolor="#fef3c7",
+            label="02:00:00:00:00:01 | octet0 = 0x02 = 0000 0010 | I/G=0  U/L=1 | 本地单播（eth_random_addr 模式）"];
+        e1 -> e2 -> e3 [style=invis];
+    }
+
+    ig -> e1 [style=invis];
+}

@@ -1,0 +1,60 @@
+direction: down
+
+title: |md
+  ## Qdisc：出站流量控制
+| {near: top-center; shape: text}
+
+enqueue: "skb 到达 dev_queue_xmit" {
+  style.fill: "#dbeafe"
+  e_body: |md
+    __dev_queue_xmit(skb, NULL):
+    1. 选择 TX 队列
+       (RPS/aRFS/symmetric)
+    2. 在 txq 上查找根 qdisc
+    3. q->enqueue(skb, q,
+       &to_free)：FIFO、RR、
+       分层等
+  |
+}
+
+run: "qdisc_run / __qdisc_run" {
+  style.fill: "#fef3c7"
+  r_body: |md
+    qdisc“泵”：
+    ```
+    while (q->dequeue)
+      sch_direct_xmit()
+      # -> start_xmit
+    ```
+    在上下文（sendmsg）或
+    软中断中运行，积压时使用：
+    NET_TX_SOFTIRQ.
+  |
+}
+
+drv: "驱动 ndo_start_xmit" {
+  style.fill: "#dcfce7"
+  d_body: |md
+    netdev_start_xmit(skb, dev, txq):
+    - dev->netdev_ops
+        ->ndo_start_xmit()
+    - 构造 DMA 描述符
+    - 提交到 NIC TX 环
+    - Returns NETDEV_TX_OK/BUSY
+  |
+}
+
+types: "常见 qdisc 类型\n(/proc/net/psched, tc qdisc)" {
+  style.fill: "#fef3c7"
+  t_body: |md
+    - pfifo_fast （旧版默认值）
+    - fq_codel （4.12+ 默认值）
+    - fq （适合 BBR，支持节奏控制）
+    - htb, hfsc （分层）
+    - mq （多队列包装器）
+    - clsact （BPF 钩子框架）
+  |
+}
+
+enqueue -> run -> drv
+drv -> types {style.stroke-dash: 4}

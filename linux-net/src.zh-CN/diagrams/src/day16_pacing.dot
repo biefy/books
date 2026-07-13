@@ -1,0 +1,43 @@
+digraph pacing {
+    rankdir=LR;
+    labelloc=t;
+    label="突发发送与节奏发送：将一个 cwnd 的数据包分散到整个 RTT";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // 上方：突发发送
+    subgraph cluster_bursty {
+        label="突发发送（经典丢包型拥塞控制）：ACK 到达时，所有数据包立即首尾相接地发送";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#dc2626";
+        node [shape=box, style="filled", fillcolor="#dbeafe", width=0.4];
+
+        b0 [label="p"]; b1 [label="p"]; b2 [label="p"]; b3 [label="p"]; b4 [label="p"]; b5 [label="p"];
+        b0 -> b1 -> b2 -> b3 -> b4 -> b5 [arrowhead=none, color="#94a3b8"];
+
+        bqueue [shape=box, style="filled", fillcolor="#fee2e2",
+                label="瓶颈缓冲区：\n较深的常驻队列\n（数据包堆积，\nRTT 增大）"];
+        b5 -> bqueue [color="#dc2626", style=bold, label="大量涌入"];
+    }
+
+    // 下方：节奏发送
+    subgraph cluster_paced {
+        label="节奏发送（BBR）：相同的数据包均匀分布在整个 RTT 内";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+        node [shape=box, style="filled", fillcolor="#dbeafe", width=0.4];
+
+        p0 [label="p"]; g1 [label="间隔", shape=plaintext, fillcolor=none, style=""];
+        p1 [label="p"]; g2 [label="间隔", shape=plaintext, fillcolor=none, style=""];
+        p2 [label="p"]; g3 [label="间隔", shape=plaintext, fillcolor=none, style=""];
+        p3 [label="p"];
+        p0 -> g1 -> p1 -> g2 -> p2 -> g3 -> p3 [arrowhead=none, color="#94a3b8"];
+
+        pqueue [shape=box, style="filled", fillcolor="#dcfce7",
+                label="瓶颈缓冲区：\n较浅的队列\n（RTT 保持较低）"];
+        p3 -> pqueue [color="#16a34a", style=bold, label="缓缓流入"];
+    }
+
+    pacer [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+        label="节奏控制器：fq qdisc 为每个数据包标记目标离开时间\l（sk_pacing_status = SK_PACING_FQ）。当 qdisc 不是 fq 时，\lTCP 协议栈内部的后备机制会控制节奏（SK_PACING_NEEDED）；精度较低但可用——\l这就是为什么回环接口上的 netem 仍能体现 BBR。\l"];
+
+    bqueue -> pacer [style=invis];
+}

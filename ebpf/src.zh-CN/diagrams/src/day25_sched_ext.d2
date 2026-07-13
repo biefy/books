@@ -1,0 +1,51 @@
+direction: down
+
+title: |md
+  ## sched_ext：以 BPF 作为内核调度器
+| {near: top-center; shape: text}
+
+cfs: "默认调度器（CFS）" {
+  style.fill: "#fee2e2"
+  c_body: |md
+    单一的内核内实现：
+    - kernel/sched/fair.c
+    - 可运行任务的红黑树
+    - 虚拟运行时间核算
+    - 跨 CPU 负载均衡
+    - 硬编码策略
+
+    要更改策略：需要内核补丁。
+  |
+}
+
+scx: "sched_ext（BPF 调度器）" {
+  style.fill: "#dcfce7"
+  s_body: |md
+    通过 struct_ops 实现可插拔调度器：
+    - kernel/sched/ext.c（框架）
+    - 由你的 BPF 程序实现
+      enqueue、dispatch、init、exit
+      回调函数
+    - 加载 BPF 对象 → 激活
+    - watchdog 捕获停顿 →
+      回退到 CFS
+
+    以用户空间的速度迭代
+    调度策略。
+  |
+}
+
+watchdog: |md
+  **watchdog 是必需的。**<br />
+  如果有缺陷的 BPF 调度器<br />
+  无法调度任务，系统将会<br />
+  冻结。内核会监控等待调度<br />
+  超过 30 秒的任务，并逐出<br />
+  BPF 调度器，回退到 CFS。
+
+  正是这一安全网让 BPF<br />
+  调度器可以投入实际使用。
+| {style.fill: "#fef3c7"}
+
+cfs -> scx
+scx -> watchdog

@@ -1,0 +1,41 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif"}}}%%
+flowchart TD
+    Start(["BPF_PROG_LOAD"])
+    Walk["逐条遍历\n指令"]
+    Branch{"条件\n跳转？"}
+    Path1["分支 A\n(true)"]
+    Path2["分支 B\n(false)"]
+    Mark["标记寄存器\n类型/分支"]
+    Conv{"分支\n汇合？"}
+    Merge["合并状态\n（取交集）"]
+    Done["每条路径\n都到达退出点"]
+    Pruned{"状态已\n探索？"}
+    OK(["接受"])
+    Limit{"达到指令上限？\n(1M)"}
+    Reject(["拒绝：\n复杂度"])
+
+    Start --> Walk
+    Walk --> Pruned
+    Pruned -->|是| Walk
+    Pruned -->|否| Branch
+    Branch -->|是| Path1
+    Branch -->|是| Path2
+    Branch -->|否| Mark
+    Path1 --> Mark
+    Path2 --> Mark
+    Mark --> Conv
+    Conv -->|是| Merge
+    Conv -->|否| Walk
+    Merge --> Walk
+    Walk --> Done
+    Walk --> Limit
+    Limit -->|是| Reject
+    Limit -->|否| Walk
+    Done --> OK
+
+    classDef hot fill:#fef3c7,stroke:#d97706
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    class Branch,Conv,Limit,Pruned hot
+    class OK ok
+    class Reject bad

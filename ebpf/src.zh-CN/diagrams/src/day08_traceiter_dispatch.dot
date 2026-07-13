@@ -1,0 +1,41 @@
+digraph traceiter_dispatch {
+    rankdir=TB;
+    labelloc=t;
+    label="sched_switch 触发：__traceiter 遍历探针列表，此层不复制";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    fire [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+          label="sched_switch 触发\n（关闭时静态分支开销约为 0）"];
+
+    iter [shape=box, style="filled,rounded", fillcolor="#dbeafe", fontname="Noto Sans Mono CJK SC",
+          label="__traceiter_sched_switch(NULL, args)\n遍历已注册的探针列表，\n将原始参数原封不动地传给每个探针"];
+
+    args [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9, fontname="Noto Sans Mono CJK SC",
+          label="原始 TP_PROTO 参数（位于寄存器中）：\l(preempt, prev, next, prev_state)\l将相同指针传给每个探针\l"];
+
+    // The probe list entries
+    copy [shape=box, style="filled", fillcolor="#e5e7eb", fontcolor="#6b7280",
+          label="ftrace 复制探针\nTP_fast_assign memcpy()\n填充扁平事件结构体"];
+    perf [shape=box, style="filled", fillcolor="#e5e7eb", fontcolor="#6b7280",
+          label="perf 探针\n(perf_trace_sched_switch)"];
+    bpf  [shape=box, style="filled", fillcolor="#dcfce7",
+          label="__bpf_trace_run\n-> 你的 tp_btf 程序\n（有类型的 prev/next，零拷贝）"];
+
+    fire -> iter;
+    iter -> copy [style=dashed, color="#9ca3af"];
+    iter -> perf [style=dashed, color="#9ca3af"];
+    iter -> bpf  [color="#16a34a", style=bold];
+
+    // raw args flow unchanged to every entry
+    args -> copy [style=dotted, color="#d97706", arrowsize=0.6];
+    args -> perf [style=dotted, color="#d97706", arrowsize=0.6];
+    args -> bpf  [style=dotted, color="#d97706", arrowsize=0.6];
+    { rank=same; copy; perf; bpf; }
+    iter -> args [style=invis];
+
+    callout [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+             label="只有挂载了 tracepoint/ 或 ftrace/perf 监听器时，\l灰色的复制/perf 探针才会出现在列表中\l-> 因此复制开销是有条件的。\l只有 tp_btf？memcpy 根本不会运行。\l"];
+    copy -> callout [style=invis];
+}

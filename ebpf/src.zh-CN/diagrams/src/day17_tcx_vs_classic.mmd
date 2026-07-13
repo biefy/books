@@ -1,0 +1,21 @@
+---
+config:
+  themeVariables:
+    fontFamily: "Noto Sans CJK SC, PingFang SC, sans-serif"
+---
+flowchart LR
+    Classic["<b>经典 tc-bpf 挂载</b><br/><b>执行：</b>创建 clsact qdisc、添加 tc 过滤器，并按优先级运行过滤器<br/><b>移交：</b>数据包路径遍历由 qdisc 持有的过滤器状态<br/><b>状态：</b>挂载由 tc 对象持有，必须显式删除"]
+
+    TCX["<b>tcx 挂载</b><br/><b>执行：</b>将 BPF 程序直接挂载到 ingress/egress tcx 钩子<br/><b>移交：</b>内核返回一个 bpf_link fd，用于所有权管理和排序<br/><b>状态：</b>关闭链接即卸载，mprog 标志控制 before/after/replace 顺序"]
+
+    Packet["<b>数据包判决</b><br/>两条路径都在 tc ingress/egress 对 skb 运行<br/><b>状态：</b>程序判决可以放行、丢弃、重定向或继续"]
+
+    Classic --> Packet
+    TCX --> Packet
+
+    classDef old fill:#fee2e2,stroke:#dc2626,stroke-width:2px
+    classDef new fill:#dcfce7,stroke:#16a34a,stroke-width:2px
+    classDef pkt fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+    class Classic old
+    class TCX new
+    class Packet pkt

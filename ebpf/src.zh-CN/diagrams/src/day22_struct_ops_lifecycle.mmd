@@ -1,0 +1,23 @@
+%%{init: {"sequence": {"useMaxWidth": false, "actorMargin": 20, "noteMargin": 8}, "themeVariables": {"fontFamily": "Noto Sans CJK SC, Microsoft YaHei, sans-serif"}}}%%
+sequenceDiagram
+    participant US as 用户空间<br/>加载器
+    participant LIB as libbpf<br/>骨架
+    participant BPF as BPF<br/>验证器/映射
+    participant LNK as bpf_link<br/>(.struct_ops.link)
+    participant TCP as TCP CC<br/>子系统
+    participant SK as 应用程序<br/>套接字
+
+    US->>LIB: 打开含回调函数和<br/>虚函数表的 .bpf.o
+    LIB->>BPF: 对每个 struct_ops 回调<br/>执行 BPF_PROG_LOAD
+    Note over BPF: 对照内核 BTF 虚函数表<br/>检查签名
+    LIB->>BPF: 创建/更新<br/>struct_ops 映射
+    Note over BPF: 映射保存<br/>回调函数指针
+    LIB->>LNK: 挂载<br/>struct_ops link
+    LNK->>TCP: 注册<br/>tcp_congestion_ops 名称
+    Note over TCP: 算法出现在<br/>available_congestion_control 中
+    SK->>TCP: setsockopt<br/>(TCP_CONGESTION, name)
+    TCP->>BPF: 在 TCP 事件上调用<br/>选定的回调函数
+    Note over BPF: BPF 代码现在已成为<br/>CC 算法的一部分
+    US->>LNK: 关闭/销毁 link
+    LNK->>TCP: 注销算法
+    Note over TCP: 套接字无法再<br/>选择这个 BPF CC

@@ -1,0 +1,50 @@
+digraph wakeup_path {
+    rankdir=TB;
+    labelloc=t;
+    label="唤醒休眠消费者的方式：默认启发式与 FORCE_WAKEUP";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // ---- 面板 1：默认 cons_pos == rec_pos 启发式 ----
+    subgraph cluster_default {
+        label="默认（flags = 0）：仅当消费者停在这条记录的确切位置时唤醒";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+
+        d_cons [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+                label="消费者线程\n在 rb->waitq 上执行 epoll_wait\n（已停驻，占用 0 CPU）"];
+        d_submit [shape=box, style="filled", fillcolor="#e9d5ff",
+                  label="生产者：bpf_ringbuf_submit(rec, 0)\nrec_pos = hdr - rb->data\ncons_pos = consumer_pos & mask"];
+        d_test [shape=diamond, style="filled", fillcolor="#fef3c7",
+                label="cons_pos == rec_pos ?"];
+        d_irq [shape=box, style="filled", fillcolor="#dcfce7",
+               label="irq_work_queue(&rb->work)\n-> bpf_ringbuf_notify\n-> wake_up_all(&rb->waitq)"];
+        d_skip [shape=box, style="filled", fillcolor="#dcfce7",
+                label="消费者落在后面，仍在排空数据\n不唤醒（高负载时开销低）"];
+
+        d_submit -> d_test;
+        d_test -> d_irq [label="是：必然正在休眠等待"];
+        d_test -> d_skip [label="否：正忙，落后几条记录"];
+        d_irq -> d_cons [label="解除 epoll_wait 阻塞", color="#2563eb", style=bold];
+    }
+
+    // ---- 面板 2：FORCE_WAKEUP 风暴 ----
+    subgraph cluster_force {
+        label="BPF_RB_FORCE_WAKEUP：每次提交都触发 irq_work";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#dc2626";
+
+        f_submit [shape=box, style="filled", fillcolor="#e9d5ff",
+                  label="每次提交都执行，不考虑 cons_pos：\nirq_work_queue(&rb->work)"];
+        f_storm [shape=box, style="filled", fillcolor="#fee2e2",
+                 label="每个事件都调用 wake_up_all\n= 每条记录都让 epoll_wait 返回一次\n系统调用风暴，消费者疲于应付"];
+        f_cost [shape=box, style="filled", fillcolor="#fee2e2",
+                label="高事件率时慢 2-5 倍\n差距扩大 -> 丢弃更多事件"];
+
+        f_submit -> f_storm -> f_cost [color="#dc2626", style=bold];
+    }
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="唤醒通过 irq_work 延迟执行，因为 submit 可能运行在 NMI/硬 IRQ\l上下文中，此时调用调度器是非法的。\lBPF_RB_NO_WAKEUP (1<<0) 从不唤醒；FORCE_WAKEUP (1<<1) 始终唤醒。\l"];
+
+    d_skip -> f_submit [style=invis];
+    f_cost -> note [style=invis];
+}

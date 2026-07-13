@@ -1,0 +1,49 @@
+digraph fd_to_sock {
+    rankdir=LR;
+    labelloc=t;
+    label="fd → struct file → struct socket → struct sock：从 FD 深入到协议状态";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+    nodesep=0.5; ranksep=1.0;
+
+    fd [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+        label="fd (int)\n例如 5\n索引 fd 表"];
+
+    file [shape=record, style="filled", fillcolor="#dbeafe",
+          label="{struct file|f_op = &socket_file_ops|private_data → socket}"];
+
+    sock [shape=record, style="filled", fillcolor="#dbeafe",
+          label="{struct socket|sk → struct sock|ops (proto_ops)}"];
+
+    sk [shape=record, style="filled", fillcolor="#dbeafe",
+        label="{struct sock|sk_prot (proto)|接收/发送队列、锁}"];
+
+    fd -> file [label="fd 表"];
+    file -> sock [label="private_data"];
+    sock -> sk [label="->sk"];
+    sk -> proto [label="->sk_prot"];
+
+    proto [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+           label="proto 虚函数表\ntcp_prot / udp_prot\n->recvmsg / ->sendmsg"];
+
+    // 分层注释
+    vfs [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+         label="VFS / 文件层\l（前两跳）\l"];
+    player [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+            label="协议层\l（后两跳）\l"];
+    vfs -> file [style=invis];
+    player -> sk [style=invis];
+
+    // 入口点
+    rd [shape=box, style="filled,rounded", fillcolor="#fee2e2", fontsize=9,
+        label="read() / poll()\n从这里进入"];
+    rd -> file [color="#dc2626", style=bold];
+
+    snd [shape=box, style="filled,rounded", fillcolor="#fee2e2", fontsize=9,
+         label="tcp_sendmsg()\n从这里进入"];
+    snd -> sk [color="#dc2626", style=bold];
+
+    { rank=same; vfs; rd; }
+    { rank=same; player; snd; }
+}

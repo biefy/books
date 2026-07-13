@@ -1,0 +1,49 @@
+digraph two_allocators {
+    rankdir=TB;
+    labelloc=t;
+    label="一个 skb = 来自两个分配器的两次分配";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    alloc [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+           label="__alloc_skb(size, gfp, flags, node)"];
+
+    // Left: descriptor allocator
+    subgraph cluster_desc {
+        label="1. 描述符（固定大小）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        headcache [shape=box, style="filled", fillcolor="#dbeafe",
+                   label="skbuff_head_cache\n（slab kmem_cache，\nSLAB_HWCACHE_ALIGN）\n弹出一个空闲槽位——O(1)"];
+        fclone [shape=box, style="filled", fillcolor="#dbeafe",
+                label="skbuff_fclone_cache\n（SKB_ALLOC_FCLONE）：\n两个 skb + 引用计数，\n预先捆绑克隆"];
+        percpu [shape=box, style="filled", fillcolor="#dbeafe",
+                label="per-CPU napi_alloc_cache\n（SKB_ALLOC_NAPI）：\nRX 快速路径，绕过 slab\n慢速路径"];
+        desc [shape=box, style="filled,rounded", fillcolor="#bfdbfe",
+              label="struct sk_buff\n（描述符）"];
+        headcache -> desc; fclone -> desc [style=dashed]; percpu -> desc [style=dashed];
+    }
+
+    // Right: data buffer allocator
+    subgraph cluster_data {
+        label="2. 线性数据缓冲区（可变大小）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#d97706";
+        kreserve [shape=box, style="filled", fillcolor="#fef3c7",
+                  label="kmalloc_reserve()"];
+        small [shape=box, style="filled", fillcolor="#fef3c7",
+               label="skb_small_head_cache\n（小头部）"];
+        buckets [shape=box, style="filled", fillcolor="#fef3c7",
+                 label="kmalloc 大小桶\n(kmalloc-512, -2k, …)\n用于较大头部"];
+        data [shape=box, style="filled,rounded", fillcolor="#fde68a",
+              label="线性数据缓冲区"];
+        kreserve -> small; kreserve -> buckets; small -> data; buckets -> data;
+    }
+
+    alloc -> headcache [label="分配 1"];
+    alloc -> kreserve [label="分配 2"];
+
+    desc -> data [label="skb->head 指向其中", color="#dc2626", style=bold];
+
+    gfp [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+         label="RX 软中断中 gfp_mask = GFP_ATOMIC\l（不得睡眠）。node = NUMA 提示。\l"];
+    alloc -> gfp [style=invis];
+}

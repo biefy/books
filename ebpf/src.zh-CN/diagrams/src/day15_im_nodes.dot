@@ -1,0 +1,32 @@
+digraph im_nodes {
+    rankdir=TB;
+    labelloc=t;
+    label="IM（中间）节点：只用于分支，不含值——遍历会经过它，但绝不会返回它";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.6; ranksep=0.8;
+
+    root [shape=box, style="filled,rounded", fillcolor="#f3f4f6", fontname="Noto Sans CJK SC",
+          label="根节点\n（10.x——共享位 0..13）"];
+
+    // IM 分支节点：虚线、空心
+    im [shape=box, style="rounded,dashed", color="#9333ea", fillcolor="white",
+        label="位 14 处的 IM 分支节点\nflags |= LPM_TREE_NODE_FLAG_IM\n“不含值”"];
+
+    leafA [shape=box, style="filled,rounded", fillcolor="#dbeafe", fontname="Noto Sans CJK SC",
+           label="10.1.0.0/16\n（实心叶节点——含值）"];
+    leafB [shape=box, style="filled,rounded", fillcolor="#dbeafe", fontname="Noto Sans CJK SC",
+           label="10.2.0.0/16\n（实心叶节点——含值）"];
+
+    root -> im [label="遍历", fontname="Noto Sans CJK SC", fontsize=9];
+    im -> leafA [label="位 14 = 0", fontname="Noto Sans CJK SC", fontsize=9];
+    im -> leafB [label="位 14 = 1", fontname="Noto Sans CJK SC", fontsize=9];
+
+    walknote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9, fontname="Noto Sans CJK SC",
+              label="查找会经过 IM 节点，\l但只记住最近一个清除了 IM 标志的节点：\l\l  if (!(node->flags & ..._IM))\l      found = node;\l\l因此绝不会返回 IM 节点——\l它只负责分叉到两个 /16 叶节点。\l"];
+    im -> walknote [style=dashed, color="#9333ea"];
+
+    tally [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9, fontname="Noto Sans CJK SC",
+           label="内存统计\l----------------\l1 个已存储前缀\l  = 1 个实心叶节点\l  + 可能存在的少量 IM 分支节点\l  = 几百字节\l"];
+    leafB -> tally [style=invis];
+}

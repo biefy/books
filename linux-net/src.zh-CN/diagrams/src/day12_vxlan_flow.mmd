@@ -1,0 +1,19 @@
+%%{init: {'themeVariables': {'fontFamily': 'Noto Sans CJK SC, Noto Sans SC, sans-serif'}}}%%
+flowchart TD
+    Inner["内部 Ethernet 帧<br/><b>作用：</b>携带租户源/目的 MAC/IP<br/><b>为何进入下一步：</b>VXLAN 设备必须映射覆盖网络目的地址<br/><b>状态：</b>skb 属于覆盖网络 netdev"]
+    FDB["VXLAN FDB / VNI 查找<br/><b>作用：</b>将内部目的 MAC + VNI 映射到远端 VTEP<br/><b>为何进入下一步：</b>底层网络需要外层 IP 目的地址<br/><b>状态：</b>已选定 VNI 和 VTEP IP"]
+    Encap["封装<br/><b>作用：</b>前置外层 Ethernet/IP/UDP + VXLAN 头<br/><b>为何进入下一步：</b>底层网络路由器只理解外层数据包<br/><b>状态：</b>skb 现已包含隧道元数据和外层头部"]
+    Underlay["底层网络路由输出<br/><b>作用：</b>将外层 IP 数据包路由到远端 VTEP<br/><b>为何进入下一步：</b>NIC 发送普通 UDP/IP 帧<br/><b>状态：</b>已选择外层下一跳/设备"]
+    Wire["线路<br/><b>状态：</b>UDP 目的端口 4789，VNI 标识租户网段"]
+    UDP["远端 UDP 隧道套接字<br/><b>作用：</b>接收端口 4789 的流量并分派给 VXLAN 处理程序<br/><b>为何进入下一步：</b>VXLAN 代码验证头部/VNI<br/><b>状态：</b>封装后的 skb 已被隧道端点接受"]
+    Decap["解封装<br/><b>作用：</b>移除外层头部并恢复内部帧上下文<br/><b>为何进入下一步：</b>网桥/IP 协议栈应看到原始租户帧<br/><b>状态：</b>skb 已挂接到 VXLAN netdev RX 路径"]
+    Stack["普通 RX 路径<br/><b>作用：</b>由网桥、IP、netfilter 或套接字交付处理内部帧<br/><b>状态：</b>租户数据包如同本地 L2 流量一样运行"]
+
+    Inner --> FDB --> Encap --> Underlay --> Wire --> UDP --> Decap --> Stack
+
+    classDef overlay fill:#dbeafe,stroke:#2563eb
+    classDef tunnel fill:#fef3c7,stroke:#d97706
+    classDef underlay fill:#dcfce7,stroke:#16a34a
+    class Inner,FDB,Stack overlay
+    class Encap,UDP,Decap tunnel
+    class Underlay,Wire underlay

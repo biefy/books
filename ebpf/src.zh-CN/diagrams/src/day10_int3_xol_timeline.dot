@@ -1,0 +1,34 @@
+digraph int3_xol_timeline {
+    rankdir=TB;
+    labelloc=t;
+    label="命中入口 uprobe：int3 陷阱、运行 BPF、在线外重放被替换的指令，然后恢复执行";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans CJK SC", fontsize=10, shape=box, style="filled,rounded"];
+    edge [fontname="Noto Sans CJK SC"];
+    nodesep=0.4; ranksep=0.6;
+
+    t1 [fillcolor="#fef3c7",
+        label="线程执行\n0xCC 字节\n（int3，仍处于修补状态）"];
+    t2 [fillcolor="#fee2e2",
+        label="CPU 陷入：\nexc_int3 -> 内核\n断点异常"];
+    t3 [fillcolor="#dbeafe",
+        label="内核构建 pt_regs\n用户寄存器快照\n(rdi..r9, rax)"];
+    t4 [fillcolor="#e9d5ff",
+        label="handle_swbp ->\nhandler_chain：\n你的 BPF 程序运行"];
+    t5 [fillcolor="#dcfce7",
+        label="将保存的原始指令复制到\nxol_area 暂存槽\narch_uprobe.ixol[]"];
+    t6 [fillcolor="#dcfce7",
+        label="在线外单步执行\n这一条指令"];
+    t7 [fillcolor="#dbeafe",
+        label="设置 IP = original_addr + len\n恢复用户空间执行"];
+
+    t1 -> t2 -> t3 -> t4 -> t5 -> t6 -> t7;
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="跟踪期间绝不会移除 0xCC 字节。\l每个线程都在自己的 xol 槽中单步执行自己的副本，\l因此任何线程都不会看到只修补了一半的指令。\l下一次命中仍会在同一 int3 处再次陷入。\l"];
+    t6 -> note [style=dashed, color="#dc2626", constraint=false];
+
+    cost [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="每次命中的开销：\l陷入内核（约 50 ns）\l+ BPF 程序时间\l+ 一次单步执行。\l"];
+    t4 -> cost [style=invis];
+}

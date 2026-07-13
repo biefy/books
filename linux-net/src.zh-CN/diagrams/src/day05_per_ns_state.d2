@@ -1,0 +1,68 @@
+direction: down
+
+title: |md
+  ## 每 netns 子系统状态
+| {near: top-center; shape: text}
+
+routing: "每命名空间路由" {
+  style.fill: "#dbeafe"
+  r_body: |md
+    每个命名空间都有独立的 FIB：
+    - net->ipv4.fib_main_tbl
+    - net->ipv4.fib_local_tbl
+    - net->ipv6.fib6_main_tbl
+
+    `ip route` 只显示当前
+    命名空间的表。
+  |
+}
+
+netfilter: "每命名空间 netfilter" {
+  style.fill: "#fef3c7"
+  nf_body: |md
+    每命名空间的 nf_hooks：
+    - net->nf.hooks_ipv4[]
+    - net->nf.hooks_ipv6[]
+    - net->nf.hooks_bridge[]
+
+    nftables 表/集合：
+    - net->nft.tables
+
+    Conntrack 表：
+    - net->ct.htable
+    - net->ct.count
+  |
+}
+
+socks: "每命名空间套接字" {
+  style.fill: "#dcfce7"
+  s_body: |md
+    监听套接字在各自命名空间中绑定：
+    - inet_bind 在 sk->sk_net 的
+      绑定表中查找端口
+    - 两个命名空间都可绑定 :80，
+      互不冲突
+
+    查找表（每命名空间）：
+    - tcp_hashinfo.bhash[]
+    - tcp_hashinfo.ehash[]
+    - udp_table.hash[]
+  |
+}
+
+sysctl: "每命名空间 sysctl" {
+  style.fill: "#fef3c7"
+  ss_body: |md
+    许多 net.ipv4.* 和 net.core.*
+    sysctl 按命名空间隔离：
+    - tcp_congestion_control
+    - rp_filter
+    - somaxconn
+    - ip_forward
+    - conntrack_max
+
+    部分仅为全局设置（例如 kernel.*）。
+  |
+}
+
+routing -> netfilter -> socks -> sysctl

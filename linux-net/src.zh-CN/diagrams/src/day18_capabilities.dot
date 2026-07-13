@@ -1,0 +1,46 @@
+digraph capabilities {
+    rankdir=TB;
+    labelloc=t;
+    label="能力门控：每个 sockopt 需要哪一类能力";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // 左列：CAP_NET_RAW
+    subgraph cluster_raw {
+        label="CAP_NET_RAW  —  以不同方式查看/路由";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        raw_a [shape=box, style="filled", fillcolor="#dbeafe", label="SO_BINDTODEVICE"];
+        raw_b [shape=box, style="filled", fillcolor="#dbeafe", label="打开 raw / packet 套接字"];
+        raw_c [shape=box, style="filled", fillcolor="#dbeafe", label="绑定非本地地址"];
+        raw_a -> raw_b -> raw_c [style=invis];
+    }
+
+    // 右列：CAP_NET_ADMIN
+    subgraph cluster_admin {
+        label="CAP_NET_ADMIN  —  重新配置内核";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#d97706";
+        adm_a [shape=box, style="filled", fillcolor="#fef3c7", label="SO_SNDBUFFORCE"];
+        adm_b [shape=box, style="filled", fillcolor="#fef3c7", label="SO_RCVBUFFORCE"];
+        adm_c [shape=box, style="filled", fillcolor="#fef3c7", label="仅管理员可用的调节项"];
+        adm_a -> adm_b -> adm_c [style=invis];
+    }
+
+    // 位于中间、跨越两类的选项
+    subgraph cluster_both {
+        label="接受任一种能力（横跨两类）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+        both_a [shape=box, style="filled", fillcolor="#dcfce7", label="IP_TRANSPARENT"];
+        both_b [shape=box, style="filled", fillcolor="#dcfce7", label="SO_MARK"];
+        both_a -> both_b [style=invis];
+    }
+
+    // 将跨类选项连接到两列
+    both_a -> raw_c   [color="#16a34a", style=dashed, constraint=false, dir=none];
+    both_a -> adm_c   [color="#16a34a", style=dashed, constraint=false, dir=none];
+    both_b -> raw_a   [color="#16a34a", style=dashed, constraint=false, dir=none];
+    both_b -> adm_a   [color="#16a34a", style=dashed, constraint=false, dir=none];
+
+    note [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+          label="以不同方式查看/路由 = RAW；重新配置 = ADMIN。\lsockopt_capable() 允许 BPF 调用者完全跳过门控；\l用户空间调用者则继续调用 capable(cap)。\l依据套接字所属的用户命名空间进行检查。\l"];
+    both_b -> note [style=invis];
+}

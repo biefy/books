@@ -1,0 +1,41 @@
+digraph udp_header {
+    rankdir=TB;
+    labelloc=t;
+    label="8 字节 UDP 头 + 校验和覆盖的 IPv4 伪首部";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    // UDP 头：两列字节网格（每行 = 4 字节 = 两个 16-bit 字段）
+    subgraph cluster_udp {
+        label="struct udphdr——线路上的 8 字节";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        udp [shape=record, style="filled", fillcolor="#dbeafe",
+             label="{ {source (16b)|dest (16b)} | {len (16b)|check (16b)} }"];
+    }
+
+    // 伪首部：不在线路上，仅为校验和而前置
+    subgraph cluster_pseudo {
+        label="IPv4 伪首部——不在线路上，仅参与求和";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+        pseudo [shape=record, style="filled", fillcolor="#dcfce7",
+                label="{ 源 IP (32b) | 目标 IP (32b) | { 零 (8b) | proto=17 (8b) | UDP 长度 (16b) } }"];
+    }
+
+    // 载荷
+    payload [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+             label="UDP 载荷（可变）"];
+
+    // 覆盖范围：csum_tcpudp_magic 求和的内容
+    cover [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+           label="checksum = 对以下内容求反码和：\l  (1) 伪首部\l  (2) UDP 头（计算时 check 视为 0）\l  (3) 载荷\lcsum_tcpudp_magic(saddr, daddr, len, IPPROTO_UDP, udp_csum(skb))\l"];
+
+    skip [shape=box, style="filled,rounded", fillcolor="#fee2e2", fontsize=9,
+          label="IPv4 接收时 check == 0\n=> 跳过验证\n（真正的零会改写为 0xFFFF）"];
+
+    pseudo -> udp [color="#16a34a", arrowhead=none, style=dashed, label="为求和而前置"];
+    udp -> payload [color="#94a3b8", arrowhead=none];
+
+    pseudo -> cover [style=invis];
+    udp -> skip [color="#dc2626", style=dashed, label="check 字段"];
+}

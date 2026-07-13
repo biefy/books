@@ -126,8 +126,8 @@ So the loop story end-to-end: the CFG pass (1) finds the back-edge, range tracki
 > 3. `for (int i = 0; i < n && i < 100; i++) sum += i;` (same `n`)
 > 4. `int i = 0; while (1) { if (i >= 10) break; sum += i; i++; }`
 >
-> .  
-> .  
+> .\
+> .\
 > .
 >
 > **Answers:** 1 ✓ (constant bound — `umax(i)` pinned at 9, box shrinks, easy unroll). 2 ✗ ("infinite loop" — `n`'s box is `[0,U64_MAX]`, so `umax(i)` stays `U64_MAX` and termination is unprovable). 3 ✓ (the `i < 100` is the static-cap trick from the range section — it caps `umax(i)` at 99 regardless of `n`). 4 ✓ (functionally identical to 1 — the `if (i >= 10) break` gives the range tracker the same `umax(i) <= 9` fact).

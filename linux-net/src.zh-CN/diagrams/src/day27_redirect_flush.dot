@@ -1,0 +1,55 @@
+digraph redirect_flush {
+    rankdir=LR;
+    labelloc=t;
+    label="XDP_REDIRECT：每次 poll 批处理，随后统一 flush 一次";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC", fontsize=10];
+
+    subgraph cluster_poll {
+        label="一次 NAPI poll（第 2 天预算）——每帧执行阶段 1 + 阶段 2";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+
+        // frame 1
+        p1 [shape=box, style="filled", fillcolor="#dbeafe",
+            label="帧 1\n程序返回 XDP_REDIRECT\n（将目标写入任务本地的\nbpf_redirect_info）"];
+        e1 [shape=box, style="filled", fillcolor="#fef3c7",
+            label="驱动 xdp_do_redirect()\n将帧加入目标批量队列"];
+        p1 -> e1 [color="#2563eb"];
+
+        // frame 2
+        p2 [shape=box, style="filled", fillcolor="#dbeafe",
+            label="帧 2\n程序返回 XDP_REDIRECT"];
+        e2 [shape=box, style="filled", fillcolor="#fef3c7",
+            label="xdp_do_redirect()\n入队"];
+        p2 -> e2 [color="#2563eb"];
+
+        // frame N
+        pN [shape=box, style="filled", fillcolor="#dbeafe",
+            label="帧 N\n程序返回 XDP_REDIRECT"];
+        eN [shape=box, style="filled", fillcolor="#fef3c7",
+            label="xdp_do_redirect()\n入队"];
+        pN -> eN [color="#2563eb"];
+
+        e1 -> p2 [style=dashed, color="#94a3b8", constraint=false];
+        e2 -> pN [style=dashed, color="#94a3b8", constraint=false, label="...N 帧..."];
+    }
+
+    flush [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+           label="xdp_do_flush()\n仅一次，在 poll 结束时\n排空所有批量队列"];
+
+    e1 -> flush [color="#7c3aed", style=bold];
+    e2 -> flush [color="#7c3aed", style=bold];
+    eN -> flush [color="#7c3aed", style=bold, label="一次 flush，\n多个帧"];
+
+    dev [shape=box, style="filled", fillcolor="#dcfce7",
+         label="devmap ->\nndo_xdp_xmit\n（批量 TX）"];
+    cpu [shape=box, style="filled", fillcolor="#dcfce7",
+         label="cpumap ->\n唤醒远程\nCPU kthread"];
+    xsk [shape=box, style="filled", fillcolor="#dcfce7",
+         label="xskmap ->\n通知 AF_XDP\n套接字"];
+
+    flush -> dev [color="#16a34a"];
+    flush -> cpu [color="#16a34a"];
+    flush -> xsk [color="#16a34a"];
+}

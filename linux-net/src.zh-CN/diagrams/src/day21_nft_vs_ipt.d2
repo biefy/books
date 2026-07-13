@@ -1,0 +1,53 @@
+direction: down
+
+title: |md
+  ## nftables 与 iptables 对比
+| {near: top-center; shape: text}
+
+ipt: "iptables / x_tables" {
+  style.fill: "#fee2e2"
+  i_body: |md
+    - **作用：** 按链中的顺序遍历
+    - 结构固定的规则项。
+    - **为何进入下一条规则：** 当前
+    - 规则没有给出终止型裁决。
+    - **状态模型：** 按协议划分的
+    - 表（`iptables`、
+    - `ip6tables`、`arptables`、
+    - `ebtables`）以及 match/
+    - target 模块。
+  |
+}
+
+nft: "nftables / nf_tables" {
+  style.fill: "#dcfce7"
+  n_body: |md
+    - **作用：** 在 `nft_do_chain()` 中
+    - 对表达式序列求值。
+    - **大型策略为何更快：**
+    - 集合/映射取代冗长的线性链，
+    - 用于成员关系和
+    - 键到裁决的决策。
+    - **状态模型：** inet、ip、ip6、
+    - arp、bridge 和 netdev 系列
+    - 共用一种语法。
+  |
+}
+
+cmd: "相同策略，不同执行方式" {
+  style.fill: "#fef3c7"
+  c_body: |md
+    iptables:
+    `-p tcp --dport 22 -j ACCEPT`
+
+    nftables:
+    `tcp dport 22 accept`
+
+    - **两者都会：** 在同一钩子处返回
+    - Netfilter 裁决；不要随意混用引擎。
+  |
+}
+
+ipt -> nft: {style.opacity: 0}
+ipt -> cmd: "线性规则项匹配"
+nft -> cmd: "表达式得出裁决"

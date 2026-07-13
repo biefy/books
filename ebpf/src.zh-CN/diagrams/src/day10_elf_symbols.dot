@@ -1,0 +1,15 @@
+digraph G {
+    rankdir=TB;
+    node [shape=box, style="rounded,filled", fontname="Noto Sans CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    elf [label="/usr/bin/bash\n（ELF 二进制文件）\n\n- TEXT（可执行代码）\n- .symtab（可能已剥离）\n- .dynsym（动态符号）\n- .plt + .got（延迟绑定桩）", fillcolor="#dbeafe"];
+
+    discovery [label="如何查找偏移：\n\n$ nm /usr/bin/bash | grep ' T readline'\n0000000000064f00 T readline\n\n$ objdump -d /usr/bin/bash | grep 'readline>'\n0000000000064f00 <readline@@READLINE_8.0>\n\n$ nm -D libc.so.6 | grep ' T malloc'\n0000000000099a00 T malloc", fillcolor="#fef3c7", fontname="Noto Sans Mono CJK SC"];
+
+    secs [label="SEC() 格式：\n\nSEC(\"uprobe//usr/bin/bash:readline\")\nSEC(\"uprobe//usr/bin/bash:0x64f00\")\nSEC(\"uretprobe//libc.so.6:malloc\")\nSEC(\"usdt//bin:provider:probe\")\n\n符号解析发生在挂载时，\n而非加载时。", fillcolor="#dcfce7", fontname="Noto Sans Mono CJK SC"];
+
+    elf -> discovery [label="将符号解析为偏移"];
+    elf -> secs [label="在 BPF 代码中引用"];
+    discovery -> secs [label="粘贴偏移或符号名", style=dashed];
+}

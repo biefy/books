@@ -1,0 +1,21 @@
+%%{init: {"themeVariables": {"fontFamily": "\"Noto Sans CJK SC\", sans-serif"}}}%%
+flowchart TD
+    Wake["<b>1. 任务变为可运行</b><br/>唤醒、fork 或抢占<br/>使任务具备运行资格<br/><b>交接：</b>sched_ext 询问 BPF<br/>任务应在何处等待<br/><b>状态：</b>任务处于可运行状态<br/>并保留先前所在的 CPU"]
+
+    Enq["<b>2. ops.enqueue</b><br/>BPF 选择 DSQ、时间片以及<br/>FIFO 或 vtime 排序方式<br/><b>交接：</b>任务必须等待<br/>直到某个 CPU 需要工作<br/><b>状态：</b>scx_bpf_dsq_insert*<br/>记录队列所有权"]
+
+    DSQ["<b>3. 调度队列</b><br/>由内核管理的可运行任务<br/>队列，按策略排序<br/><b>交接：</b>dispatch 可将<br/>工作移至 CPU 本地 DSQ<br/><b>状态：</b>任务已入队，<br/>但尚未运行"]
+
+    Dispatch["<b>4. ops.dispatch</b><br/>CPU 需要工作时，BPF 调用<br/>scx_bpf_dsq_move_to_local<br/>或插入本地工作<br/><b>交接：</b>核心调度器只从<br/>本地 DSQ 运行任务<br/><b>状态：</b>选中的任务已位于<br/>该 CPU 本地"]
+
+    Run["<b>5. CPU 运行任务</b><br/>任务消耗时间片，直到<br/>阻塞、被抢占、让出或退出<br/><b>交接：</b>再次可运行意味着<br/>进入下一轮 enqueue 周期<br/><b>状态：</b>运行时间已核算，<br/>watchdog 可观察到进展"]
+
+    Wake --> Enq --> DSQ --> Dispatch --> Run
+    Run -. 阻塞后唤醒 / 时间片结束 .-> Wake
+
+    classDef bpf fill:#fef3c7,stroke:#d97706,stroke-width:2px
+    classDef state fill:#dcfce7,stroke:#16a34a,stroke-width:2px
+    classDef run fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+    class Enq,Dispatch bpf
+    class Wake,DSQ state
+    class Run run

@@ -1,0 +1,49 @@
+digraph reorder {
+    rankdir=TB;
+    labelloc=t;
+    label="乱序看起来像丢包：让一个流始终走同一条路径";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    // 上方：一条路径，按序到达
+    subgraph cluster_good {
+        label="良好 — 整个流走下一跳 A，按序到达";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+        gsend [shape=box, style="filled", fillcolor="#dbeafe",
+               label="发送方\n发送 1 2 3 4"];
+        gA [shape=box, style="filled", fillcolor="#dcfce7",
+            label="下一跳 A\n（单一路径）"];
+        grecv [shape=record, style="filled", fillcolor="#fef3c7",
+               label="{接收方|按序收到 1 2 3 4}"];
+        gack [shape=box, style="filled", fillcolor="#dcfce7",
+              label="正常 ACK\n1,2,3,4\n窗口增大"];
+        gsend -> gA -> grecv -> gack [color="#16a34a"];
+    }
+
+    // 下方：两条路径，发生乱序
+    subgraph cluster_bad {
+        label="不良 — 同一个流在 A（快）和 B（慢）之间拆分";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#dc2626";
+        bsend [shape=box, style="filled", fillcolor="#dbeafe",
+               label="发送方\n发送 1 2 3 4"];
+        bA [shape=box, style="filled", fillcolor="#dcfce7",
+            label="下一跳 A（快）\n承载 1 3"];
+        bB [shape=box, style="filled", fillcolor="#e9d5ff",
+            label="下一跳 B（慢）\n承载 2 4"];
+        brecv [shape=record, style="filled", fillcolor="#fef3c7",
+               label="{接收方|收到 1、3、4……2 迟到\n（乱序）}"];
+        bdup [shape=box, style="filled", fillcolor="#fee2e2",
+              label="重复 ACK\nACK1 ACK1 ACK1\n第 3 个重复 ACK -> 快速重传\n拥塞窗口缩小"];
+        bsend -> bA [color="#16a34a"];
+        bsend -> bB [color="#7c3aed"];
+        bA -> brecv [color="#16a34a"];
+        bB -> brecv [style=dashed, color="#7c3aed", label="迟到"];
+        brecv -> bdup [color="#dc2626", style=bold];
+    }
+
+    cap [shape=note, style="filled", fillcolor="#fee2e2", fontsize=10, fontname="Noto Sans CJK SC",
+         label="没有任何数据包丢失 — 每个数据包都已到达。\l但乱序到达会模拟丢包的重复 ACK 模式，\l因此 TCP 的丢包检测器会触发，吞吐量在数秒内骤降。\l"];
+    gack -> cap [style=invis];
+    bdup -> cap [style=invis];
+}

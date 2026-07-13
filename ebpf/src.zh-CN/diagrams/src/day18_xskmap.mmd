@@ -1,0 +1,23 @@
+---
+config:
+  themeVariables:
+    fontFamily: "Noto Sans CJK SC, PingFang SC, sans-serif"
+---
+flowchart TD
+    Create["创建 AF_XDP 套接字<br/><b>执行：</b>将 XSK 绑定到 ifindex<br/>+ RX 队列 + UMEM<br/><b>下一步的原因：</b>XDP 重定向<br/>需要一个有效的套接字 fd<br/><b>状态：</b>套接字持有 RX/TX 环形队列"]
+    Map["更新 XSKMAP<br/><b>执行：</b>存储 queue_id -> xsk fd<br/><b>下一步的原因：</b>BPF redirect_map<br/>按 ctx->rx_queue_index 查找<br/><b>状态：</b>队列已有用户空间所有者"]
+    Packet["数据包到达 XDP<br/><b>执行：</b>程序读取<br/>rx_queue_index 和策略<br/><b>下一步的原因：</b>只有已注册的<br/>队列才能安全重定向<br/><b>状态：</b>xdp_buff 仍位于 skb 之前"]
+    Lookup["bpf_redirect_map<br/><b>执行：</b>检查该队列的 XSKMAP 条目<br/><b>下一步的原因：</b>命中则移交给 AF_XDP；<br/>未命中则使用回退行为<br/><b>状态：</b>重定向目标或 XDP_PASS"]
+    Ring["XSK RX 环形队列<br/><b>执行：</b>接收 UMEM 帧的描述符<br/><b>下一步的原因：</b>用户空间轮询描述符，<br/>而非每个数据包都执行系统调用<br/><b>状态：</b>用户持有数据包缓冲区"]
+    Cleanup["删除映射条目<br/><b>执行：</b>在拆除套接字前<br/>移除 queue -> fd<br/><b>状态：</b>后续数据包将放行/丢弃，<br/>而不会以过期 XSK 为目标"]
+
+    Create --> Map --> Packet --> Lookup
+    Lookup -->|映射命中| Ring --> Cleanup
+    Lookup -->|没有条目| Pass["XDP_PASS / 回退<br/><b>状态：</b>数据包继续进入<br/>常规协议栈"]
+
+    classDef setup fill:#dbeafe,stroke:#2563eb
+    classDef hot fill:#fef3c7,stroke:#d97706
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    class Create,Map,Cleanup setup
+    class Packet,Lookup hot
+    class Ring,Pass ok

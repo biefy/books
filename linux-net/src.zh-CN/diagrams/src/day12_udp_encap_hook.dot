@@ -1,0 +1,52 @@
+digraph udp_encap_hook {
+    rankdir=TB;
+    labelloc=t;
+    label="UDP 封装钩子：UDP 套接字如何成为隧道解封装入口";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    arrive [shape=record, style="filled", fillcolor="#fef3c7",
+            label="{外层 UDP 数据报\n到达 udp_rcv|目的端口 4789}"];
+
+    lookup [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="四元组套接字查找\n（源 IP、目的 IP、源端口、目的端口）\n→ struct udp_sock"];
+    arrive -> lookup [style=bold, color="#d97706"];
+
+    branch [shape=diamond, style="filled", fillcolor="#dbeafe",
+            label="up-\>encap_rcv\n已设置？"];
+    lookup -> branch [style=bold];
+
+    // 转向：隧道入站
+    subgraph cluster_divert {
+        label="转向——udp_queue_rcv_one_skb (net/ipv4/udp.c:2364)";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+        encap [shape=box, style="filled", fillcolor="#dcfce7",
+               label="encap_rcv(sk, skb) = vxlan_rcv\n在内核中消费，绝不唤醒用户空间"];
+        decap [shape=box, style="filled", fillcolor="#dcfce7",
+               label="vxlan_rcv：\n解析 VXLAN 头，提取 VNI\n去除外层头部 (skb_pull)\n将内部帧交给 gro_cells_receive"];
+        encap -> decap [style=bold, color="#16a34a"];
+    }
+    branch -> encap [label="是（隧道套接字）", style=bold, color="#16a34a"];
+
+    inner [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+           label="内部 Ethernet 帧重新进入协议栈，\n就像从 vxlan0 接收一样"];
+    decap -> inner [style=bold, color="#16a34a"];
+
+    // 普通 UDP 路径
+    subgraph cluster_normal {
+        label="普通路径——普通 UDP 数据报";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        queue [shape=box, style="filled", fillcolor="#dbeafe",
+               label="追加到 sk_receive_queue"];
+        recv [shape=box, style="filled", fillcolor="#dbeafe",
+              label="recvmsg() 在用户空间读取它"];
+        queue -> recv [style=bold, color="#2563eb"];
+    }
+    branch -> queue [label="否", style=bold, color="#2563eb"];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="encap_rcv 返回约定：\l  0  = 已消费（或丢弃）\l  \>0 = 不属于我 → 继续进入 sk_receive_queue\l  \<0 = 作为 IP proto -ret 重新提交\l因此，发往 :4789 的非 VXLAN 游离数据包仍会像普通 UDP 一样工作。\l"];
+    inner -> note [style=invis];
+    recv -> note [style=invis];
+}

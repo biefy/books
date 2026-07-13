@@ -1,0 +1,47 @@
+digraph static_key {
+    rankdir=TB;
+    labelloc=t;
+    label="NF_HOOK 调用点：静态键就地修补机器码";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    compound=true;
+
+    // 左侧面板：键关闭
+    subgraph cluster_off {
+        label="左侧 — 键关闭（未注册钩子）：调用点为 nop";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+
+        off_site [shape=record, style="filled", fillcolor="#dbeafe",
+                  label="{NF_HOOK 调用点|nop（直接向下执行）}"];
+        off_okfn [shape=box, style="filled", fillcolor="#fef3c7",
+                  label="okfn(skb)\n流水线下一阶段"];
+        off_slow [shape=box, style="filled,rounded", fillcolor="#e2e8f0", fontcolor="#94a3b8",
+                  label="nf_hook_slow(...)\n（不会到达 — 灰显）\n遍历优先级链表"];
+
+        off_site -> off_okfn [style=bold, color="#16a34a", label="CPU 直接通过：\n无加载、无比较、\n不占用预测器槽位"];
+        off_site -> off_slow [style=dashed, color="#cbd5e1"];
+    }
+
+    // 右侧面板：键开启
+    subgraph cluster_on {
+        label="右侧 — 键开启（已注册钩子）：调用点实时修补为 jmp";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#7c3aed";
+
+        on_site [shape=record, style="filled", fillcolor="#dbeafe",
+                 label="{NF_HOOK 调用点|jmp  nf_hook_slow}"];
+        on_slow [shape=box, style="filled", fillcolor="#dcfce7",
+                 label="nf_hook_slow(...)\n按优先级顺序遍历\nnet->nf.hooks_<fam>[hook]"];
+        on_okfn [shape=box, style="filled", fillcolor="#fef3c7",
+                 label="okfn(skb)\n（仅当所有 verdict 均为 ACCEPT）"];
+
+        on_site -> on_slow [style=bold, color="#7c3aed", label="跳转到\n慢速路径"];
+        on_slow -> on_okfn [label="全部 ACCEPT"];
+    }
+
+    // 中央转换箭头
+    transition [shape=note, style="filled", fillcolor="#dcfce7", fontsize=10,
+                label="nf_register_net_hook\l   -> static_key_slow_inc(&nf_hooks_needed[pf][hook])\l      -> text_poke 改写这些确切字节：nop  =>  jmp\l（仅在注册时付出一次成本，而非每个数据包都付出）\l"];
+
+    off_site -> transition [ltail=cluster_off, color="#dc2626", style=bold, label="注册"];
+    transition -> on_site [lhead=cluster_on, color="#dc2626", style=bold];
+}

@@ -1,0 +1,47 @@
+digraph task_refcount_timeline {
+    rankdir=TB;
+    labelloc=t;
+    label="一个 BPF 程序运行期间的 task_struct->rcu_users：运行时计数器与验证器引用 id #1";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.45; ranksep=0.75;
+
+    // --- 从左到右的运行时计数器状态 ---
+    s0 [shape=record, style="filled", fillcolor="#dbeafe", fontsize=11,
+        label="{ rcu_users = N | 由调度器持有\n(任务仍存活) }"];
+
+    s1 [shape=record, style="filled", fillcolor="#dbeafe", fontsize=11,
+        label="{ rcu_users = N+1 | BPF 现在额外持有 +1 }"];
+
+    s2 [shape=record, style="filled", fillcolor="#dbeafe", fontsize=11,
+        label="{ rcu_users = N | BPF 已释放其引用 }"];
+
+    // 计数器转换
+    s0 -> s1 [label="bpf_task_acquire()\nrefcount_inc_not_zero", color="#d97706",
+              style=bold, fontname="Noto Sans Mono CJK SC", fontsize=9];
+    s1 -> s2 [label="bpf_task_release()\nput_task_struct_rcu_user", color="#2563eb",
+              style=bold, fontname="Noto Sans Mono CJK SC", fontsize=9];
+
+    // --- 虚线侧分支：非零递增失败路径 ---
+    fail [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9, fontname="Noto Sans CJK SC",
+          label="如果 rcu_users 已经为 0：\l计数器正处于拆除过程中，\linc_not_zero 返回 false\l=> bpf_task_acquire 返回 NULL\l(KF_RET_NULL：必须检查)\l"];
+    s0 -> fail [label="为 0 的情况", style=dashed, color="#dc2626",
+                fontname="Noto Sans CJK SC", fontsize=9];
+
+    // --- 持有 +1 时运行的 BPF 程序体 ---
+    body [shape=box, style="filled,rounded", fillcolor="#fef3c7", fontsize=10,
+          label="BPF 程序体运行\nacq->pid、bpf_printk、...\n(在 RCU 读侧期间固定任务，使其保持存活)"];
+    s1 -> body [style=dashed, color="#a16207", arrowhead=none];
+
+    // --- 验证器引用 id #1 的生命周期条，跨越 acquire..release ---
+    ropen [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=10,
+           label="验证器：id #1 已打开\n位于 KF_ACQUIRE 返回处"];
+    rclose [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=10,
+            label="验证器：id #1 已关闭\n位于 KF_RELEASE"];
+    ropen -> rclose [label="+1 的静态镜像\n必须在每条退出路径上关闭",
+                     color="#7c3aed", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+
+    // 将引用 id 条与对应的计数器状态相连
+    s1 -> ropen  [style=dashed, color="#7c3aed", arrowhead=none];
+    s2 -> rclose [style=dashed, color="#7c3aed", arrowhead=none];
+}

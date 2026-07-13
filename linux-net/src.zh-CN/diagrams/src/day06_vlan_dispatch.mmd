@@ -1,0 +1,30 @@
+---
+config:
+  themeVariables:
+    fontFamily: '"Noto Sans CJK SC", "PingFang SC", sans-serif'
+---
+flowchart TD
+    Frame["带标记帧到达 eth0"]
+    Strip{"硬件去除 VLAN 标记？"}
+    HwStripped["已设置 skb->vlan_tci<br/>skb->vlan_proto = 0x8100<br/>帧看起来没有标记"]
+    SwTagged["帧仍带有标记<br/>type 字段 = 0x8100"]
+
+    Lookup["__vlan_hwaccel_get_tag<br/>识别 vlan_id"]
+    Find["按 (eth0, vlan_id)<br/>查找 VLAN netdev"]
+    Found{"找到 VLAN 设备？"}
+    Forward["将 skb 重定向到该<br/>VLAN netdev 的 RX 队列"]
+    Drop["丢弃（没有监听方）"]
+
+    Frame --> Strip
+    Strip -->|是| HwStripped --> Lookup
+    Strip -->|否| SwTagged --> Lookup
+    Lookup --> Find --> Found
+    Found -->|是| Forward
+    Found -->|否| Drop
+
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    classDef hot fill:#fef3c7,stroke:#d97706
+    class Forward ok
+    class Drop bad
+    class Strip,Found hot

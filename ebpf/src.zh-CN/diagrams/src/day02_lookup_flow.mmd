@@ -1,0 +1,20 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif"}}}%%
+flowchart TD
+    Start(["bpf_map_lookup_elem(\n&counts, &pid)"])
+    Decide{"返回值\n== NULL?"}
+    Update["bpf_map_update_elem(\n&counts, &pid,\n&one, BPF_ANY)\n（插入并设置初始值）"]
+    Atomic["__sync_fetch_and_add(\ncnt, 1)\n（就地原子递增）"]
+    Out(["return 0"])
+
+    Start --> Decide
+    Decide -->|"NULL\n（第一次看到此 PID）"| Update
+    Decide -->|"非 NULL\n（此前已经计数）"| Atomic
+    Update --> Out
+    Atomic --> Out
+
+    classDef hot fill:#fef3c7,stroke:#d97706,stroke-width:2px
+    classDef ok fill:#dcfce7,stroke:#16a34a,stroke-width:2px
+    classDef bad fill:#fee2e2,stroke:#dc2626,stroke-width:2px
+    class Decide hot
+    class Atomic,Update ok
+    class Start,Out ok

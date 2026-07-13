@@ -1,0 +1,114 @@
+direction: down
+
+title: |md
+  ### 邻居输出：未解析队列、过期验证与两条快速路径
+| {near: top-center; shape: text}
+
+tx: "TX 已有下一跳邻居" {
+  style.fill: "#dbeafe"
+  t_body: |md
+    ip_finish_output2 到达：
+
+    `neigh_output(neigh, skb, skip_cache)`
+
+    它先检查已连接状态 + hh 缓存。
+    否则调用当前的
+    `neigh->output` 函数指针。
+  |
+}
+
+unresolved: "NONE / INCOMPLETE：解析" {
+  style.fill: "#fef3c7"
+  u_body: |md
+    `neigh_resolve_output()` 调用
+    `__neigh_event_send()`。
+
+    NONE → INCOMPLETE
+    启动定时器 + 发送 ARP 请求
+
+    返回 1：当前不发送此 skb。
+  |
+}
+
+queue: "有界 arp_queue" {
+  style.fill: "#ede9fe"
+  q_body: |md
+    只有 INCOMPLETE 流量停放在这里。
+
+    限制以字节计（`QUEUE_LEN_BYTES`）。
+    如果新 skb 会导致溢出，
+    则依次出队/丢弃最旧条目，直到可以容纳：
+    `SKB_DROP_REASON_NEIGH_QUEUEFULL`。
+  |
+}
+
+reply: "ARP 回复：邻居变为 REACHABLE" {
+  style.fill: "#dcfce7"
+  r_body: |md
+    neigh_update 保存 MAC。
+    neigh_connect 选择已连接输出。
+
+    清空队列时会为每个 skb 重新查找
+    顶层邻居，然后将其重新注入。
+  |
+}
+
+hh: "快速路径 A：neigh_hh_output" {
+  style.fill: "#dcfce7"
+  h_body: |md
+    如果状态为 NUD_CONNECTED 且存在 `hh_len`，
+    内联辅助函数会绕过 `neigh->output`：
+
+    在 seqlock 下复制缓存的 L2 标头
+    压入标头 → dev_queue_xmit
+  |
+}
+
+connected: "快速路径 B：connected_output" {
+  style.fill: "#fff7ed"
+  c_body: |md
+    没有可用的标头缓存时，
+    转而使用函数指针。
+
+    通用 `neigh_connected_output()` 针对此 skb 调用
+    dev_hard_header，然后发送。
+
+    这是 hh 缓存路径之外的另一条路径。
+  |
+}
+
+stale: "STALE：立即发送，稍后验证" {
+  style.fill: "#fef3c7"
+  s_body: |md
+    neigh_suspect 选择解析输出。
+
+    下一个数据包将 STALE → DELAY，但
+    `__neigh_event_send()` 返回成功；
+    立即使用已知 MAC。
+
+    定时器到期前没有上层确认？
+    DELAY → PROBE，并开始发送请求。
+    STALE 流量不会排队。
+  |
+}
+
+fail: "解析失败" {
+  style.fill: "#fee2e2"
+  f_body: |md
+    在 INCOMPLETE 状态下耗尽探测预算：
+    状态 → FAILED
+
+    排队的 skb 经过 error_report；
+    IPv4 调用 dst_link_failure，并在释放它们时
+    计入 NEIGH_FAILED。
+  |
+}
+
+tx -> unresolved: "地址不可用"
+unresolved -> queue: "INCOMPLETE：停放 skb"
+queue -> reply: "探测预算耗尽前收到回复"
+queue -> fail: "没有回复"
+reply -> hh: "已连接 + 已缓存标头"
+reply -> connected: "已连接，没有可用 hh 缓存"
+tx -> stale: "MAC 已知，可达性已过期"
+stale -> connected: "发送当前数据包"

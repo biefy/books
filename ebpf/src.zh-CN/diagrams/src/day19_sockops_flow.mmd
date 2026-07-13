@@ -1,0 +1,22 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 520
+  themeVariables:
+    fontFamily: "Noto Sans CJK SC, PingFang SC, sans-serif"
+---
+flowchart TD
+    Proc["cgroup A 中的进程<br/><b>执行：</b>创建/连接 TCP 套接字<br/><b>下一步的原因：</b>cgroup 成员关系决定选择哪些已挂载的 sock_ops 程序<br/><b>状态：</b>套接字已与 cgroup 关联"]
+    Callback["sock_ops 回调函数<br/><b>执行：</b>在 TCP_CONNECT_CB 或 ACTIVE_ESTABLISHED_CB 等事件上运行<br/><b>下一步的原因：</b>回调时机决定哪些套接字选项仍然有效<br/><b>状态：</b>bpf_sock_ops 暴露 skops 字段和 op 代码"]
+    Policy["BPF 策略查找<br/><b>执行：</b>读取 cgroup/套接字元组或映射，以选择调优参数<br/><b>下一步的原因：</b>只应更改匹配的套接字<br/><b>状态：</b>期望的 TCP 选项或不执行操作"]
+    SetOpt["bpf_setsockopt<br/><b>执行：</b>在数据路径使用前更改允许修改的 TCP/套接字选项<br/><b>下一步的原因：</b>TCP 发送路径会观察到更新后的设置<br/><b>状态：</b>nodelay/拥塞控制/缓冲区选项已更改"]
+    Send["TCP 发送数据<br/><b>执行：</b>后续数据包使用已调优的套接字状态<br/><b>状态：</b>策略按 cgroup/套接字应用"]
+
+    Proc --> Callback --> Policy --> SetOpt --> Send
+
+    classDef in fill:#dbeafe,stroke:#2563eb
+    classDef hot fill:#fef3c7,stroke:#d97706
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    class Proc in
+    class Callback,Policy,SetOpt hot
+    class Send ok

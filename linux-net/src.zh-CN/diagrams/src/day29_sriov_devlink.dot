@@ -1,0 +1,67 @@
+digraph sriov_devlink {
+    rankdir=TB;
+    labelloc=t;
+    label="SR-IOV：一块物理 NIC 划分为 PF + VF，并通过 devlink 配置";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC", fontsize=10];
+
+    // The physical NIC: PF + embedded switch
+    subgraph cluster_nic {
+        label="一块物理 NIC";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#7c3aed";
+        pf [shape=box, style="filled", fillcolor="#e9d5ff",
+            label="PF（Physical Function）\n完整 NIC"];
+        esw [shape=box, style="filled", fillcolor="#fef3c7",
+             label="嵌入式交换机（switchdev 模式）\n引导 VF <-> 线路的流量，\n可通过 tc/bridge 编程"];
+        pf -> esw [style=invis];
+    }
+
+    // The VFs
+    subgraph cluster_vfs {
+        label="SR-IOV 虚拟功能";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", fillcolor="#dbeafe"];
+        vf0 [label="VF0"];
+        vf1 [label="VF1"];
+        vfn [label="VFn"];
+    }
+
+    // VMs / containers consuming the VFs
+    subgraph cluster_guests {
+        label="客户机（接近裸机的 NIC 访问）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled,rounded", fillcolor="#dcfce7"];
+        g0 [label="VM / 容器 0"];
+        g1 [label="VM / 容器 1"];
+        gn [label="VM / 容器 n"];
+    }
+
+    esw -> vf0; esw -> vf1; esw -> vfn;
+    vf0 -> g0 [label="已分配"]; vf1 -> g1; vfn -> gn;
+
+    // Host-side port representors
+    subgraph cluster_rep {
+        label="主机侧端口 representor（每个 VF 对应一个 netdev）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+        node [shape=box, style="filled", fillcolor="#dcfce7"];
+        r0 [label="rep VF0"];
+        r1 [label="rep VF1"];
+        rn [label="rep VFn"];
+    }
+
+    vf0 -> r0 [style=dashed, color="#16a34a", constraint=false, label="代表"];
+    vf1 -> r1 [style=dashed, color="#16a34a", constraint=false];
+    vfn -> rn [style=dashed, color="#16a34a", constraint=false];
+
+    // devlink as the channel
+    devlink [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+             label="devlink + tc\n枚举并配置端口，\n应用策略 + 计数器"];
+    devlink -> r0 [color="#7c3aed", style=bold];
+    devlink -> r1 [color="#7c3aed", style=bold];
+    devlink -> rn [color="#7c3aed", style=bold];
+    devlink -> esw [color="#7c3aed", style=bold, label="编程交换机"];
+
+    wire [shape=box, style="filled", fillcolor="#fee2e2", label="线路"];
+    esw -> wire [style=bold, color="#dc2626"];
+}

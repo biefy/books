@@ -1,0 +1,42 @@
+digraph send_gate {
+    rankdir=LR;
+    labelloc=t;
+    label="tcp_write_xmit：两个相互独立、单位各异的门控";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // queued skbs waiting behind the gate
+    subgraph cluster_q {
+        label="sk_write_queue（已排队，等待中）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#94a3b8";
+        node [shape=box, style="filled", fillcolor="#fef3c7"];
+        q0 [label="skb"]; q1 [label="skb"]; q2 [label="skb"];
+        q0 -> q1 -> q2 [style=invis];
+    }
+
+    gate [shape=box, style="filled", fillcolor="#e9d5ff",
+          label="tcp_write_xmit\n（对每个 skb 检查\n两个门控）"];
+
+    // Gate 1: congestion, in PACKETS
+    cwnd [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="门控 1——拥塞（数据包）\ntcp_cwnd_test\n在途数据包 < snd_cwnd\nsnd_cwnd 以 MSS 大小报文段计数\n（初始 = 10 个数据包）"];
+
+    // Gate 2: flow control, in BYTES
+    swnd [shape=note, style="filled", fillcolor="#dbeafe", fontsize=9,
+          label="门控 2——流量控制（字节）\ntcp_snd_wnd_test\nend_seq 不得超过\nsnd_una + snd_wnd"];
+
+    对端 [shape=box, style="filled", fillcolor="#dbeafe", label="对端"];
+
+    q0 -> gate [color="#94a3b8"];
+    gate -> cwnd [style=bold, color="#16a34a"];
+    gate -> swnd [style=bold, color="#2563eb"];
+    cwnd -> 对端 [label="仅当两者都允许时\n才发送", color="#7c3aed"];
+    swnd -> 对端 [style=invis];
+
+    对端 -> gate [style=dashed, color="#16a34a", constraint=false,
+                  label="ACK 返回 -> 在途量下降 -> 门控开放"];
+
+    note [shape=box, style="filled,rounded", fillcolor="#fee2e2", fontsize=9,
+          label="Linux 的 snd_cwnd 单位是数据包，snd_wnd 单位是字节。\n内核从不对两者取 min()：它们是两个独立测试。"];
+    note -> gate [style=invis];
+}

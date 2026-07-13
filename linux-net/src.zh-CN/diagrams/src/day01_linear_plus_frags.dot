@@ -1,0 +1,45 @@
+digraph linear_plus_frags {
+    rankdir=LR;
+    labelloc=t;
+    label="为何载荷放入页片段，而不是一个大缓冲区";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // The skb split design (the GOOD way)
+    subgraph cluster_good {
+        label="一个 64KB GRO 超级数据包——拆分式设计";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+
+        head [shape=box, style="filled", fillcolor="#dbeafe",
+              label="线性头部\n（小块 kmalloc）\nETH | IP | TCP\n仅含头部"];
+        shinfo [shape=box, style="filled", fillcolor="#dcfce7",
+                label="skb_shared_info\nnr_frags = N\nfrags[]"];
+        head -> shinfo [label="位于末尾"];
+
+        // scattered pages
+        node [shape=box, style="filled", fillcolor="#fef3c7"];
+        fp0 [label="页 A\n4KB 载荷"];
+        fp1 [label="页 B\n4KB 载荷"];
+        fp2 [label="页 C\n4KB 载荷"];
+        fpd [shape=plaintext, style="", fillcolor="white", label="……最多\nMAX_SKB_FRAGS"];
+
+        shinfo -> fp0 [label="frags[0]"];
+        shinfo -> fp1 [label="frags[1]"];
+        shinfo -> fp2 [label="frags[2]"];
+        shinfo -> fpd [style=dashed, arrowhead=none];
+
+        note_good [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+                   label="每一页可从任意空闲位置取得。\l无需物理连续。\l可以是 DMA 页（RX），也可以是\lsendfile 文件缓存页（TX）：\l只引用，绝不复制。\l"];
+        fp2 -> note_good [style=invis];
+    }
+
+    // The BAD way
+    subgraph cluster_bad {
+        label="一个 64KB 连续缓冲区";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#dc2626";
+        bad [shape=box, style="filled", fillcolor="#fee2e2",
+             label="kmalloc(64KB)\n需要 16 个物理\n连续页\n\n✗ 内存碎片化时\n不可靠\n✗ > KMALLOC_MAX_SIZE"];
+    }
+
+    head -> bad [style=invis];
+}

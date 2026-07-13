@@ -1,0 +1,54 @@
+digraph rx_handler_path {
+    rankdir=TB;
+    labelloc=t;
+    label="rx_handler 在 __netif_receive_skb_core 内、L3 解复用之上触发";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    frame [shape=box, style="filled", fillcolor="#fef3c7",
+           label="eth0 上的帧\n（网桥端口）"];
+
+    vlan [shape=box, style="filled", fillcolor="#dbeafe",
+          label="vlan_do_receive()"];
+
+    check [shape=diamond, style="filled", fillcolor="#e9d5ff",
+           label="rx_handler =\nrcu_dereference(\nskb->dev->rx_handler)\n已设置？"];
+
+    handler [shape=box, style="filled", fillcolor="#dcfce7",
+             label="br_handle_frame(&skb)\n（网桥的 rx_handler）"];
+
+    consumed [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+              label="RX_HANDLER_CONSUMED\n网桥已转发/泛洪\n停止——主机永远看不到它"];
+    pass [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+          label="RX_HANDLER_PASS\n发往网桥自身 IP 的帧\n继续进入 L3 解复用"];
+    another [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+             label="RX_HANDLER_ANOTHER\nskb->dev 已改变 (macvlan)\n重新执行接收循环"];
+    exact [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+           label="RX_HANDLER_EXACT\n仅精确 ptype 交付"];
+
+    demux [shape=box, style="filled", fillcolor="#dbeafe",
+           label="ptype_base[] 解复用\n（以 skb->protocol 为键）"];
+    iprcv [shape=box, style="filled,rounded", fillcolor="#bfdbfe",
+           label="ip_rcv()  — L3 / 主机 IP 协议栈"];
+
+    frame -> vlan;
+    vlan -> check;
+    check -> handler [label="是", color="#7c3aed", style=bold];
+    check -> demux [label="没有处理程序", color="#94a3b8", style=dashed];
+
+    handler -> consumed;
+    handler -> pass;
+    handler -> another;
+    handler -> exact;
+
+    pass -> demux [color="#16a34a", style=bold, label="继续执行"];
+    exact -> demux [color="#94a3b8", style=dashed];
+    another -> frame [color="#d97706", style=dashed, constraint=false,
+                      label="用新的 skb->dev 重新循环"];
+    demux -> iprcv;
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="网桥位于 L3 解复用之上：\l它优先处理端口上的每个帧，\l因此加入网桥的 eth0 不再向自己的 IP 协议栈交付，\l除非 br_handle_frame 返回 PASS。\l"];
+    note -> handler [style=invis];
+}

@@ -1,0 +1,25 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, Microsoft YaHei, sans-serif"}}}%%
+flowchart TD
+    Code["应用程序 C 源码：<br/>DTRACE_PROBE2 宏<br/>声明 'malloc_entry' 探针"]
+    Compiled["编译后的二进制文件：<br/>探针位置处的 nop 指令<br/>+ ELF .note.stapsdt 段<br/>描述每个探针"]
+
+    Code --> Compiled
+
+    Find["libbpf 挂载时读取 .note.stapsdt：<br/>查找 'malloc_entry' 的提供方+探针<br/>定位 nop 偏移"]
+    InstallU["在 nop 偏移处安装 uprobe<br/>（机制与常规 uprobe 相同）"]
+
+    Compiled --> Find
+    Find --> InstallU
+
+    Trap["挂载时 nop 变为 int3；<br/>每个探针位置都会触发"]
+    BPF["BPF 程序运行，<br/>参数值来自寄存器"]
+
+    InstallU --> Trap
+    Trap --> BPF
+
+    classDef app fill:#dbeafe,stroke:#2563eb
+    classDef att fill:#fef3c7,stroke:#d97706
+    classDef rt fill:#dcfce7,stroke:#16a34a
+    class Code,Compiled app
+    class Find,InstallU att
+    class Trap,BPF rt

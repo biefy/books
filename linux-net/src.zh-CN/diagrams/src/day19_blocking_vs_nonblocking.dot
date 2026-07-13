@@ -1,0 +1,48 @@
+digraph blocking_vs_nonblocking {
+    rankdir=TB;
+    labelloc=t;
+    label="空套接字上的阻塞与非阻塞 recv()";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // 左侧：阻塞
+    subgraph cluster_block {
+        label="阻塞（默认）";
+        fontname="Noto Sans CJK SC"; fontsize=12; style="rounded"; color="#dc2626";
+        bcall [shape=box, style="filled", fillcolor="#dbeafe",
+               label="recv(fd, ...)\n套接字为空"];
+        bsleep [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+                label="线程停驻在\n套接字等待队列\n（离开运行队列）"];
+        bwake [shape=box, style="filled", fillcolor="#fef3c7",
+               label="数据到达 → 唤醒 →\nrecv() 返回字节"];
+        bnote [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+               label="1 个线程 = 1 个客户端\l当这个系统调用休眠时，\l其他客户端得不到服务\l"];
+        bcall -> bsleep [label="无数据"];
+        bsleep -> bwake [style=dashed, label="很久以后"];
+        bsleep -> bnote [style=invis];
+    }
+
+    // 右侧：非阻塞
+    subgraph cluster_nb {
+        label="非阻塞（O_NONBLOCK）";
+        fontname="Noto Sans CJK SC"; fontsize=12; style="rounded"; color="#16a34a";
+        ncall [shape=box, style="filled", fillcolor="#dbeafe",
+               label="recv(fd, ...)\n套接字为空"];
+        nret [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+              label="立即返回 -1，errno=EAGAIN\n（绝不休眠）"];
+        nloop [shape=box, style="filled", fillcolor="#e9d5ff",
+               label="epoll 事件循环\n服务下一个就绪 FD"];
+        nnote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+               label="EAGAIN 不是错误\l= 本会休眠 / 已排空\l一个线程，多个客户端\l"];
+        ncall -> nret [label="无数据"];
+        nret -> nloop [color="#16a34a", style=bold];
+        nret -> nnote [style=invis];
+    }
+
+    // 底部的 ET 排空循环
+    drain [shape=box, style="filled,rounded", fillcolor="#fef3c7", fontsize=10,
+           label="边沿触发的排空惯用法\nfor (;;) { n = recv(fd, buf, len, 0);\n  if (n > 0)  { consume(buf, n); continue; }\n  if (n == 0) { close_peer(fd); break; }\n  if (errno == EAGAIN) break;   // drained\n  handle_error(fd); break; }"];
+
+    nloop -> drain [color="#16a34a", style=bold, label="自行读取，\n一直排空到 EAGAIN"];
+    bnote -> drain [style=invis];
+}

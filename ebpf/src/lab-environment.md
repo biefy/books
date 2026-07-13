@@ -90,8 +90,8 @@ make -C ebpf/labs check
 ```
 
 Use an existing exact checkout with `LINUX_SRC=/path/to/linux`. The helper
-rejects other commits/releases. Build one chapter with `make -C ebpf/labs
-dayNN`; use `day28-30` for the combined capstone. All generated artifacts stay
+rejects other commits/releases. Build one chapter with `make -C ebpf/labs dayNN`;
+use `day28-30` for the combined capstone. All generated artifacts stay
 under `ebpf/labs/.output/` and `make clean` removes them. Kernel-backed wrappers
 build only the relevant v7.1 aggregate, convert its DWARF to BTF, and generate a
 narrow `vmlinux.h`; compilation never depends on the build host's kernel BTF.

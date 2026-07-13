@@ -1,0 +1,33 @@
+digraph nfct_word {
+    rankdir=TB;
+    labelloc=t;
+    label="skb->_nfct：一个机器字同时保存指针和每包状态";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // The packed 64-bit word
+    word [shape=record, style="filled", fillcolor="#dbeafe",
+          label="{ skb-\>_nfct（一个 unsigned long，64 位） | { <ptr> struct nf_conn *（高 61 位） | <info> 低 3 位 = ip_conntrack_info } }"];
+
+    // The two masks
+    ptrmask [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+             label="skb_nfct():\nword & NFCT_PTRMASK\n（~7UL -> 清除低 3 位）"];
+    infomask [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+              label="ctinfo：\nword & NFCT_INFOMASK\n（7UL -> 保留低 3 位）"];
+
+    word:ptr -> ptrmask [color="#7c3aed", style=bold, label="还原指针"];
+    word:info -> infomask [color="#d97706", style=bold, label="还原状态"];
+
+    // Results
+    conn [shape=box, style="filled", fillcolor="#dbeafe",
+          label="struct nf_conn\n（对应哪个连接）"];
+    ptrmask -> conn [color="#7c3aed"];
+
+    states [shape=record, style="filled", fillcolor="#fef3c7",
+            label="{ 该数据包的状态 | 0 ESTABLISHED | 1 RELATED | 2 NEW | 3 = IP_CT_IS_REPLY | 3 ESTABLISHED_REPLY | 4 RELATED_REPLY }"];
+    infomask -> states [color="#d97706"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="指针经过对齐，因此低 3 位始终为 0，可以复用。\l所以状态枚举必须容纳在 3 位（0..7）内，\l而 IP_CT_IS_REPLY = 3 也恰好可作为方向分界值。\l"];
+    states -> note [style=invis];
+}
