@@ -35,7 +35,10 @@
       a.target = "_blank";
       a.rel = "noopener";
       a.className = "ksrc-link-wrap";
-      a.title = "Open in Linux " + KERNEL_TAG + " on GitHub";
+      var isChinese = document.documentElement.lang.toLowerCase().indexOf("zh") === 0;
+      a.title = isChinese
+        ? "在 GitHub 上打开 Linux " + KERNEL_TAG + " 源码"
+        : "Open in Linux " + KERNEL_TAG + " on GitHub";
 
       // Insert: replace code with anchor wrapping code.
       code.parentNode.insertBefore(a, code);

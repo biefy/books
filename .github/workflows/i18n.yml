@@ -1,21 +1,14 @@
-name: Deploy books to GitHub Pages
+name: Validate bilingual books
 
 on:
-  push:
-    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
-  build:
+  bilingual-site:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,32 +25,21 @@ jobs:
             | tar -xz -C $HOME/.local/bin
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Install pinned frontend tools
+      - name: Install pinned Pagefind
         run: npm ci --ignore-scripts
 
-      - name: Validate translations
+      - name: Check script syntax
+        run: |
+          bash -n scripts/build-site.sh render-diagrams.sh
+          python3 -m py_compile scripts/check-i18n.py scripts/check-site.py
+
+      - name: Check translation parity and source locks
         run: python3 scripts/check-i18n.py check
 
-      - name: Build bilingual site and Pagefind index
+      - name: Build English and Chinese books and index with Pagefind
         run: ./scripts/build-site.sh
 
-      - name: Smoke-test links, assets, and multilingual search
+      - name: Smoke-test links, assets, locales, and multilingual search
         run: |
           python3 scripts/check-site.py _site
           node scripts/check-search.mjs _site
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: _site
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
