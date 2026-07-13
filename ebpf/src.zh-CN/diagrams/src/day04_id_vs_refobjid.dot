@@ -1,0 +1,28 @@
+digraph id_vs_refobjid {
+    rankdir=TB;
+    labelloc=t;
+    label="寄存器上的两个 id 字段：NULL 性关联与已获取引用";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.4; ranksep=0.55;
+
+    marker [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=11,
+            label="mark_ptr_or_null_regs(reg, is_null)\n遍历共享同一 id 的每个寄存器；在两个分支上翻转类型\n并且，如果 NULL 分支设置了 ref_obj_id，则释放它"];
+
+    left [shape=record, style="filled", fillcolor="#dbeafe", fontsize=10,
+          label="{ map_value_or_null | id = 2（已设置） | ref_obj_id = 0 | 来自 bpf_map_lookup_elem }"];
+
+    right [shape=record, style="filled", fillcolor="#fef3c7", fontsize=10,
+           label="{ mem_or_null  /  socket_or_null | id = 5（已设置） | ref_obj_id = 5（已设置） | ringbuf_reserve / socket lookup }"];
+
+    leftnote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+              label="检查即可消除该义务。\l遇到 NULL 时直接返回无需额外操作。\l只写 if (!v) return 0; 就足够。\l"];
+
+    rightnote [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+               label="必须提交 / 释放该引用，\l否则验证器会拒绝：\l  Unreleased reference id=5\l"];
+
+    marker -> left  [label="映射实验", color="#2563eb", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+    marker -> right [label="携带引用", color="#d97706", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+    left -> leftnote [style=invis];
+    right -> rightnote [style=invis];
+}

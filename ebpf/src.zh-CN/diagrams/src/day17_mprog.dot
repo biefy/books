@@ -1,0 +1,42 @@
+digraph mprog {
+    rankdir=TB;
+    bgcolor="white";
+    labelloc="t";
+    fontname="Noto Sans CJK SC";
+    fontsize=18;
+    label="mprog：在同一个 tcx 钩子上有序插入";
+    node [fontname="Noto Sans Mono CJK SC", fontsize=11];
+    edge [fontname="Noto Sans CJK SC", fontsize=10];
+
+    /* ---- veth1 tcx-ingress 上的现有链 ---- */
+    subgraph cluster_chain {
+        label="veth1 上的现有链（tcx/ingress），从左向右运行";
+        fontname="Noto Sans CJK SC";
+        fontsize=12;
+        style="rounded";
+        color="#9ca3af";
+        rank=same;
+
+        counter [label="counter\nlink_id 3 / prog_id 5", shape=box, style="filled,rounded", fillcolor="#dbeafe"];
+        firewall [label="firewall\nlink_id 4 / prog_id 6", shape=box, style="filled,rounded", fillcolor="#dbeafe"];
+        counter -> firewall [label="链顺序"];
+    }
+
+    /* ---- 三种定位操作 ---- */
+    before [label="BPF_F_BEFORE  (relative_id = 5)\n在 counter 之前紧邻插入 NEW\n结果：NEW -> counter -> firewall", shape=box, style="filled,rounded", fillcolor="#dcfce7"];
+    after  [label="BPF_F_AFTER  (relative_id = 5)\n在 counter 之后紧邻插入 NEW\n结果：counter -> NEW -> firewall", shape=box, style="filled,rounded", fillcolor="#dcfce7"];
+    replace [label="REPLACE = 原位更新链接\nbpf_link__update_program(l_counter, NEW)\n结果：NEW -> firewall（原子交换，钩子不会为空）", shape=box, style="filled,rounded", fillcolor="#e9d5ff"];
+
+    counter -> before  [style=dashed, color="#16a34a", label="指定一个相邻程序"];
+    counter -> after   [style=dashed, color="#16a34a", label="指定一个相邻程序"];
+    counter -> replace [style=dashed, color="#7c3aed", label="移交链接"];
+    before -> after -> replace [style=invis, weight=100];
+
+    /* ---- 命名说明：相邻程序与目标 ---- */
+    naming [label="两种不同的寻址方式：\l  BEFORE / AFTER  -> 指定一个相邻程序\l      relative_id (+BPF_F_ID) 或 relative_fd\l  REPLACE         -> 指定目标程序\l      LINK_UPDATE：链接自身的程序\l      prog-attach：replace_bpf_fd\l", shape=note, style="filled", fillcolor="#fef3c7", fontsize=10, fontname="Noto Sans CJK SC"];
+    replace -> naming [style=invis];
+
+    /* ---- 判决图例（核心且至关重要的事实） ---- */
+    verdict [label="每个程序的返回值：\l  TCX_NEXT (-1)               继续沿链运行\l  TCX_PASS / TC_ACT_OK (0)    接受，停止该链\l  TCX_DROP / TC_ACT_SHOT (2)  丢弃，停止该链\l  TCX_REDIRECT (7)            重定向，停止该链\l\l  只有 TCX_NEXT 才会继续。TC_ACT_OK 会停止。\l", shape=note, style="filled", fillcolor="#fee2e2", fontsize=11, fontname="Noto Sans CJK SC"];
+    naming -> verdict [style=invis];
+}

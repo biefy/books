@@ -1,0 +1,29 @@
+digraph prio_dsq {
+    rankdir=LR;
+    labelloc=t;
+    label="每 cgroup 的 DSQ：enqueue 按优先级路由；dispatch 优先排空 PRIO_DSQ";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+
+    enq [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=10,
+         label="simple_enqueue(p)\l沿祖先向上查找 priority_cgroup_id\l匹配？PRIO_DSQ : SHARED_DSQ\l"];
+
+    prio [shape=record, style="filled", fillcolor="#fef3c7",
+          label="{ PRIO_DSQ (1) | 优先 cgroup 中的任务 | 最先调度 }"];
+    shared [shape=record, style="filled", fillcolor="#dbeafe",
+            label="{ SHARED_DSQ (0) | 其余所有任务，按 vtime 排序 | 仅在 PRIO 为空时调度 }"];
+
+    disp [shape=note, style="filled", fillcolor="#dcfce7", fontsize=10,
+          label="simple_dispatch(cpu)\lmove_to_local(PRIO_DSQ) -- 命中则返回\l否则 move_to_local(SHARED_DSQ)\l"];
+
+    cpu [shape=box, style="filled", fillcolor="#fee2e2", label="本地 DSQ -> CPU"];
+
+    enq -> prio [label="优先"];
+    enq -> shared [label="默认"];
+    prio -> disp [color="#d97706", style=bold, label="第 1"];
+    shared -> disp [color="#2563eb", label="第 2"];
+    disp -> cpu;
+
+    { rank=same; prio; shared; }
+}

@@ -1,0 +1,41 @@
+digraph rcu_buckets {
+    rankdir=LR;
+    labelloc=t;
+    label="无锁 RCU 读取者与持有桶锁的写入者";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.4; ranksep=0.9;
+
+    // 桶数组
+    buckets [shape=record, style="filled", fillcolor="#dbeafe",
+             label="{ bucket[0] | bucket[1] | <b2> bucket[2] | bucket[3] | ... }"];
+
+    // bucket[2] 展开的链：一个 hlist_nulls
+    subgraph cluster_chain {
+        label="bucket[2].head（RCU hlist_nulls 链）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        e1 [shape=box, style="filled", fillcolor="#fef3c7",
+            label="元素 A\n{key, value}"];
+        e2 [shape=box, style="filled", fillcolor="#fef3c7",
+            label="元素 B\n{key, value}"];
+        nulls [shape=box, style="filled,rounded", fillcolor="#fde68a",
+               label="NULLS\n（结束标记）"];
+        e1 -> e2 -> nulls;
+    }
+
+    buckets:b2 -> e1 [label="头指针"];
+
+    // 读取者
+    reader [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+            label="读取者\n（RCU 读侧，\n不加锁）"];
+    reader -> e1 [label="遍历链", color="#16a34a", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+
+    // 写入者
+    writer [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+            label="写入者\n（持有桶自旋锁）"];
+    writer -> e2 [label="插入 / 删除", color="#dc2626", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+
+    note [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+          label="返回的指针始终有效，因为元素通过 RCU 释放：\l在进行中的读取者结束前，内存不会被回收。\l读取者只会与值的内容发生竞争（因此需要原子操作），\l绝不会发生释放后使用。\l"];
+    nulls -> note [style=invis];
+}

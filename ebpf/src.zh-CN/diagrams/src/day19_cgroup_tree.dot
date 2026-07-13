@@ -1,0 +1,48 @@
+digraph cgroup_tree {
+    rankdir=TB;
+    labelloc=t;
+    label="套接字携带指向其 cgroup 的指针；出站程序挂在该目录上";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.5; ranksep=0.7;
+
+    // cgroup2 树
+    subgraph cluster_tree {
+        label="cgroup2 统一层级（挂载类型 cgroup2）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+
+        root [shape=folder, style="filled", fillcolor="#dbeafe",
+              label="/sys/fs/cgroup\n(根 cgroup)"];
+        block [shape=folder, style="filled", fillcolor="#bfdbfe",
+               label="test_block/\n(子 cgroup)"];
+        procs [shape=box, style="filled", fillcolor="#fef3c7",
+               label="cgroup.procs\nPID 4321  (shell)"];
+
+        root -> block [label="mkdir"];
+        block -> procs [label="echo $$ >"];
+    }
+
+    // 套接字
+    sock [shape=box, style="filled,rounded", fillcolor="#fde68a",
+          label="struct sock\n(shell 的套接字)\n--------------\nsk_cgrp_data"];
+
+    // BPF 程序
+    prog [shape=box, style="filled", fillcolor="#dcfce7",
+          label="cgroup_skb/egress\nblock_udp()"];
+
+    // 套接字向上指向其创建时所在的 cgroup
+    sock -> block [label="sock_cgroup_ptr()", color="#dc2626", style=bold,
+                   fontname="Noto Sans Mono CJK SC", fontsize=9];
+
+    // 程序挂载到目录 fd
+    prog -> block [label="attach_cgroup(cg_fd)", color="#7c3aed", style=bold,
+                   fontname="Noto Sans Mono CJK SC", fontsize=9];
+
+    // 程序在此套接字的数据包上触发
+    prog -> sock [label="在其数据包上触发", style=dashed,
+                  fontname="Noto Sans CJK SC", fontsize=9];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9, fontname="Noto Sans CJK SC",
+          label="无需扫描 cgroup.procs，也无需逐包查找 PID。\l套接字创建时关联关系便一次确定，之后始终\l由 sk_cgrp_data 携带。\l"];
+    prog -> note [style=invis];
+}

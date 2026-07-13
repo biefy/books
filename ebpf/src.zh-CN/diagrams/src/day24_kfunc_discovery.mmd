@@ -1,0 +1,23 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, Microsoft YaHei, sans-serif"}}}%%
+flowchart TD
+    Start["选择要使用的 kfunc"]
+    Find1["bpftool btf dump<br/>file /sys/kernel/btf/vmlinux<br/>| grep FUNC"]
+    Find2["在源码中查找：<br/>__ksym 属性、<br/>register_btf_kfunc_id_set"]
+    Find3["文档：<br/>Documentation/bpf/kfuncs.rst<br/>列出了各类别"]
+
+    Decide{找到？}
+    Use["声明并使用：<br/>extern int the_fn(args) __ksym;"]
+    Run["编译、加载、运行"]
+    VerifyAccept{验证器接受？}
+    Match["参数/类型与 BTF 匹配——完成"]
+    Mismatch["调整签名<br/>以匹配 BTF"]
+
+    Start --> Find1 --> Find2 --> Find3 --> Decide
+    Decide -->|是| Use --> Run --> VerifyAccept
+    VerifyAccept -->|是| Match
+    VerifyAccept -->|否| Mismatch --> Run
+
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    classDef hot fill:#fef3c7,stroke:#d97706
+    class Match ok
+    class Decide,VerifyAccept,Mismatch hot

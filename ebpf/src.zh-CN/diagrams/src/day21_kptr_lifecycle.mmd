@@ -1,0 +1,20 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, Microsoft YaHei, sans-serif"}}}%%
+flowchart TD
+    Cur["bpf_get_current_task_btf()<br/>返回受信任的 *task_struct"]
+    Acq["bpf_task_acquire(cur)<br/>引用计数：1<br/>验证器：ref id 1"]
+    Slot["映射槽位 kptr_xchg<br/>原子交换"]
+    Map["{ key=k, value=&val{t→TASK} }"]
+
+    Later["……稍后，在另一次调用中……"]
+    Lookup["bpf_map_lookup_elem(&m, &k)"]
+    Take["bpf_kptr_xchg(&v->t, NULL)<br/>返回 task<br/>验证器：ref id 2"]
+    Use["使用 task 字段"]
+    Rel["bpf_task_release(t)<br/>引用计数：0<br/>验证器：ref id 2 已关闭"]
+
+    Cur --> Acq --> Slot --> Map
+    Map --> Later --> Lookup --> Take --> Use --> Rel
+
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    classDef hot fill:#fef3c7,stroke:#d97706
+    class Acq,Slot,Take,Rel hot
+    class Map,Use ok

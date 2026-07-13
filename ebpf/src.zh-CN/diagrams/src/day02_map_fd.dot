@@ -1,0 +1,38 @@
+digraph map_fd {
+    rankdir=LR;
+    labelloc=t;
+    label="通向同一个映射的两扇门——用户空间通过系统调用复制，BPF 程序获得实时指针";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.5; ranksep=1.1;
+
+    // 唯一的共享内核对象
+    mapobj [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+            label="映射对象\n（内核内存中的\n一个桶数组）"];
+
+    // 用户空间入口
+    subgraph cluster_user {
+        label="入口 1：用户空间（通过 fd）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#d97706";
+        usbox [shape=box, style="filled", fillcolor="#fef3c7",
+               label="用户空间转储程序\n持有 int fd = 5\n(bpf_map__fd)"];
+        attr [shape=box, style="filled", fillcolor="#fde68a",
+              label="union bpf_attr\nmap_fd = 5\nkey, value/next_key"];
+        usbox -> attr [label="填充"];
+    }
+
+    // BPF 入口
+    subgraph cluster_bpf {
+        label="入口 2：BPF 程序（通过地址）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+        bpfbox [shape=box, style="filled", fillcolor="#dcfce7",
+                label="BPF 程序\nbpf_map_lookup_elem(&counts, &pid)"];
+    }
+
+    attr -> mapobj [label="bpf() 系统调用\n（向内/向外复制）", color="#d97706", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+    bpfbox -> mapobj [label="辅助函数 -> 裸指针\n指向实时映射内存", color="#16a34a", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+
+    note [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+          label="名称相同，契约相反：\l用户空间将值复制出来；\lBPF 一侧获得实时指针，\l并就地解引用。\l"];
+    mapobj -> note [style=invis];
+}

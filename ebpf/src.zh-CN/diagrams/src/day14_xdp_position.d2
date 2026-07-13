@@ -1,0 +1,60 @@
+direction: down
+
+title: |md
+  ## XDP 在网络协议栈中的运行位置
+| {near: top-center; shape: text}
+
+driver: "NIC 驱动程序 RX 路径" {
+  style.fill: "#dbeafe"
+  d_body: |md
+    1. 硬件通过 DMA 将数据包
+       放入 RX 环
+    2. NAPI 轮询唤醒
+       驱动程序
+    3. 驱动程序取得
+       原始帧
+    4. **XDP 在此运行**
+       （分配 skb 之前！）
+    5. 决策：PASS / DROP
+       / TX / REDIRECT
+  |
+}
+
+xdp_layer: "XDP 程序（BPF）" {
+  style.fill: "#fef3c7"
+  x_body: |md
+    所见：原始以太网帧
+    返回：操作常量
+
+    成本：约 50 ns + 你的逻辑
+    吞吐量：每核 10-100 Mpps
+  |
+}
+
+skb_alloc: "若为 XDP_PASS：\n分配 sk_buff（约 500 ns）" {style.fill: "#fee2e2"}
+
+stack: "Linux 网络协议栈" {
+  style.fill: "#dcfce7"
+  s_body: |md
+    - tc 入站（下一个 BPF 钩子）
+    - netfilter
+      (iptables/nftables)
+    - IP 路由
+    - 套接字查找
+    - 应用程序
+  |
+}
+
+driver -> xdp_layer
+xdp_layer -> skb_alloc: "PASS"
+xdp_layer -> driver: "DROP, TX, REDIRECT" {style.stroke-dash: 4}
+skb_alloc -> stack
+
+note: |md
+  **XDP 为什么快：**
+
+  - 在分配 skb 之前运行
+  - 先于任何内核网络协议栈处理
+  - 驱动程序只需传入数据包指针
+    调用一个函数
+| {near: bottom-center; shape: text}

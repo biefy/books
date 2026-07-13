@@ -1,0 +1,50 @@
+digraph token_bucket {
+    rankdir=TB;
+    labelloc=t;
+    label="令牌桶：以固定速率补充至容量上限；每个数据包消耗一个令牌";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+    nodesep=0.5; ranksep=0.9;
+
+    // 滴入的补充源
+    refill [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+            label="补充：50 个令牌/秒\n（持续滴入）"];
+
+    // 令牌桶本身
+    bucket [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+            label="令牌桶\ncapacity = 100（上限）\ntokens 永远不会溢出容量上限"];
+
+    refill -> bucket [label="  滴入直至上限", fontsize=9,
+                      fontcolor="#16a34a", color="#16a34a"];
+
+    // 两个到达的数据包
+    pkt1 [shape=box, style="filled", fillcolor="#dbeafe",
+          label="数据包 A 到达\n有可用令牌"];
+    pkt2 [shape=box, style="filled", fillcolor="#dbeafe",
+          label="数据包 B 到达\n令牌桶为空"];
+
+    pass [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+          label="放行\n（消耗 1 个令牌）"];
+    drop [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+          label="丢弃\n（没有剩余令牌）"];
+
+    pkt1 -> bucket [label="  获取一个令牌", fontsize=9,
+                    fontcolor="#2563eb", color="#2563eb"];
+    bucket -> pass [label="  tokens >= 1", fontsize=9,
+                    fontcolor="#16a34a", color="#16a34a"];
+    pkt2 -> bucket [label="  获取一个令牌", fontsize=9,
+                    fontcolor="#2563eb", color="#2563eb", style=dashed];
+    bucket -> drop [label="  tokens == 0", fontsize=9,
+                    fontcolor="#dc2626", color="#dc2626"];
+
+    // 插图：percpu 哈希中的每源 IP 结构
+    inset [shape=record, style="filled", fillcolor="#e9d5ff", fontsize=9,
+           label="{ 每源 IP 状态（BPF_MAP_TYPE_PERCPU_HASH） | { key = src IP | struct bucket \{ | __u64 tokens; | __u64 last_refill_ns; | \} } }"];
+
+    bucket -> inset [style=invis];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="percpu 陷阱：每个 CPU 都有一个独立令牌桶，\l因此有效速率 ~= N_cpus x configured_rate。\l这是无锁正确性（无原子操作/自旋锁）的代价。\l"];
+    inset -> note [style=invis];
+}

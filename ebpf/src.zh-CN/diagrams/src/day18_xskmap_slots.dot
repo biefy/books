@@ -1,0 +1,46 @@
+digraph xskmap_slots {
+    rankdir=TB;
+    labelloc=t;
+    label="BPF_MAP_TYPE_XSKMAP：按 RX 队列索引的数组，每个槽都指向一个有效的 AF_XDP 套接字";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // 入站数据包
+    pkt [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+         label="入站帧\nrx_queue_index = 2"];
+
+    // 重定向辅助函数
+    redirect [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+              label="XDP 程序\nbpf_redirect_map(\n  &xsks_map,\n  ctx->rx_queue_index, 0)"];
+
+    // 作为记录数组的 XSKMAP
+    subgraph cluster_map {
+        label="xsks_map（XSKMAP：key=u32 队列索引，value=有效的 xdp_sock 引用）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        map [shape=record, style="filled", fillcolor="#dbeafe",
+             label="<s0>槽 0|<s1>槽 1|<s2>槽 2|<s3>槽 3|…|<sn>槽 N-1"];
+    }
+
+    // 套接字/线程
+    subgraph cluster_socks {
+        label="每个 RX 队列对应一个 AF_XDP 套接字 + 线程";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+        node [shape=box, style="filled", fillcolor="#dcfce7"];
+        sk0 [label="套接字 0\n线程 0\nRX 环形队列"];
+        sk1 [label="套接字 1\n线程 1\nRX 环形队列"];
+        sk2 [label="套接字 2\n线程 2\nRX 环形队列"];
+        sk3 [label="套接字 3\n线程 3\nRX 环形队列"];
+    }
+
+    pkt -> redirect [color="#d97706", style=bold];
+    redirect -> map:s2 [color="#7c3aed", style=bold, label="查找队列 2"];
+
+    map:s0 -> sk0 [color="#16a34a"];
+    map:s1 -> sk1 [color="#16a34a"];
+    map:s2 -> sk2 [color="#16a34a", style=bold, label="命中 -> 引导原始帧"];
+    map:s3 -> sk3 [color="#16a34a"];
+
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9, fontname="Noto Sans CJK SC",
+          label="插入 fd -> 使队列做好重定向准备。\l空槽 -> 未命中，继续执行 XDP_PASS。\l销毁套接字之前先删除条目\l（否则映射会持有悬空引用）。\l"];
+    sk3 -> note [style=invis];
+}

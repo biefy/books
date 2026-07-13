@@ -1,0 +1,13 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif"}}}%%
+flowchart TD
+    task["task<br/>struct task_struct *"]
+    rp["real_parent<br/>struct task_struct *"]
+    tgid["tgid<br/>pid_t"]
+
+    task -->|"+1872<br/>（或此内核使用的<br/>其他偏移）"| rp
+    rp -->|"+2384<br/>（另一个偏移）"| tgid
+
+    classDef field fill:#fef3c7,stroke:#d97706,stroke-width:2px
+    classDef ptr fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+    class task,rp ptr
+    class tgid field

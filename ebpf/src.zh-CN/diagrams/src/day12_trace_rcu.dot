@@ -1,0 +1,49 @@
+digraph trace_rcu {
+    rankdir=TB;
+    labelloc=t;
+    label="两条读侧路径：经典 RCU（不可休眠）与 tasks-trace RCU（可以休眠）";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.4; ranksep=0.7;
+
+    // 上方路径：经典 RCU，普通程序
+    subgraph cluster_classic {
+        label="普通 BPF 程序（经典 RCU 读侧——读取者不可休眠）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+
+        c_lock [shape=box, style="filled", fillcolor="#dcfce7",
+                label="rcu_read_lock()"];
+        c_prog [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+                label="运行程序\n（原子上下文：不可缺页、不可休眠）"];
+        c_unlock [shape=box, style="filled", fillcolor="#dcfce7",
+                  label="rcu_read_unlock()"];
+        c_lock -> c_prog -> c_unlock;
+    }
+
+    // 下方路径：tasks-trace RCU，可休眠程序
+    subgraph cluster_trace {
+        label="可休眠 BPF 程序（tasks-trace RCU 读侧——读取者可以休眠）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#d97706";
+
+        t_lock [shape=box, style="filled", fillcolor="#dcfce7",
+                label="rcu_read_lock_trace()\nmigrate_disable()"];
+        t_prog [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+                label="运行程序\nmight_fault()"];
+        t_sleep [shape=box, style="filled", fillcolor="#fee2e2",
+                 label="线程在此休眠\n（主缺页：从磁盘调入页面）\n仍固定在 CPU 上，锁仍持有"];
+        t_unlock [shape=box, style="filled", fillcolor="#dcfce7",
+                  label="rcu_read_unlock_trace()"];
+        t_lock -> t_prog -> t_sleep -> t_unlock;
+    }
+
+    // 写入者 / 分离侧
+    writer [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="分离 / 释放程序\n等待一个宽限期结束\n释放前调用\nsynchronize_rcu_tasks_trace()"];
+
+    c_unlock -> writer [label="宽限期", fontname="Noto Sans CJK SC", fontsize=9, color="#7c3aed", style=bold];
+    t_unlock -> writer [label="宽限期", fontname="Noto Sans CJK SC", fontsize=9, color="#7c3aed", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+          label="经典 RCU 读取者不可休眠——休眠的读取者会让\l宽限期永远无法结束。Tasks-trace RCU 读侧区段\l可以阻塞，因此暂停的可休眠程序不会在执行中途\l被释放。（这里是 RCU Tasks Trace，而非 SRCU。）\l"];
+    writer -> note [style=invis];
+}

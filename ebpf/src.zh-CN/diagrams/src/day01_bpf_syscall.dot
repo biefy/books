@@ -1,0 +1,52 @@
+digraph bpf_syscall {
+    rankdir=LR;
+    labelloc=t;
+    label="bpf()：一个系统调用，由命令枚举进行多路分派";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.5; ranksep=0.9;
+
+    funnel [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="bpf(cmd, attr, size)\n唯一入口点"];
+
+    // 分支 1：MAP_CREATE
+    mapcreate [shape=box, style="filled", fillcolor="#dbeafe",
+               label="BPF_MAP_CREATE\nmap_create()"];
+    mapfd [shape=box, style="filled,rounded", fillcolor="#bfdbfe",
+           label="映射 fd"];
+
+    // 分支 2：PROG_LOAD，内部包含验证器
+    progload [shape=box, style="filled", fillcolor="#dbeafe",
+              label="BPF_PROG_LOAD\nbpf_prog_load()"];
+    verifier [shape=box, style="filled", fillcolor="#fef3c7",
+              label="[ 验证器 ]"];
+    progfd [shape=box, style="filled,rounded", fillcolor="#fde68a",
+            label="程序 fd"];
+
+    // 分支 3：LINK_CREATE / 挂载
+    linkcreate [shape=box, style="filled", fillcolor="#dcfce7",
+                label="BPF_LINK_CREATE\n/ 挂载"];
+    linkfd [shape=box, style="filled,rounded", fillcolor="#bbf7d0",
+            label="链接 fd"];
+
+    funnel -> mapcreate [label="cmd 1"];
+    funnel -> progload [label="cmd 2"];
+    funnel -> linkcreate [label="cmd 3"];
+
+    mapcreate -> mapfd;
+    progload -> verifier -> progfd;
+    linkcreate -> linkfd;
+
+    // 破坏点标注
+    break2 [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+            label="破坏点 2：映射类型错误。\l在这里，即 BPF_MAP_CREATE 期间被拒绝——\l它是第一个命令。验证器根本不会运行。\l"];
+    mapcreate -> break2 [color="#dc2626", style=bold, fontname="Noto Sans CJK SC", fontsize=9, label="失败"];
+
+    break1 [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+            label="破坏点 1：缺少 NULL 检查。\l在验证器内部被拒绝，\l验证器位于 PROG_LOAD 路径中。\l"];
+    verifier -> break1 [color="#dc2626", style=bold, fontname="Noto Sans CJK SC", fontsize=9, label="失败"];
+
+    order [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+           label="libbpf 按以下顺序发出命令：\l先创建映射，再加载程序，\l然后挂载。映射、程序和链接\l均通过 fd 引用。\l"];
+    funnel -> order [style=invis];
+}

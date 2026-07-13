@@ -1,0 +1,28 @@
+flowchart TD
+    Idea["选定综合项目"]
+    Outline["勾勒架构：<br/>- BPF 程序<br/>- 映射 + 大小<br/>- 用户空间消费者<br/>- 验证器风险点"]
+
+    Build["构建最小版本"]
+    Verify{"验证器拒绝？"}
+    Read["阅读验证器日志<br/>定位类型/生命周期问题"]
+    Fix["调整代码"]
+
+    Test["在测试负载上运行"]
+    Measure["测量：<br/>吞吐量、<br/>开销、<br/>正确性"]
+    OK{"可接受？"}
+
+    Polish["打磨：<br/>丢弃计数器、<br/>README、<br/>构建说明"]
+    Done(["综合项目完成"])
+
+    Idea --> Outline --> Build --> Verify
+    Verify -->|是| Read --> Fix --> Build
+    Verify -->|否，接受| Test --> Measure --> OK
+    OK -->|否| Read
+    OK -->|是| Polish --> Done
+
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    classDef hot fill:#fef3c7,stroke:#d97706
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    class Done ok
+    class Verify,OK hot
+    class Read,Fix bad

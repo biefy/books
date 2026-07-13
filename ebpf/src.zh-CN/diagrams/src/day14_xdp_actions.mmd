@@ -1,0 +1,31 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif"}}}%%
+flowchart TD
+    Pkt["数据包到达<br/>NIC"]
+    XDP["你的 XDP 程序<br/>返回以下操作之一："]
+
+    Pass["XDP_PASS<br/>继续进入协议栈<br/>（分配 skb）"]
+    Drop["XDP_DROP<br/>释放数据包，结束<br/>（无 skb）"]
+    Tx["XDP_TX<br/>从同一接口<br/>发回"]
+    Redirect["XDP_REDIRECT<br/>发送到其他接口<br/>或 AF_XDP 套接字"]
+    Aborted["XDP_ABORTED<br/>错误路径<br/>等同于 DROP + tracepoint"]
+
+    Pkt --> XDP
+    XDP --> Pass
+    XDP --> Drop
+    XDP --> Tx
+    XDP --> Redirect
+    XDP --> Aborted
+
+    Pass --> NetStack[("Linux 网络协议栈")]
+    Drop --> Bin[("/dev/null")]
+    Tx --> Wire[("回到线路")]
+    Redirect --> Map["bpf_redirect_map<br/>(devmap, cpumap, xskmap)"]
+    Map --> OtherIface[("其他接口\n或 AF_XDP 套接字")]
+    Aborted --> Bin
+
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    classDef hot fill:#fef3c7,stroke:#d97706
+    class Pass,Tx,Redirect ok
+    class Drop,Aborted bad
+    class XDP,Map hot

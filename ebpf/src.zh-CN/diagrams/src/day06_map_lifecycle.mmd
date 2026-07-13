@@ -1,0 +1,38 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, Microsoft YaHei, sans-serif"}}}%%
+flowchart TD
+    subgraph Entry["fentry/vfs_read（调用 1）"]
+        e1["tid = 8888<br/>ts = 100"]
+        e1 --> Map1["映射：{ 8888 → 100 }"]
+    end
+
+    subgraph BodyA["函数体正在运行..."]
+        b1["...耗时若干 µs..."]
+    end
+
+    subgraph EntryB["fentry/vfs_read（来自另一线程的调用 2）"]
+        e2["tid = 9999<br/>ts = 105"]
+        Map1 --> Map2["映射：{ 8888 → 100,<br/>       9999 → 105 }"]
+    end
+
+    subgraph ExitA["fexit/vfs_read（调用 1 返回）"]
+        x1["tid = 8888<br/>now = 120"]
+        Map2 --> Map3["查找 8888 → 100<br/>删除 8888<br/>dur = 120 - 100 = 20"]
+        Map3 --> Map4["映射：{ 9999 → 105 }"]
+    end
+
+    subgraph ExitB["fexit/vfs_read（调用 2 返回）"]
+        x2["tid = 9999<br/>now = 125"]
+        Map4 --> Map5["查找 9999 → 105<br/>删除 9999<br/>dur = 125 - 105 = 20"]
+        Map5 --> Map6["映射：{ } 空"]
+    end
+
+    Entry --> BodyA --> EntryB --> ExitA --> ExitB
+
+    classDef entry fill:#dbeafe,stroke:#2563eb
+    classDef body fill:#fef3c7,stroke:#d97706
+    classDef exit fill:#dcfce7,stroke:#16a34a
+    classDef map fill:#f3f4f6,stroke:#6b7280
+    class e1,e2 entry
+    class b1 body
+    class x1,x2 exit
+    class Map1,Map2,Map3,Map4,Map5,Map6 map

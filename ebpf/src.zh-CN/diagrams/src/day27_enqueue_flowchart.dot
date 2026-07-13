@@ -1,0 +1,47 @@
+digraph enqueue_flowchart {
+    rankdir=TB;
+    labelloc=t;
+    label="central_enqueue：内核线程插队";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+    nodesep=0.4; ranksep=0.5;
+
+    arrive [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="任务 p 到达 central_enqueue"];
+
+    test [shape=diamond, style="filled", fillcolor="#fef3c7", fontsize=9,
+          label="每 CPU 内核线程？\nPF_KTHREAD &&\nnr_cpus_allowed == 1"];
+
+    kthread [shape=box, style="filled", fillcolor="#dcfce7",
+             label="插入其本地 DSQ 的队首\nSCX_DSQ_LOCAL, SCX_ENQ_PREEMPT\nnr_locals++   然后提前返回"];
+
+    push [shape=box, style="filled", fillcolor="#dbeafe",
+          label="bpf_map_push_elem(&central_q, &pid)"];
+
+    pushfail [shape=diamond, style="filled", fillcolor="#fef3c7", fontsize=9,
+              label="push 失败？\n（队列已满）"];
+
+    fallback [shape=box, style="filled", fillcolor="#fee2e2",
+              label="插入 FALLBACK_DSQ_ID\nnr_overflows++"];
+
+    runtest [shape=diamond, style="filled", fillcolor="#fef3c7", fontsize=9,
+             label="!scx_bpf_task_running(p)?"];
+
+    kick [shape=box, style="filled", fillcolor="#dbeafe",
+          label="kick central_cpu\nSCX_KICK_PREEMPT\n（立即运行 dispatch）"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="内核线程插队，让 ksoftirqd 能维持定时器运行——\l否则，贪婪的任务可能会饿死负责运行抢占定时器的线程。\l"];
+
+    arrive -> test;
+    test -> kthread [label="是", color="#16a34a", style=bold, fontsize=9];
+    test -> push [label="否", color="#2563eb", style=bold, fontsize=9];
+    push -> pushfail;
+    pushfail -> fallback [label="是", color="#dc2626", style=bold, fontsize=9];
+    pushfail -> runtest [label="否", color="#2563eb", style=bold, fontsize=9];
+    fallback -> runtest;
+    runtest -> kick [label="是", color="#dc2626", style=bold, fontsize=9];
+
+    kthread -> note [style=invis];
+}

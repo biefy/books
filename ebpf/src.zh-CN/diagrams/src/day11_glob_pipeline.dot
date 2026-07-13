@@ -1,0 +1,50 @@
+digraph glob_pipeline {
+    rankdir=TB;
+    labelloc=t;
+    label="从 glob 到地址：glob 在用户空间解析为地址";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=9];
+
+    // 阶段 1：用户空间 / libbpf——同时完成 glob 展开和名称到地址的转换
+    subgraph cluster_user {
+        label="阶段 1：用户空间（libbpf）——glob 和名称到地址的转换";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        glob [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+              label="glob 'vfs_*'"];
+        aff [shape=box, style="filled", fillcolor="#dbeafe",
+             label="tracefs\navailable_filter_functions_addrs\n（地址 + 名称对）"];
+        fallback [shape=box, style="filled", fillcolor="#dbeafe",
+             label="较旧内核：\navailable_filter_functions\n+ /proc/kallsyms"];
+        gm [shape=box, style="filled", fillcolor="#dbeafe",
+            label="glob_match() + 解析\nlibbpf_available_kprobes_parse"];
+        addrs [shape=record, style="filled", fillcolor="#fef3c7",
+               label="{ res.addrs[] | 0xffff... | 0xffff... | ... }"];
+        glob -> gm;
+        aff -> gm [label="主要路径"];
+        fallback -> gm [label="回退路径", style=dashed];
+        gm -> addrs;
+    }
+
+    // 系统调用边界
+    bnd [shape=box, style="filled,dashed", fillcolor="#fee2e2", fontname="Noto Sans CJK SC",
+         label="系统调用边界"];
+    addrs -> bnd [label="向下传递 addrs[]", style=dashed];
+
+    // 阶段 2：内核——只复制并注册
+    subgraph cluster_kernel {
+        label="阶段 2：内核——uaddrs 分支，不解析名称";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#16a34a";
+        copy [shape=box, style="filled", fillcolor="#dcfce7",
+              label="copy_from_user(addrs, uaddrs)\n数组已经解析"];
+        reg [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+             label="register_fprobe_ips()"];
+        copy -> reg;
+    }
+
+    bnd -> copy [label="copy_from_user", style=dashed];
+
+    // 注意：内核内名称路径是另一个分支
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontname="Noto Sans CJK SC", fontsize=9,
+          label="仅用于显式 syms[] / 精确名称（usyms 分支）：\lcopy_user_syms -> sort_r -> ftrace_lookup_symbols\l（对 kallsyms 做一次 O(N) 遍历）。glob 不走此路径。\l"];
+    reg -> note [style=invis];
+}

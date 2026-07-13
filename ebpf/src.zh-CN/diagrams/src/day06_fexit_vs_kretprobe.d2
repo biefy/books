@@ -1,0 +1,62 @@
+direction: down
+
+title: |md
+  ## fexit 与 kretprobe 对比
+  目标相同，机制不同
+| {near: top-center; shape: text}
+
+kretprobe: "kretprobe（传统方式）" {
+  style.fill: "#fee2e2"
+  body_kp: |md
+    1. 进入时：触发 kprobe，
+       保存真实返回地址
+    2. 用跳板**覆盖栈上的
+       返回地址**
+    3. 函数运行，然后返回到
+       跳板
+    4. 跳板调用你的
+       kretprobe 处理程序
+    5. 处理程序读取 `pt_regs->ax`
+       以获取返回值
+    6. 跳板跳转到真实
+       返回地址
+
+    **开销：**
+    - 进入时触发 int3 陷阱（约 50 ns）
+    - “实例池”有限——
+      突发调用可能漏掉返回
+    - 无法访问原始参数
+    - 修改栈的技巧会破坏
+      C++ 栈展开
+  |
+}
+
+fexit: "fexit（现代方式）" {
+  style.fill: "#dcfce7"
+  body_fx: |md
+    1. 进入时：跳板保存
+       参数
+    2. 调用 fentry 程序
+       （如有）
+    3. 调用原始函数
+    4. **跳板将返回值追加**
+       到 ctx
+    5. 使用完整 ctx（参数 + 返回值）
+       调用 fexit 程序
+    6. 返回调用方
+
+    **开销：**
+    - 进入时执行 jmp（约 10 ns）
+    - 无池限制，不会漏掉返回
+    - 原始参数**和**返回值
+      均有类型信息
+    - 不触碰栈——
+      栈展开安全
+  |
+}
+
+verdict: "可用时优先使用 fexit\n（对非 BTF 函数则回退到\nkretprobe）" {
+  style.fill: "#fef3c7"
+}
+
+kretprobe -> fexit -> verdict

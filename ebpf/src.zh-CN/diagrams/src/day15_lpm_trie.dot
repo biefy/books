@@ -1,0 +1,22 @@
+digraph G {
+    rankdir=TB;
+    node [shape=box, style="rounded,filled", fontname="Noto Sans CJK SC", fontsize=10];
+
+    root [label="根节点", fillcolor="#f3f4f6"];
+
+    n10 [label="10.0.0.0/8", fillcolor="#dbeafe"];
+    n192 [label="192.168.0.0/16", fillcolor="#dbeafe"];
+    n10_1 [label="10.1.0.0/16\n（比 10.0.0.0/8\n更具体）", fillcolor="#fef3c7"];
+    n10_1_2 [label="10.1.2.0/24\n（最具体）", fillcolor="#dcfce7"];
+    n192_168 [label="192.168.1.0/24", fillcolor="#dcfce7"];
+
+    root -> n10;
+    root -> n192;
+    n10 -> n10_1;
+    n10_1 -> n10_1_2;
+    n192 -> n192_168;
+
+    note [label="LPM = 最长前缀匹配。\n查找 10.1.2.55 时依次遍历\n根节点 → 10/8 → 10.1/16 → 10.1.2/24，\n并返回最深层的\n匹配值。", shape=note, fillcolor="#fef3c7"];
+
+    n10_1_2 -> note [style=dashed];
+}

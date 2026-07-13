@@ -1,0 +1,50 @@
+digraph proberead_vs_deref {
+    rankdir=TB;
+    labelloc=t;
+    label="修补 CO-RE 偏移后访问内核内存的两种方式";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    subgraph cluster_core {
+        label="BPF_CORE_READ（安全，每次调用跨一跳）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+
+        c_reloc [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+                 label="重定位后的偏移\n（CO-RE 将立即数修补为\n目标内核的偏移）"];
+        c_helper [shape=box, style="filled", fillcolor="#e9d5ff",
+                  label="bpf_probe_read_kernel(dst, sz, src)\n仅限 GPL 的辅助函数调用"];
+        c_nofault [shape=box, style="filled", fillcolor="#fef3c7",
+                   label="copy_from_kernel_nofault()\n尝试加载并捕获错误"];
+        c_ok [shape=box, style="filled", fillcolor="#dcfce7",
+              label="有效指针：dst = 字段值"];
+        c_bad [shape=box, style="filled", fillcolor="#fee2e2",
+               label="无效指针：memset(dst,0,size)\nreturn -EFAULT（干净的 0）"];
+
+        c_reloc -> c_helper -> c_nofault;
+        c_nofault -> c_ok [label="命中"];
+        c_nofault -> c_bad [label="错误"];
+    }
+
+    subgraph cluster_deref {
+        label="直接解引用（快速，无错误保护）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#d97706";
+
+        d_reloc [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+                 label="重定位后的偏移\n（同一个 CO-RE 修补）"];
+        d_load [shape=box, style="filled", fillcolor="#fef3c7",
+                label="普通 JIT 加载 (ldx)\n无辅助函数，无 copy_from_kernel_nofault"];
+        d_ok [shape=box, style="filled", fillcolor="#dcfce7",
+              label="可信的 PTR_TO_BTF_ID：\ndst = 字段值（更快）"];
+        d_bad [shape=box, style="filled", fillcolor="#fee2e2",
+               label="无效指针：无错误保护\n程序终止，事件丢失"];
+
+        d_reloc -> d_load;
+        d_load -> d_ok [label="有效"];
+        d_load -> d_bad [label="NULL/失效"];
+    }
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="两者都保留 CO-RE 重定位。\l只有 BPF_CORE_READ 保留安全保护。\l对内核交付的可信指针使用直接解引用；\l对某一跳可能失败的链使用 BPF_CORE_READ。\l"];
+    c_bad -> note [style=invis];
+    d_bad -> note [style=invis];
+}

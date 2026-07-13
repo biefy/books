@@ -1,0 +1,27 @@
+digraph icsk_ca_priv {
+    rankdir=TB;
+    labelloc=t;
+    label="inet_csk_ca(sk)：内联临时空间 icsk_ca_priv[104]，转换为 struct bpf_dctcp *";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    sock [shape=record, style="filled", fillcolor="#dbeafe",
+          label="struct sock / inet_connection_sock|……其他字段……|icsk_ca_ops  ●（采用哪个算法）|{icsk_ca_priv[104]（内联临时空间）|无需额外分配}"];
+
+    accessor [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=10,
+              label="inet_csk_ca(sk)\n返回 (void *)icsk_ca_priv\n类型按你的结构体解释"];
+
+    priv [shape=record, style="filled", fillcolor="#fef3c7",
+          label="struct bpf_dctcp *（28 字节，覆盖于其上）|old_delivered|old_delivered_ce|prior_rcv_nxt|dctcp_alpha|next_seq|ce_state|loss_cwnd"];
+
+    cap [shape=box, style="filled", fillcolor="#fee2e2", fontsize=10,
+         label="ICSK_CA_PRIV_SIZE = 104 字节\n硬性边界：私有结构体\n必须能够放入其中\n（28 < 104，可以容纳）"];
+
+    sock -> accessor [label="icsk_ca_priv", color="#dc2626", style=bold];
+    accessor -> priv [label="转换为 struct bpf_dctcp *", color="#7c3aed", style=bold, fontname="Noto Sans CJK SC"];
+    priv -> cap [label="必须容纳", style=dashed, color="#dc2626", fontname="Noto Sans CJK SC"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="这个内联缓冲区的生命周期：\linit() 写入初始字段（计数器清零，设置 alpha）——最后调用\lcong_avoid()/ssthresh()/in_ack_event() 在每个 ACK 上读取并更新这些字段\lrelease() 执行清理\l这正是虚函数表中存在 init/release 槽位的原因。\l"];
+    cap -> note [style=invis];
+}

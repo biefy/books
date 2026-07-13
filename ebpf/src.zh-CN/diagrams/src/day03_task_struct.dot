@@ -1,0 +1,23 @@
+digraph task_struct {
+    rankdir=LR;
+    labelloc=t;
+    label="current → task_struct → real_parent->tgid 即 PPID";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    cpu [shape=note, style="filled", fillcolor="#dcfce7", fontsize=10,
+         label="current\l（每 CPU / 寄存器：\l此刻在该 CPU 上\l运行的任务）\l"];
+
+    child [shape=record, style="filled", fillcolor="#dbeafe",
+           label="struct task_struct（子进程）|pid    = 24501（此线程）|tgid   = 24501（'ps' 显示的 PID）|real_parent（创建者链接）●|parent       （SIGCHLD 接收者）|comm   = \"rm\""];
+
+    parent [shape=record, style="filled", fillcolor="#dbeafe",
+           label="struct task_struct（父进程）|pid    = 24450|tgid   = 24450  &lt;- 这就是 PPID|real_parent ...|parent ...|comm   = \"bash\""];
+
+    cpu -> child [label="bpf_get_current_task_btf()", color="#7c3aed", style=bold];
+    child -> parent [label="real_parent（创建我的任务）", color="#dc2626", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+          label="用户可见的 PID  = task->tgid\l用户可见的 PPID = task->real_parent->tgid\l这就是实验读取 real_parent->tgid，\l而非 real_parent->pid 的原因。\l"];
+    parent -> note [style=invis];
+}

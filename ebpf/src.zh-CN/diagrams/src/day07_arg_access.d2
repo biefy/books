@@ -1,0 +1,114 @@
+direction: down
+
+title: |md
+  ## 不同程序类型的参数访问方式
+| {near: top-center; shape: text}
+
+fentry: "fentry/fexit" {
+  style.fill: "#dcfce7"
+  body: |md
+    ```c
+    SEC("fentry/vfs_read")
+    int BPF_PROG(p,
+      struct file *f, char *buf,
+      size_t n, loff_t *pos)
+    { ... }
+    ```
+    **作用：**
+    - 跳板提供由 BTF 确定类型的函数参数
+
+    **状态：**
+    - `f` 是可信的 `PTR_TO_BTF_ID`
+    - 可以直接读取字段
+  |
+}
+
+kprobe: "kprobe/kretprobe" {
+  style.fill: "#fef3c7"
+  body: |md
+    ```c
+    SEC("kprobe/vfs_read")
+    int BPF_KPROBE(p,
+      struct file *f, ...) { ... }
+    ```
+    **作用：**
+    - 陷阱将 CPU 寄存器保存到 `struct pt_regs`
+
+    **状态：**
+    - 提取出的指针属于标量
+    - 读取字段时使用 `bpf_probe_read_kernel`
+  |
+}
+
+tracepoint: "tracepoint/..." {
+  style.fill: "#fee2e2"
+  body: |md
+    ```c
+    SEC("tracepoint/syscalls/
+      sys_enter_read")
+    int p(struct
+      trace_event_raw_sys_enter
+      *ctx)
+    ```
+    **作用：**
+    - 读取复制的事件结构体
+
+    **状态：**
+    - 稳定字段来自 `events/.../format`
+    - 位于 `/sys/kernel/tracing/` 下
+    - 并非实时内核对象
+  |
+}
+
+rawtp: "raw_tracepoint/..." {
+  style.fill: "#fde68a"
+  body: |md
+    ```c
+    SEC("raw_tracepoint/sched_switch")
+    int p(struct
+      bpf_raw_tracepoint_args *ctx)
+    ```
+    **作用：**
+    - 将原始跟踪点参数公开为
+    - 按位置排列的 `u64` 槽
+
+    **状态：**
+    - 层次低于 tracepoint
+    - 调用方必须按索引解包
+  |
+}
+
+tpbtf: "tp_btf/..." {
+  style.fill: "#dbeafe"
+  body: |md
+    ```c
+    SEC("tp_btf/sched_switch")
+    int BPF_PROG(p, bool preempt,
+      struct task_struct *prev,
+      struct task_struct *next)
+    ```
+    **作用：**
+    - 使用跟踪点的 BTF 原型
+
+    **状态：**
+    - 实时的类型化指针
+    - 在整个回调期间有效
+  |
+}
+
+fentry -> kprobe
+kprobe -> tracepoint
+tracepoint -> rawtp
+rawtp -> tpbtf
+
+legend: |md
+  **沿链条向下选择的原因**
+  - fentry -> kprobe：
+  - 旧式陷阱路径，目标相同
+  - kprobe -> tracepoint：
+  - 显式事件可避开脆弱的函数名
+  - tracepoint -> raw_tracepoint：
+  - 需要原始参数时跳过结构体复制
+  - raw_tracepoint -> tp_btf：
+  - BTF 恢复类型化参数
+| {near: bottom-center; shape: text}

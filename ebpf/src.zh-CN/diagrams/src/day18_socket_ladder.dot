@@ -1,0 +1,31 @@
+digraph socket_ladder {
+    rankdir=TB;
+    labelloc=t;
+    label="AF_XDP 套接字的设置阶梯（xsk_socket__create 封装的内容）";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10, shape=box, style="filled,rounded"];
+
+    s1 [fillcolor="#e9d5ff",
+        label="1.  socket(AF_XDP, SOCK_RAW, 0)\n-> 一个原始 xsk fd"];
+    s2 [fillcolor="#dbeafe",
+        label="2.  setsockopt(XDP_UMEM_REG, &xdp_umem_reg)\n注册 UMEM (addr, len, chunk_size, headroom)"];
+    s3 [fillcolor="#dbeafe",
+        label="3.  setsockopt 设置环形队列大小\nXDP_UMEM_FILL_RING / XDP_UMEM_COMPLETION_RING\nXDP_RX_RING / XDP_TX_RING"];
+    s4 [fillcolor="#fef3c7",
+        label="4.  在固定的 XDP_PGOFF_* 偏移处 mmap 每个环形队列\nRX=0  TX=0x80000000\nFILL=0x100000000  COMP=0x180000000\n=> 生产者/消费者计数器变为共享内存"];
+    s5 [fillcolor="#dcfce7",
+        label="5.  bind(fd, &sockaddr_xdp)\n将套接字绑定到一个 (ifindex, queue_id)\nsxdp_flags = XDP_ZEROCOPY | XDP_COPY | 默认值"];
+
+    s1 -> s2 -> s3 -> s4 -> s5 [color="#2563eb", style=bold];
+
+    wrap [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9, fontname="Noto Sans CJK SC",
+          label="xsk_socket__create() /\lxsk_umem__create() 封装了\l以上全部操作。了解这一\l顺序，才能排查创建失败。\l"];
+
+    wakeup [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9, fontname="Noto Sans CJK SC",
+            label="XDP_USE_NEED_WAKEUP：驱动休眠时，\l会在环形队列标志中设置 XDP_RING_NEED_WAKEUP\l-> 用 poll()/sendto()/recvfrom() 将其唤醒。\l不使用此机制时：忙轮询。\l"];
+
+    s3 -> wrap [style=invis];
+    s5 -> wakeup [style=invis];
+    { rank=same; s4; wrap; }
+    { rank=same; s5; wakeup; }
+}

@@ -1,0 +1,41 @@
+digraph log2_histogram {
+    rankdir=TB;
+    labelloc=t;
+    label="延迟直方图：floor(log2) 选择槽位，每个事件执行一次原子加法";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+    nodesep=0.4; ranksep=0.9;
+
+    // 输入事件
+    dur [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+         label="duration = 4200 ns"];
+
+    // log2 框
+    log2 [shape=box, style="filled", fillcolor="#e9d5ff",
+          label="slot = floor(log2(dur))\nlog2l(4200) = 12"];
+
+    dur -> log2 [label="  每个事件执行一次\l  原子递增", fontsize=9,
+                 fontcolor="#16a34a", color="#16a34a"];
+
+    // 将 64 槽数组画为水平条形图（record）
+    hist [shape=record, style="filled", fillcolor="#dbeafe", fontsize=9,
+          label="{ 槽位 09  | 槽位 10 ## | 槽位 11 ##### | <s>槽位 12 ######## (+1) | 槽位 13 #### | 槽位 14 # | ... 直到槽位 63 }"];
+
+    log2 -> hist:s [label="  索引 12", fontsize=9,
+                    fontcolor="#2563eb", color="#2563eb"];
+
+    arrlbl [shape=plaintext, fontname="Noto Sans CJK SC", fontsize=9,
+            label="BPF_MAP_TYPE_ARRAY\n64 x u64 计数器\n（每个二次幂桶一个）"];
+    arrlbl -> hist [style=invis];
+
+    // 退出时读出
+    readout [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+             label="用户空间：退出时\n一次性读取整个数组\n并打印条形图"];
+    hist -> readout [label="  读取全部 64 个槽位\l  且只读一次", fontsize=9,
+                     fontcolor="#16a34a", color="#16a34a"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="热路径每个事件只需一次 __sync_fetch_and_add；\l完整数组仅在退出时读取一次。\l每个事件的开销极低，远小于 ringbuf 的 reserve/commit/wakeup。\l"];
+    readout -> note [style=invis];
+}

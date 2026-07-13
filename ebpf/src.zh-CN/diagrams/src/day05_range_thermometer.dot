@@ -1,0 +1,46 @@
+digraph range_thermometer {
+    rankdir=TB;
+    labelloc=t;
+    label="范围域：必须收缩至可证明退出的边界框 [umin,umax]";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    subgraph cluster_good {
+        label="i < 64（常量边界  ->  可证明）";
+        fontname="Noto Sans CJK SC"; fontsize=11;
+        style="filled"; fillcolor="#f0fdf4"; color="#16a34a";
+
+        g0 [shape=record, style="filled", fillcolor="#dbeafe",
+            label="迭代 0|umin=0  umax=63"];
+        g1 [shape=record, style="filled", fillcolor="#dbeafe",
+            label="迭代 1|umin=1  umax=63"];
+        g2 [shape=record, style="filled", fillcolor="#dbeafe",
+            label="迭代 32|umin=32  umax=63"];
+        g3 [shape=record, style="filled", fillcolor="#dcfce7",
+            label="迭代 63|umin=63  umax=63|umin == umax  =\>  到达退出点"];
+        g0 -> g1 -> g2 -> g3 [label="i++（umax 固定为 63）", color="#16a34a", style=bold];
+    }
+
+    subgraph cluster_bad {
+        label="i < n（n 未知  ->  无法证明）";
+        fontname="Noto Sans CJK SC"; fontsize=11;
+        style="filled"; fillcolor="#fef2f2"; color="#dc2626";
+
+        b0 [shape=record, style="filled", fillcolor="#dbeafe",
+            label="迭代 0|umin=0  umax=U64_MAX"];
+        b1 [shape=record, style="filled", fillcolor="#dbeafe",
+            label="迭代 1|umin=1  umax=U64_MAX"];
+        b2 [shape=record, style="filled", fillcolor="#fee2e2",
+            label="迭代 k|umin=k  umax=U64_MAX|边界框从不收缩  =\>  无法退出"];
+        b0 -> b1 -> b2 [label="i++（umax 停留在 U64_MAX）", color="#dc2626", style=bold];
+    }
+
+    tnum_before [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+        label="执行 n & 0x7f 前的 tnum(n)\l位 63..7：? ? ? ... ?（未知）\l位  6..0：? ? ? ? ? ? ?（未知）\lumax(n) = U64_MAX\l"];
+    tnum_after [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+        label="执行 n & 0x7f 后的 tnum(n)\l位 63..7：0 0 0 ... 0（已知为零）\l位  6..0：? ? ? ? ? ? ?（未知）\lumax(n) = 127（确定事实）\l"];
+    tnum_before -> tnum_after [label="& 0x7f 将高位确定为已知的 0", color="#7c3aed", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+
+    g3 -> tnum_before [style=invis];
+    b2 -> tnum_before [style=invis];
+}

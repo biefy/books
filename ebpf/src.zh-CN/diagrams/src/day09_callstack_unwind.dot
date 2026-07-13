@@ -1,0 +1,62 @@
+digraph callstack_unwind {
+    rankdir=TB;
+    labelloc=t;
+    label="遍历原生栈的两种方式——最终都得到相同的 trace->ip[]";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+    nodesep=0.45; ranksep=0.55;
+
+    // Left: frame-pointer chain
+    subgraph cluster_fp {
+        label="帧指针栈展开（-fno-omit-frame-pointer）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+
+        rbp [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontname="Noto Sans Mono CJK SC",
+             label="%rbp\n（指向当前栈帧）"];
+
+        f1 [shape=record, style="filled", fillcolor="#dbeafe", fontname="Noto Sans Mono CJK SC",
+            label="<sav>保存的 %rbp|返回地址（叶函数）"];
+        f2 [shape=record, style="filled", fillcolor="#dbeafe", fontname="Noto Sans Mono CJK SC",
+            label="<sav>保存的 %rbp|返回地址（调用方）"];
+        f3 [shape=record, style="filled", fillcolor="#dbeafe", fontname="Noto Sans Mono CJK SC",
+            label="<sav>保存的 %rbp|返回地址（调用方的调用方）"];
+
+        rbp -> f1:sav [color="#7c3aed", style=bold];
+        f1:sav -> f2:sav [label="沿链条继续", color="#7c3aed", style=bold,
+                          fontname="Noto Sans CJK SC", fontsize=8];
+        f2:sav -> f3:sav [color="#7c3aed", style=bold];
+
+        fpnote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=8,
+                label="链表：每个保存的 %rbp\l都指向上一对值。\l会占用一个寄存器。\l"];
+        f3 -> fpnote [style=invis];
+    }
+
+    // Right: ORC, no frame pointers
+    subgraph cluster_orc {
+        label="ORC 栈展开（不使用帧指针，内核采用的方式）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#d97706";
+
+        stack [shape=record, style="filled", fillcolor="#fef3c7",
+               label="原始栈字节|返回地址（叶函数）|...|返回地址（调用方）|...|返回地址"];
+
+        orc [shape=record, style="filled", fillcolor="#fde68a", fontname="Noto Sans Mono CJK SC",
+             label="ORC 表（以 IP 为键）|__start_orc_unwind_ip 数组|__start_orc_unwind 数组|在 IP X 处：sp 偏移定位上一栈帧"];
+
+        stack -> orc [label="orc_find(IP)\n提供 sp 偏移", color="#d97706",
+                      style=bold, fontname="Noto Sans Mono CJK SC", fontsize=8];
+
+        orcnote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=8,
+                 label="编译时构建的带外表。\l不占用寄存器。\lORC_TYPE_CALL 是常见情况。\l"];
+        orc -> orcnote [style=invis];
+    }
+
+    // Bottom: convergence
+    trace [shape=record, style="filled", fillcolor="#bfdbfe", fontname="Noto Sans Mono CJK SC",
+           label="trace ip 数组（叶函数在前的返回地址）|ip0 = 叶函数 | ip1 | ip2 | ...  然后由 bpf_get_stackid 哈希"];
+
+    fpnote -> trace [label="结果相同", color="#dc2626", style=bold,
+                     fontname="Noto Sans CJK SC", fontsize=9];
+    orcnote -> trace [label="结果相同", color="#dc2626", style=bold,
+                      fontname="Noto Sans CJK SC", fontsize=9];
+}

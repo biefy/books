@@ -1,0 +1,40 @@
+digraph syscall_ladder {
+    rankdir=TB;
+    labelloc=t;
+    label="read() 分派阶梯——所有 read() 共享的公共基础路径";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans CJK SC", fontsize=10, shape=box, style="filled,rounded", width=3.2];
+    edge [fontname="Noto Sans CJK SC"];
+    nodesep=0.4; ranksep=0.4;
+
+    // userspace
+    cat   [fillcolor="#e9d5ff", label="cat（进程，折叠行的根）"];
+    libc  [fillcolor="#e9d5ff", label="__libc_read（libc 系统调用包装器）"];
+
+    // boundary
+    boundary [shape=note, fillcolor="#fef3c7", style="filled",
+              label="SYSCALL 指令——用户/内核边界"];
+
+    // kernel ladder
+    entry [fillcolor="#dbeafe", label="entry_SYSCALL_64（汇编桩）"];
+    dosys [fillcolor="#dbeafe", fontname="Noto Sans Mono CJK SC", label="do_syscall_64(regs, nr)\nsyscall_64.c:87"];
+    x64   [fillcolor="#dbeafe", fontname="Noto Sans Mono CJK SC", label="__x64_sys_read（SYSCALL_DEFINE3）\nread_write.c:724"];
+    ksys  [fillcolor="#dbeafe", fontname="Noto Sans Mono CJK SC", label="ksys_read()\nread_write.c:706"];
+    vfs   [fillcolor="#bfdbfe", fontname="Noto Sans Mono CJK SC", label="vfs_read()（你跟踪的叶函数）\nread_write.c:554"];
+
+    cat -> libc -> boundary -> entry -> dosys -> x64 -> ksys -> vfs
+        [color="#7c3aed", style=bold];
+
+    // annotations on the side
+    day7 [shape=note, fillcolor="#dcfce7", style="filled", fontsize=9,
+          label="第 7 天的 read 跟踪点位于此处，\l即系统调用入口上移一层的位置。\l"];
+    fhook [shape=note, fillcolor="#fee2e2", style="filled", fontsize=9,
+           label="fentry/vfs_read 钩子点\l（最底部叶函数，今天的目标）。\l"];
+
+    day7  -> entry [style=dashed, color="#16a34a", constraint=false];
+    fhook -> vfs   [style=dashed, color="#dc2626", constraint=false];
+
+    folded [shape=note, fillcolor="#fef3c7", style="filled", fontsize=9, fontname="Noto Sans Mono CJK SC",
+            label="折叠行（从根到叶）：\lcat;__libc_read;entry_SYSCALL_64;\ldo_syscall_64;__x64_sys_read;\lksys_read;vfs_read 137\l"];
+    vfs -> folded [style=invis];
+}

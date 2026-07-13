@@ -1,0 +1,30 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif"}, "sequence": {"useMaxWidth": false, "actorMargin": 8, "messageMargin": 24, "boxMargin": 8, "noteMargin": 8, "mirrorActors": false}}}%%
+sequenceDiagram
+    autonumber
+    participant DEV as 你
+    participant CC as clang<br/>-target bpf
+    participant LB as libbpf
+    participant SC as bpf()<br/>系统调用
+    participant VER as 验证器
+    participant JIT as JIT
+    participant ATT as 挂载点<br/>(filename_unlinkat)
+
+    DEV->>CC: hello.bpf.c
+    CC-->>DEV: hello.bpf.o<br/>（字节码 + BTF）
+    DEV->>LB: 打开对象
+    LB->>LB: 通过内核 BTF<br/>执行 CO-RE 重定位
+    LB->>SC: BPF_PROG_LOAD
+    SC->>VER: 分析每一条<br/>指令
+    alt 程序安全
+        VER-->>SC: 接受
+        SC->>JIT: 编译为<br/>原生代码
+        JIT-->>SC: 原生代码
+        SC-->>LB: prog_fd
+        LB->>SC: BPF_LINK_CREATE
+        SC->>ATT: 安装<br/>跳板
+        Note over ATT: 每次调用<br/>filename_unlinkat<br/>都会执行你的程序
+    else 程序不安全
+        VER-->>SC: 拒绝 + 日志
+        SC-->>LB: -EACCES
+        LB-->>DEV: 验证器日志
+    end

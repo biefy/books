@@ -1,0 +1,33 @@
+digraph veth_netns {
+    rankdir=LR;
+    labelloc=t;
+    label="跨两个命名空间的 veth 对：流量必须穿过线路，而 XDP 就在那里运行";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    subgraph cluster_root {
+        label="root 命名空间（主机）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        veth0 [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+            label="veth0\n10.0.0.1/24"];
+        lo [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+            label="lo（回环）\n如果 10.0.0.2 是本地地址，\n传送会在此处短路"];
+    }
+
+    subgraph cluster_ns1 {
+        label="ns1（网络命名空间）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#d97706";
+        veth1 [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+            label="veth1\n10.0.0.2/24"];
+        xdp [shape=box, style="filled", fillcolor="#fef3c7",
+            label="veth1 RX 路径上的\nXDP 钩子\n(bpf_prog_run_xdp)"];
+        veth1 -> xdp [label="RX", color="#dc2626", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+    }
+
+    veth0 -> veth1 [label="虚拟线缆\nveth0 上 TX -> veth1 上 RX", dir=both,
+        color="#16a34a", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+        label="不同命名空间迫使流量穿过线路。\l相同命名空间 -> 内核通过 lo 传送，\l数据包永远不会到达 veth1 XDP 钩子。\l"];
+    veth0 -> note [style=invis];
+}

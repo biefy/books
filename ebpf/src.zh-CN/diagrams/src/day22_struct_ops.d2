@@ -1,0 +1,65 @@
+direction: down
+
+title: |md
+  ## struct_ops：BPF 替换内核虚函数表
+| {near: top-center; shape: text}
+
+before: "使用 struct_ops 之前" {
+  style.fill: "#fee2e2"
+  b_body: |md
+    子系统在 C 中有一个虚函数表：
+    ```c
+    struct tcp_congestion_ops bbr = {
+      .name = "bbr",
+      .init = bbr_init,
+      .cong_avoid = bbr_main,
+      ...
+    };
+    tcp_register_
+      congestion_control(&bbr);
+    ```
+
+    要添加新的 CC 算法：
+    - 在内核树中编写 C 代码
+    - 编译为内核模块
+    - 加载 .ko
+    - 只能祈祷代码不会让内核崩溃
+  |
+}
+
+after: "使用 struct_ops" {
+  style.fill: "#dcfce7"
+  a_body: |md
+    BPF 程序定义虚函数表：
+    ```c
+    struct tcp_congestion_ops
+        bbr_bpf = {
+      .name = "bbr_bpf",
+      .init = (void *)bbr_init_bpf,
+      .cong_avoid =
+          (void *)bbr_main_bpf,
+    };
+    SEC(".struct_ops")
+    struct tcp_congestion_ops
+        bbr_bpf;
+    ```
+    每个函数都是一个 BPF 程序。
+
+    加载时通过
+    `tcp_register_congestion_control` 注册。
+    用户空间通过 `setsockopt` 选择。
+  |
+}
+
+powers: |md
+  **由此实现两项重要功能：**
+  - BPF 中的 **TCP 拥塞控制**
+  - **sched_ext**——BPF 调度器（第 25 天起）
+
+  只要内核中存在带函数指针的
+  `struct ops`，struct_ops 就能让
+  BPF 提供相应实现。
+| {style.fill: "#fef3c7"}
+
+before -> after
+after -> powers

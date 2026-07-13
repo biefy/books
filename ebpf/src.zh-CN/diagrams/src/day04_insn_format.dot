@@ -1,0 +1,28 @@
+digraph insn_format {
+    rankdir=TB;
+    labelloc=t;
+    label="将一行验证器日志展开为各个字段";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.35; ranksep=0.5;
+
+    line [shape=box, style="filled,rounded", fillcolor="#fef3c7", fontsize=12,
+          label="7: (79) r1 = *(u64 *)(r0 +0)"];
+
+    fields [shape=record, style="filled", fillcolor="#dbeafe", fontsize=10,
+            label="{ 指令索引\n7 | 操作码字节\n0x79 | dst\nr1 | src\nr0 | off\n+0 }"];
+
+    opcode [shape=record, style="filled", fillcolor="#e9d5ff", fontsize=10,
+            label="{ 0x79 = | LDX\nclass 0x01 | MEM\nmode 0x60 | DW\nsize 0x18 }"];
+
+    deref [shape=note, style="filled", fillcolor="#fee2e2", fontsize=10,
+           label="LDX = 加载 = 解引用\l在 NULL 检查证明非 NULL 之前，\l禁止对 PTR_TO_MAP_VALUE_OR_NULL 执行此操作。\l"];
+
+    width [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+           label="*(u64 *) 的大小后缀 = DW（8 字节）\l对应 C 类型：value 为 __u64。\l*(u32 *) 则为 W（4 字节）：即 __u32 key。\l"];
+
+    line -> fields [label="拆分为", color="#2563eb", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+    fields -> opcode [label="解码 0x79", color="#7c3aed", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+    opcode -> deref [label="LDX 表示", color="#dc2626", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+    opcode -> width [style=invis];
+}

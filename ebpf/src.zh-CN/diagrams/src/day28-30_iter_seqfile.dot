@@ -1,0 +1,45 @@
+digraph iter_seqfile {
+    rankdir=TB;
+    labelloc=t;
+    label="BPF 迭代器：内核按需运行程序，填充每次 read()";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+    nodesep=0.5; ranksep=1.0;
+
+    // 内核侧
+    subgraph cluster_kernel {
+        label="内核侧：迭代器遍历任务列表，每个任务调用一次程序";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+
+        tasks [shape=record, style="filled", fillcolor="#dbeafe", fontsize=9,
+               label="{ 任务列表 | 任务 A | 任务 B | 任务 C | ... | NULL }"];
+
+        prog [shape=box, style="filled", fillcolor="#e9d5ff",
+              label="SEC(\"iter/task\") prog\nseq_num==0 -> 表头\ntask!=NULL -> 一行\ntask==NULL -> 表尾"];
+
+        seq [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+             label="ctx->meta->seq\n（struct seq_file 缓冲区）\nBPF_SEQ_PRINTF 追加行"];
+
+        tasks -> prog [label="  每个任务一次\l  + 使用 NULL 再调用一次", fontsize=9,
+                       fontcolor="#2563eb", color="#2563eb"];
+        prog -> seq [label="  追加一行", fontsize=9,
+                     fontcolor="#16a34a", color="#16a34a"];
+    }
+
+    // 用户空间侧
+    subgraph cluster_user {
+        label="用户空间侧";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#d97706";
+
+        loop [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+              label="read(iter_fd) 循环\n排空缓冲区，直到\nread() 返回 0（EOF）"];
+    }
+
+    seq -> loop [label="  内核按需运行程序\l  以填充每次 read()", fontsize=9,
+                 fontcolor="#7c3aed", color="#7c3aed"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="拉取而非推送：没有 ringbuf，没有唤醒，也不会丢失。\l缓冲机制就是 seq_file；节奏由 read() 控制。\l每次 read() 都会运行足够多次程序，以填满缓冲区。\l"];
+    loop -> note [style=invis];
+}

@@ -1,0 +1,46 @@
+digraph demand_paging {
+    rankdir=TB;
+    labelloc=t;
+    label="按需分页：次缺页（不休眠）与主缺页（停止调度）";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.5; ranksep=0.7;
+
+    // BPF 程序在辅助函数调用处暂停
+    prog [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+          label="可休眠 BPF 程序\nbpf_copy_from_user(dst, sz, upath)"];
+
+    vaddr [shape=box, style="filled", fillcolor="#fef3c7",
+           label="虚拟地址 upath\n（位于有效 VMA 内）"];
+
+    mmu [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+         label="MMU / 页表遍历\n查找 upath 的 PTE"];
+
+    decision [shape=diamond, style="filled", fillcolor="#e9d5ff",
+              label="PTE 存在？", fontname="Noto Sans CJK SC", fontsize=11];
+
+    // 次缺页路径（存在）
+    minor [shape=box, style="filled", fillcolor="#dcfce7",
+           label="次缺页\n数据已经在 RAM 中\n（页缓存命中 / 共享页 / 零页）\n安装 PTE，重新执行指令"];
+    minor_done [shape=box, style="filled", fillcolor="#dcfce7",
+                label="复制在数微秒内完成\n线程从不阻塞  ->  辅助函数返回 0"];
+
+    // 主缺页路径（不存在）
+    major [shape=box, style="filled", fillcolor="#fee2e2",
+           label="主缺页\n页不在内存中\nhandle_mm_fault -> VM_FAULT_RETRY"];
+    io [shape=box, style="filled", fillcolor="#fee2e2",
+        label="从磁盘 / 交换空间读取页面（I/O）"];
+    sleep [shape=box, style="filled,rounded", fillcolor="#fee2e2",
+           label="线程停止调度（进入休眠）\nBPF 程序在辅助函数调用处暂停\nI/O 完成后被唤醒并恢复执行"];
+
+    prog -> vaddr -> mmu -> decision;
+    decision -> minor [label="是", fontname="Noto Sans CJK SC", fontsize=9, color="#16a34a"];
+    minor -> minor_done;
+    decision -> major [label="否", fontname="Noto Sans CJK SC", fontsize=9, color="#dc2626"];
+    major -> io -> sleep;
+    sleep -> minor_done [label="恢复执行，\n复制完成", fontname="Noto Sans CJK SC", fontsize=9, style=dashed];
+
+    note [shape=note, style="filled", fillcolor="#e9d5ff", fontsize=9,
+          label="“地址有效”和“由 RAM 承载”是两个\l不同的问题。只有主缺页路径会休眠——\l这正是 bpf_copy_from_user 只能用于\l可休眠程序的原因。\l"];
+    minor_done -> note [style=invis];
+}

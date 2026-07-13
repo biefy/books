@@ -1,0 +1,91 @@
+direction: down
+
+title: |md
+  ## CO-RE 重定位：内核 A 与内核 B
+| {near: top-center; shape: text}
+
+# 内核 A 一侧
+ka: "内核 A（构建主机）" {
+  style.fill: "#fef3c7"
+  layout_a: |md
+    `task_struct` 布局（A）：
+    ```
+    off  field
+    0    state
+    24   stack
+    32   flags
+    ...
+    1872 real_parent ←here
+    1880 parent
+    ...
+    2384 tgid
+    2388 pid
+    ```
+  |
+}
+
+# 内核 B 一侧（布局已漂移）
+kb: "内核 B（目标，其他版本）" {
+  style.fill: "#dbeafe"
+  layout_b: |md
+    `task_struct` 布局（B）：
+    ```
+    off  field
+    0    state
+    24   stack
+    32   flags
+    ...
+    1920 real_parent ←+48
+    1928 parent
+    ...
+    2440 tgid ←+56
+    2444 pid
+    ```
+  |
+}
+
+# 单一 .bpf.o 构件
+obj: "hello.bpf.o（在 A 上构建一次）" {
+  shape: package
+  style.fill: "#dcfce7"
+  src: |md
+    源码：
+    ```c
+    BPF_CORE_READ(task,
+      real_parent, tgid);
+    ```
+  |
+  emitted: |md
+    生成内容（读取 real_parent、tgid）：
+    ```
+    r1 = task
+    r1 = *(u64*)(r1+OFF)
+    r1 = *(u32*)(r1+OFF)
+    ```
+    + CO-RE 重定位记录：
+    ```
+    relo kind=field_byte_offset
+      type=task_struct
+      field=real_parent
+    relo kind=field_byte_offset
+      type=task_struct
+      field=tgid
+    ```
+  |
+  src -> emitted: {style.opacity: 0}
+}
+
+ka -> kb: "布局随版本\n发生漂移" {style.stroke-dash: 3}
+kb -> obj: "针对 A 的 vmlinux.h\n进行编译"
+
+# 加载时
+load_a: "在内核 A 上加载：\nlibbpf 修补 +1872、+2384\n（来自 A 的 BTF 的偏移）" {style.fill: "#dcfce7"}
+load_b: "在内核 B 上加载：\nlibbpf 修补 +1920、+2440\n（来自 B 的 BTF 的偏移）" {style.fill: "#dcfce7"}
+
+obj -> load_a
+load_a -> load_b
+
+ka.layout_a -> load_a
+kb.layout_b -> load_b
+
+note: "同一个 .bpf.o，在加载时修补为两组不同的偏移。\n\n没有 CO-RE，就必须为每个内核重新编译。\n使用 CO-RE，只需交付一个 .o，它会自行适配。" {near: bottom-center; shape: text}

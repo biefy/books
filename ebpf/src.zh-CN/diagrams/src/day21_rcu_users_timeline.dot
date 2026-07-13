@@ -1,0 +1,42 @@
+digraph rcu_users_timeline {
+    rankdir=LR;
+    labelloc=t;
+    label="rcu_users 让暂存的任务在多次调用之间（乃至 do_exit 之后）仍可读取";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.35; ranksep=0.7;
+
+    // kptr lane
+    subgraph cluster_kptr {
+        label="使用 kptr（持有 rcu_users 引用）";
+        fontname="Noto Sans CJK SC"; fontsize=12; style="rounded"; color="#2563eb";
+
+        k0 [shape=box, style="filled", fillcolor="#dbeafe",
+            label="t0 fentry\nbpf_task_acquire\nrcu_users 1 -> 2"];
+        k1 [shape=box, style="filled", fillcolor="#dcfce7",
+            label="t1 线程\ndo_exit()\n结构体仍然存活\n(rcu_users > 0)"];
+        k2 [shape=box, style="filled", fillcolor="#fef3c7",
+            label="t2 fexit\n读取 t->pid\n安全"];
+        k3 [shape=box, style="filled", fillcolor="#dbeafe",
+            label="t3 释放\nrcu_users 2 -> 1\n稍后：经过 RCU 宽限期后\n最终释放"];
+        k0 -> k1 -> k2 -> k3 [color="#2563eb", style=bold];
+    }
+
+    // no-kptr lane
+    subgraph cluster_nokptr {
+        label="不使用 kptr（未持有引用）";
+        fontname="Noto Sans CJK SC"; fontsize=12; style="rounded"; color="#dc2626";
+
+        n0 [shape=box, style="filled", fillcolor="#dbeafe",
+            label="t0 fentry\n看到了 task\n（未获取引用）"];
+        n1 [shape=box, style="filled", fillcolor="#fee2e2",
+            label="t1 线程\ndo_exit()\n结构体已释放\n(rcu_users 降至 0)"];
+        n2 [shape=box, style="filled", fillcolor="#fee2e2",
+            label="t2 读取 t->pid\n释放后使用"];
+        n0 -> n1 -> n2 [color="#dc2626", style=bold];
+    }
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="rcu_users 是维持内存分配有效的计数，因此即使线程退出后仍可安全读取。\l持有该计数，才能保证 fentry 保存 / fexit 读取这一对操作正确无误。\l"];
+    k3 -> note [style=invis];
+}

@@ -1,0 +1,39 @@
+digraph kallsyms_resolve {
+    rankdir=TB;
+    labelloc=t;
+    label="内核符号化：在 /proc/kallsyms 中查找地址不大于目标的最近符号";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+    nodesep=0.5; ranksep=0.7;
+
+    // captured address
+    frame [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontname="Noto Sans Mono CJK SC",
+           label="捕获的返回地址\nffffffff9a0ea100\n（位于 vfs_read 内部若干字节处）"];
+
+    // sorted kallsyms slice as a record
+    subgraph cluster_ks {
+        label="/proc/kallsyms（按地址数值排序）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+
+        ks [shape=record, style="filled", fillcolor="#dbeafe", fontname="Noto Sans Mono CJK SC",
+            label="{ ffffffff9a0ea0a0  T  rw_verify_area | <hit>ffffffff9a0ea0e0  T  vfs_read | ffffffff9a0ea1c0  T  vfs_write }"];
+    }
+
+    frame -> ks:hit [label="最大 addr <= frame", color="#dc2626", style=bold,
+                     fontname="Noto Sans Mono CJK SC", fontsize=9];
+
+    match [shape=box, style="filled,rounded", fillcolor="#dcfce7", fontname="Noto Sans Mono CJK SC",
+           label="选中：vfs_read\n(start <= frame < 下一个符号)"];
+    ks:hit -> match [color="#16a34a", style=bold];
+
+    // callout about exact match failing
+    exact [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+           label="kallsyms 列出的是符号起始地址，\l而不是地址范围。帧位于函数中部，\l因此精确匹配几乎总会失败。\l"];
+    match -> exact [style=invis];
+
+    // kptr_restrict warning
+    warn [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="kptr_restrict=1（默认）：非 root 读取方\l看到的地址列全是\l0000000000000000。请以 root 身份读取。\l"];
+    frame -> warn [style=invis];
+}

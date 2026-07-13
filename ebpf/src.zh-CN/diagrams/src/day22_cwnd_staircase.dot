@@ -1,0 +1,36 @@
+digraph cwnd_staircase {
+    rankdir=TB;
+    labelloc=t;
+    label="cwnd 随时间变化：慢启动爬升、ssthresh 边界、拥塞避免与一次撤销";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+
+    // Phases as a left-to-right staircase of cells
+    ss [shape=box, style="filled", fillcolor="#fef3c7", fontsize=10,
+        label="慢启动\ncwnd 近似指数增长\n（低于 ssthresh）\n每个 ACK：cong_avoid()\n-> tcp_slow_start()"];
+
+    thresh [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=10,
+            label="ssthresh 线\ncwnd 即将越过该线时\n慢启动结束"];
+
+    ca [shape=box, style="filled", fillcolor="#fef3c7", fontsize=10,
+        label="拥塞避免\ncwnd 近似线性增长\n（高于 ssthresh）\n每个 ACK：cong_avoid()\n-> tcp_cong_avoid_ai()"];
+
+    loss [shape=box, style="filled", fillcolor="#fee2e2", fontsize=10,
+          label="丢包 / ECN 事件\n网络发出故障信号\n触发 ssthresh()：\n新阈值 = cwnd >> 1\ncwnd 下降"];
+
+    ca2 [shape=box, style="filled", fillcolor="#fef3c7", fontsize=10,
+         label="在较低 cwnd 上\n恢复拥塞避免\n每个 ACK 调用 cong_avoid()"];
+
+    undo [shape=box, style="filled", fillcolor="#dcfce7", fontsize=10,
+          label="检测到虚假丢包\n（数据包只是发生重排，\n并未丢失）\n触发 undo_cwnd()：\n恢复之前削减的 cwnd"];
+
+    ss -> thresh [color="#d97706", style=bold, label="向上爬升", fontname="Noto Sans CJK SC"];
+    thresh -> ca [color="#d97706", style=bold];
+    ca -> loss [color="#dc2626", style=bold, label="持续探测，直到……", fontname="Noto Sans CJK SC"];
+    loss -> ca2 [color="#d97706", style=bold, label="退避", fontname="Noto Sans CJK SC"];
+    ca2 -> undo [color="#16a34a", style=bold];
+
+    note [shape=note, style="filled", fillcolor="#dbeafe", fontsize=9,
+          label="图中展示了必需的 CC 回调被触发：\lssthresh() = 发生拥塞时退避多远（必需）\lcong_avoid() = 每个 ACK 推进 cwnd（必需：它与 cong_control 至少实现一个）\lundo_cwnd() = 撤销如今确认不该进行的削减（必需）\lcwnd 就是 `ss -ti` 输出中的 cwnd:10\l"];
+    undo -> note [style=invis];
+}

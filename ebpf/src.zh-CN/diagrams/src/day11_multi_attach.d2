@@ -1,0 +1,46 @@
+direction: down
+
+title: |md
+  ## 单探针与多探针挂载对比
+| {near: top-center; shape: text}
+
+single: "单次挂载（传统方式）" {
+  style.fill: "#fee2e2"
+  s_body: |md
+    对要跟踪的 N 个函数逐一执行：
+    1. perf_event_open() 系统调用
+    2. 分配内核 kprobe 对象
+    3. 安装 int3（或跳板）
+    4. 每次挂载对应一个 BPF link
+
+    **成本：**
+    - N 次系统调用（N=1000+ 时启动缓慢）
+    - N 个跟踪点监听器
+    - N 个文件描述符
+    - O(N) 挂载延迟
+  |
+}
+
+multi: "多探针挂载（现代方式，自 5.18 起）" {
+  style.fill: "#dcfce7"
+  m_body: |md
+    一次挂载 N 个函数：
+    1. **一次** BPF_LINK_CREATE 系统调用
+    2. 传入 N 个函数/偏移量的列表
+    3. 内核一次性安装全部 N 个探针
+    4. **一个** BPF link 覆盖全部 N 个函数
+
+    **成本：**
+    - 1 次系统调用
+    - 1 个 BPF link
+    - 安装仍为 O(N)，但没有逐次系统调用开销
+    - N 很大时启动速度提高 10-100×
+  |
+}
+
+api: "API:\nbpf_program__attach_kprobe_multi_opts(\n  prog, NULL, &opts);\n+ struct bpf_kprobe_multi_opts {\n   .syms = symbols_array,\n   .cnt = N,\n  };" {
+  style.fill: "#fef3c7"
+}
+
+single -> multi: "现代代码\n应使用此方式" {style.stroke-dash: 4}
+multi -> api {style.stroke-dash: 4}

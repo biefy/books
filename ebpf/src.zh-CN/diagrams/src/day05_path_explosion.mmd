@@ -1,0 +1,31 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif"}}}%%
+flowchart TD
+    Loop["for (i = 0; i &lt; n; i++)"]
+    Choice{"验证器是否知道<br/>n 的上界？"}
+
+    Yes["展开循环：<br/>将每次迭代作为<br/>独立路径分析"]
+    No["无界 → 拒绝"]
+
+    Path1["迭代 0：以 i=0 的寄存器状态<br/>探索循环体"]
+    Path2["迭代 1：以 i=1 的寄存器状态<br/>探索循环体"]
+    PathN["迭代 N-1：以 i=N-1 的状态<br/>探索循环体"]
+    Cost["复杂度：O(n × body_complexity)<br/>每次迭代都在循环体内分叉路径"]
+
+    Loop --> Choice
+    Choice -->|是，n 有界| Yes
+    Choice -->|否| No
+    Yes --> Path1
+    Path1 --> Path2
+    Path2 --> PathN
+    PathN --> Cost
+    Cost --> Limit{"是否触及 1M 条指令的<br/>复杂度预算？"}
+    Limit -->|是| Reject(["REJECT:<br/>BPF program too large"])
+    Limit -->|否| OK(["接受"])
+    No --> Reject2(["REJECT:<br/>back-edge to insn N"])
+
+    classDef bad fill:#fee2e2,stroke:#dc2626
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    classDef hot fill:#fef3c7,stroke:#d97706
+    class Reject,Reject2 bad
+    class OK ok
+    class Choice,Limit hot

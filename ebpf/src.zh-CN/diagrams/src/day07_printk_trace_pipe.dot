@@ -1,0 +1,46 @@
+digraph printk_trace_pipe {
+    rankdir=TB;
+    labelloc=t;
+    label="bpf_printk：所有写入方共享一个全局 ftrace 缓冲区";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+    nodesep=0.4; ranksep=0.9;
+
+    // Three BPF programs
+    subgraph cluster_progs {
+        label="BPF 程序（任意类型）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        p1 [shape=box, style="filled,rounded", fillcolor="#dbeafe", fontname="Noto Sans Mono CJK SC", label="via_fentry\nbpf_printk(\"f=%p n=%zu\")"];
+        p2 [shape=box, style="filled,rounded", fillcolor="#dbeafe", fontname="Noto Sans Mono CJK SC", label="via_kprobe\nbpf_printk(\"f=%p n=%zu\")"];
+        p3 [shape=box, style="filled,rounded", fillcolor="#dbeafe", fontname="Noto Sans Mono CJK SC", label="via_tp\nbpf_printk(\"fd=%d\")"];
+    }
+
+    helper [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontname="Noto Sans Mono CJK SC",
+            label="<=3 个参数：bpf_trace_printk (FN 6)\n4-12 个参数：bpf_trace_vprintk (FN 177)"];
+
+    helpernote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+                label="分派器 ___bpf_pick_printk：\l<=3 个参数 -> bpf_trace_printk (FN 6, max 3)\l4-12 个参数 -> bpf_trace_vprintk (FN 177)\l最多 MAX_BPRINTF_VARARGS = 12\l"];
+
+    buf [shape=box, style="filled,rounded", fillcolor="#fef3c7",
+         label="共享的 ftrace 环形缓冲区"];
+
+    bufnote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+             label="全局：系统中每个 bpf_printk 都交错写入此处。\l读取时阻塞并排空。\l"];
+
+    pipe [shape=box, style="filled,rounded", fillcolor="#dbeafe", fontname="Noto Sans Mono CJK SC",
+          label="/sys/kernel/tracing/trace_pipe"];
+
+    cat [shape=box, style="filled,rounded", fillcolor="#dcfce7", fontname="Noto Sans Mono CJK SC",
+         label="cat trace_pipe\n（用户空间）"];
+
+    p1 -> helper;
+    p2 -> helper;
+    p3 -> helper;
+    helper -> buf [color="#d97706", style=bold];
+    buf -> pipe [color="#7c3aed", style=bold];
+    pipe -> cat [label="读取时排空", color="#16a34a", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+
+    helper -> helpernote [style=invis];
+    buf -> bufnote [style=invis];
+}

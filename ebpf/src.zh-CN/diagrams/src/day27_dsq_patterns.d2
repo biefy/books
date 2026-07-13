@@ -1,0 +1,21 @@
+direction: down
+
+title: |md
+  ## DSQ 模式：共享调度与每 CPU 调度
+| {near: top-center; shape: text}
+
+global: "全局 DSQ（SCX_DSQ_GLOBAL）\n\n所有 CPU 从同一个队列拉取任务。\n\n优点：\n- 简单\n- 自动负载均衡\n  （空闲 CPU 获取下一个任务）\n\n缺点：\n- 丧失缓存局部性\n- 高速率下出现锁争用\n- 无延迟保证\n\n使用者：scx_simple（默认）" {
+  style.fill: "#fef3c7"
+}
+
+percpu: "每 CPU DSQ（scx_bpf_create_dsq）\n\n每个 CPU 都有自己的队列。\n\n优点：\n- 缓存局部性\n- 无锁争用\n- 可以实施每 CPU 策略\n\n缺点：\n- 需要在 BPF 中手动负载均衡\n- 本地无工作时，空闲 CPU 会饥饿\n\n使用者：scx_central、scx_flatcg" {
+  style.fill: "#dcfce7"
+}
+
+central: "中央 DSQ（scx_central 模式）\n\n一个 CPU 充当‘中央’调度器；\n其他 CPU 会 enqueue，但从不直接 dispatch。\n\n优点：\n- 集中式策略决策\n- 灵活（防止抖动、\n  延迟优先队列等）\n\n缺点：\n- 中央 CPU 是瓶颈\n- 跨 CPU IPI 开销\n\n使用者：scx_central" {
+  style.fill: "#dbeafe"
+}
+
+global -> percpu: {style.opacity: 0}
+global -> central: "扩展规模" {style.stroke-dash: 4}
+percpu -> central: "采用中央控制" {style.stroke-dash: 4}

@@ -1,0 +1,23 @@
+%%{init: {"themeVariables": {"fontFamily": "Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif"}}}%%
+stateDiagram-v2
+    direction TB
+    [*] --> ScalarUnknown: 程序开始
+    ScalarUnknown --> CallReturned: 调用 bpf_map_lookup_elem
+    state CallReturned <<choice>>
+    CallReturned --> PTR_OR_NULL: r0 = 返回结果
+
+    state "PTR_TO_MAP_VALUE_OR_NULL\n（禁止解引用）" as PTR_OR_NULL
+    state "PTR_TO_MAP_VALUE\n（可解引用）" as PTR
+    state "scalar = 0\n（非 NULL 分支不可达）" as ScalarZero
+
+    PTR_OR_NULL --> NullCheck: if (!r0)
+    state NullCheck <<choice>>
+    NullCheck --> PTR: false 分支\n(r0 != NULL)
+    NullCheck --> ScalarZero: true 分支\n(r0 == NULL)
+
+    PTR --> [*]: 接受解引用
+    ScalarZero --> [*]: 不得解引用\n（尝试时验证器拒绝）
+
+    PTR_OR_NULL --> Reject: 未经检查便解引用
+    state "拒绝\n'R0 invalid mem access\nmap_value_or_null'" as Reject
+    Reject --> [*]

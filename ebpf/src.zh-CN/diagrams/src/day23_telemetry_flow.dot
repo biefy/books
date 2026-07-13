@@ -1,0 +1,50 @@
+digraph telemetry_flow {
+    rankdir=TB;
+    labelloc=t;
+    label="逐 ACK 遥测路径：一个传入 ACK 从内核 ACK 处理函数，经 BPF 回调和 ringbuf，到达用户空间轮询循环";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.4; ranksep=0.7;
+
+    subgraph cluster_kernel {
+        label="内核"; fontname="Noto Sans CJK SC"; fontsize=12; style="filled"; fillcolor="#f3f4f6";
+
+        ack [shape=box, style="filled", fillcolor="#fef3c7",
+             label="传入 ACK\n(tcp_v4_rcv -> tcp_ack)"];
+        dispatch [shape=box, style="filled", fillcolor="#dbeafe",
+                  label="tcp_in_ack_event\nicsk->icsk_ca_ops->in_ack_event"];
+        cb [shape=record, style="filled", fillcolor="#dbeafe",
+            label="bpf_dctcp_update_alpha (BPF_PROG)|读取 tp-\>snd_cwnd、packets_out、srtt_us|原有的 alpha 更新仍会运行"];
+        reserve [shape=box, style="filled", fillcolor="#dcfce7",
+                 label="bpf_ringbuf_reserve(&rb, sizeof(*e), 0)"];
+        fill [shape=record, style="filled", fillcolor="#fef3c7",
+              label="填充 struct tcp_event|ts_ns | srtt_us\>\>3 | cwnd | in_flight | sk"];
+        submit [shape=box, style="filled", fillcolor="#dcfce7",
+                label="bpf_ringbuf_submit(e, 0)"];
+
+        ack -> dispatch [color="#d97706", style=bold];
+        dispatch -> cb [color="#2563eb", style=bold, label="一次间接调用，\n仅调用选定的 CC", fontname="Noto Sans CJK SC", fontsize=9];
+        cb -> reserve [color="#16a34a", style=bold];
+        reserve -> fill [color="#16a34a", style=bold];
+        fill -> submit [color="#16a34a", style=bold];
+    }
+
+    rb [shape=box, style="filled", fillcolor="#e9d5ff",
+        label="BPF_MAP_TYPE_RINGBUF (rb)\n无锁，由内核与用户空间共享"];
+    submit -> rb [color="#7c3aed", style=bold];
+
+    subgraph cluster_user {
+        label="用户空间 (logged_dctcp)"; fontname="Noto Sans CJK SC"; fontsize=12; style="filled"; fillcolor="#f3f4f6";
+
+        poll [shape=box, style="filled", fillcolor="#dbeafe",
+              label="ring_buffer__poll(rb, 100ms)"];
+        handle [shape=box, style="filled", fillcolor="#dbeafe",
+                label="handle_event(e)"];
+        print [shape=box, style="filled", fillcolor="#fef3c7",
+               label="printf(\"cwnd=%u in_flight=%u srtt=%uus\")"];
+
+        poll -> handle [color="#2563eb", style=bold];
+        handle -> print [color="#2563eb", style=bold];
+    }
+    rb -> poll [color="#7c3aed", style=bold, label="每条记录触发一次回调", fontname="Noto Sans CJK SC", fontsize=9];
+}

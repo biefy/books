@@ -1,0 +1,44 @@
+digraph ctx_vs_ptregs {
+    rankdir=LR;
+    labelloc=t;
+    label="两种 ctx 形态：跳板 u64[] 与 struct pt_regs 快照";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+    nodesep=0.5; ranksep=1.0;
+
+    // Left: fentry trampoline ctx[] array
+    subgraph cluster_fentry {
+        label="形态 A — fentry / fexit / tp_btf";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+        fctx [shape=record, style="filled", fillcolor="#dbeafe",
+              label="{ u64 ctx[]（跳板） | { ctx[0] = f  (struct file *) | ctx[1] = buf (char *) | ctx[2] = n  (size_t) } }"];
+        fnote [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9, fontname="Noto Sans CJK SC",
+               label="ctx[0] 就是有类型的第一个参数。\lBPF_PROG 直接按索引访问：\l___bpf_ctx_cast -> ctx[0], ctx[1]...\l"];
+        fctx -> fnote [style=invis];
+    }
+
+    // Right: pt_regs frame as stack of named slots
+    subgraph cluster_ptregs {
+        label="形态 B — kprobe / kretprobe";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#d97706";
+        pregs [shape=record, style="filled", fillcolor="#fef3c7",
+               label="{ struct pt_regs *（保存的寄存器） | { 0x00  r15（被调用方保存） | 0x08  r14 | ... | 0x60  dx  = arg3 | 0x68  si  = arg2 | 0x70  di  = arg1 = f } }"];
+    }
+
+    arg0 [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+          label="arg0 = f\n(struct file *)"];
+
+    // PT_REGS_PARM1 path: di -> arg0
+    pregs -> arg0 [label="PT_REGS_PARM1\n= di @ 0x70", color="#7c3aed", style=bold,
+                   fontname="Noto Sans Mono CJK SC", fontsize=9];
+
+    // Break 2 red arrow from r15 @ 0x00
+    garbage [shape=box, style="filled,rounded", fillcolor="#fee2e2", fontname="Noto Sans CJK SC",
+             label="错误 2：\nBPF_PROG 读取 ctx[0]\n= r15 @ 0x00 = 无意义数据"];
+    pregs -> garbage [label="错误的宏", color="#dc2626", style=bold,
+                      fontname="Noto Sans CJK SC", fontsize=9];
+
+    fctx -> pregs [label="数据相同，\n容器不同", color="#dc2626", style=dashed,
+                   fontname="Noto Sans CJK SC", fontsize=9];
+}

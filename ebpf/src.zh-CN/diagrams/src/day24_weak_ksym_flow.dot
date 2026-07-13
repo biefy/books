@@ -1,0 +1,32 @@
+digraph weak_ksym_flow {
+    rankdir=TB;
+    labelloc=t;
+    label="__ksym 与 __weak __ksym：符号缺失时会发生什么";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.5; ranksep=0.55;
+
+    start [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=11,
+           label="在目标内核上加载 .bpf.o"];
+
+    q [shape=diamond, style="filled", fillcolor="#dbeafe", fontsize=10,
+       label="内核 BTF 中\n是否有该符号？"];
+
+    yes [shape=box, style="filled,rounded", fillcolor="#dcfce7", fontsize=10,
+         label="ksym 解析为 kfunc 地址\n（__ksym 和 __weak __ksym 均是如此）\n程序加载成功，并执行调用"];
+
+    hard [shape=box, style="filled,rounded", fillcolor="#fee2e2", fontsize=10,
+          label="普通 __ksym\n加载失败\n（BPF_PROG_LOAD 中止）"];
+
+    soft [shape=box, style="filled,rounded", fillcolor="#dcfce7", fontsize=10,
+          label="__weak __ksym\n解析为 NULL → 程序加载成功\n受保护的 if (fn) 会跳过调用"];
+
+    start -> q;
+    q -> yes [label="是", color="#16a34a", style=bold, fontname="Noto Sans CJK SC", fontsize=10];
+    q -> hard [label="否", color="#dc2626", style=bold, fontname="Noto Sans CJK SC", fontsize=10];
+    q -> soft [label="否", color="#16a34a", style=bold, fontname="Noto Sans CJK SC", fontsize=10];
+
+    note [shape=note, style="filled", fillcolor="#fef3c7", fontsize=9,
+          label="“否”分支会根据所写的声明进一步分流。\l__weak 是“只编译一次，即可在 kfunc 可用性不同的\l内核上运行”的机制。\l"];
+    soft -> note [style=invis];
+}

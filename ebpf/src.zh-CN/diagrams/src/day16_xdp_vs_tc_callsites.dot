@@ -1,0 +1,50 @@
+digraph xdp_vs_tc_callsites {
+    rankdir=TB;
+    labelloc=t;
+    label="XDP 与两个 tc 钩子的触发位置——v7.1 调用点";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.45; ranksep=0.55;
+
+    // RX 路径
+    subgraph cluster_rx {
+        label="RX 路径（接收）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+
+        nic [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+             label="NIC -> 驱动 NAPI poll"];
+        xdp [shape=box, style="filled", fillcolor="#fee2e2",
+             label="XDP 钩子\n(位于驱动中，skb 之前)\n此时还没有 skb"];
+        skb [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+             label="已分配 skb\n(len、protocol、mark 已填充)"];
+        tcin [shape=box, style="filled", fillcolor="#dcfce7",
+              label="sch_handle_ingress()\ndev.c:4460，由 dev.c:6053 调用\n-> tc_run / tc_ingress 程序"];
+        l3 [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+            label="ip_rcv() 与 L3 处理程序"];
+
+        nic -> xdp -> skb -> tcin -> l3;
+    }
+
+    // TX 路径
+    subgraph cluster_tx {
+        label="TX 路径（发送）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#d97706";
+
+        xmit [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+              label="__dev_queue_xmit()"];
+        tceg [shape=box, style="filled", fillcolor="#dcfce7",
+              label="sch_handle_egress()\ndev.c:4524，由 dev.c:4807 调用\n-> tc_run / tc_egress 程序"];
+        qdisc [shape=record, style="filled", fillcolor="#fde68a",
+               label="真正排队的 qdisc | 数据包 | 数据包"];
+        drv [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+             label="驱动 TX -> NIC"];
+
+        xmit -> tceg -> qdisc -> drv;
+    }
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9, fontname="Noto Sans CJK SC",
+          label="XDP 在 skb 出现前运行；tc-ingress 在其后运行。\l出站钩子恰好在真正的 qdisc 之前触发——\l本地路由的数据包永远不会到达它。\l"];
+
+    l3 -> note [style=invis];
+    note -> xmit [style=invis];
+}

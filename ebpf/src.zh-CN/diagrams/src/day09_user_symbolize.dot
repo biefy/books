@@ -1,0 +1,47 @@
+digraph user_symbolize {
+    rankdir=TB;
+    labelloc=t;
+    label="用户符号化：减去加载基址，然后使用 addr2line";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+    nodesep=0.5; ranksep=0.6;
+
+    // runtime address inside process
+    runtime [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontname="Noto Sans Mono CJK SC",
+             label="运行时地址 A = 0x7f3c12ab8120\n（位于被跟踪进程内，因 ASLR 而随机化）"];
+
+    // /proc/PID/maps line
+    subgraph cluster_maps {
+        label="/proc/PID/maps（查找覆盖 A 的 r-xp 段）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+
+        maps [shape=record, style="filled", fillcolor="#dbeafe", fontname="Noto Sans Mono CJK SC",
+              label="{ <b>7f3c12a90000-7f3c12c00000 r-xp  libc.so.6 | 7f3c12c00000-...        r--p  libc.so.6 }"];
+    }
+
+    runtime -> maps:b [label="A 位于此范围内", color="#7c3aed", style=bold,
+                       fontname="Noto Sans CJK SC", fontsize=9];
+
+    // base
+    base [shape=box, style="filled,rounded", fillcolor="#fef3c7", fontname="Noto Sans Mono CJK SC",
+          label="加载基址 B = 0x7f3c12a90000\n（段起点 = 左列）"];
+    maps:b -> base [color="#d97706", style=bold];
+
+    // subtraction
+    sub [shape=box, style="filled,rounded", fillcolor="#fde68a", fontname="Noto Sans Mono CJK SC",
+         label="文件偏移 = A - B = 0x28120"];
+    base -> sub [color="#d97706", style=bold];
+    runtime -> sub [style=invis];
+
+    // addr2line
+    a2l [shape=box, style="filled,rounded", fillcolor="#dcfce7", fontname="Noto Sans Mono CJK SC",
+         label="addr2line -f -e libc.so.6 0x28120\n-> __read  at  read.c:26"];
+    sub -> a2l [label="将文件偏移传给 addr2line", color="#16a34a", style=bold,
+                fontname="Noto Sans CJK SC", fontsize=9];
+
+    // non-PIE note
+    note [shape=note, style="filled", fillcolor="#fee2e2", fontsize=9,
+          label="例外：非 PIE 的 ET_EXEC 链接到固定基址\l（约为 0），因此跳过减法，\l直接将 A 传给 addr2line。\l"];
+    a2l -> note [style=invis];
+}

@@ -1,0 +1,58 @@
+digraph uretprobe_twotrap {
+    rankdir=TB;
+    labelloc=t;
+    label="Uretprobe（原生 x86_64）：入口陷阱劫持返回地址；返回时运行 uretprobe(2) 系统调用跳板";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+    nodesep=0.5; ranksep=0.7;
+    compound=true;
+
+    // ---- Trap 1: entry ----
+    subgraph cluster_entry {
+        label="陷阱 1——readline 入口处（第一条指令）的 int3";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+
+        stack [shape=record, style="filled", fillcolor="#fef3c7",
+               label="用户栈\n返回地址槽 = 真实调用方\n重写为跳板地址"];
+
+        lifo [shape=record, style="filled", fillcolor="#e9d5ff", fontname="Noto Sans Mono CJK SC",
+              label="utask return_instances（每任务 LIFO）\npush：真实调用方地址\n... 嵌套调用在此入栈 ..."];
+
+        stack -> lifo [label="prepare_uretprobe：\l读取真实返回地址并将其入栈", color="#7c3aed",
+            style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+    }
+
+    // ---- The function body runs ----
+    run [shape=box, style="filled,rounded", fillcolor="#dbeafe",
+         label="readline() 正常运行，\n然后执行其 `ret`\n-> 到达跳板而非调用方"];
+
+    stack -> run [label="返回地址现指向跳板", color="#2563eb",
+        style=bold, fontname="Noto Sans CJK SC", fontsize=9, ltail=cluster_entry];
+
+    // ---- Stage 2: syscall trampoline ----
+    subgraph cluster_ret {
+        label="阶段 2——系统调用跳板（原生 64 位），不是第二次 int3";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#d97706";
+
+        tramp [shape=record, style="filled", fillcolor="#fef3c7", fontname="Noto Sans Mono CJK SC",
+               label="uretprobe_trampoline_entry\npush rax/rcx/r11\nmov $__NR_uretprobe, rax\nsyscall"];
+        sysc [shape=box, style="filled,rounded", fillcolor="#fee2e2", fontname="Noto Sans Mono CJK SC",
+              label="sys_uretprobe (SYSCALL_DEFINE0)：\n验证调用方 IP\n-> uprobe_handle_trampoline(regs)"];
+        bpf [shape=box, style="filled,rounded", fillcolor="#e9d5ff",
+             label="你的 uretprobe BPF 运行\nPT_REGS_RC (rax) = 返回值\n（readline 分配的 char*）"];
+        restore [shape=box, style="filled,rounded", fillcolor="#dcfce7",
+                 label="从 LIFO 弹出真实调用方\n设置 IP -> 真实调用方\n调用方恢复执行，全然不知"];
+
+        tramp -> sysc -> bpf -> restore;
+    }
+
+    run -> tramp [label="控制流到达跳板", color="#d97706",
+        style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+    lifo -> restore [label="弹出匹配的入口（LIFO）", color="#7c3aed",
+        style=dashed, fontname="Noto Sans CJK SC", fontsize=9];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="原生 64 位：返回时执行 uretprobe(2) 系统调用——没有第二次 int3。\l32 位/兼容模式仍回退为在跳板 int3 上触发陷阱（handle_swbp）。\l调用会嵌套 -> 每任务 LIFO：每个被劫持的栈帧压入一个条目，每次返回弹出一个。\l返回时只有 rax 仍有效——参数寄存器早已失效。\l"];
+    restore -> note [style=invis];
+}

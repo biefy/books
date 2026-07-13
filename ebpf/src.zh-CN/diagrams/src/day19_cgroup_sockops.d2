@@ -1,0 +1,65 @@
+direction: down
+
+title: |md
+  ## cgroup BPF 与 sockops
+  每个 cgroup 的网络策略
+| {near: top-center; shape: text}
+
+cg_skb: "cgroup_skb" {
+  style.fill: "#dbeafe"
+  cg_body: |md
+    挂载：cgroup_skb/{ingress,egress}
+
+    对此 cgroup 中套接字的**每个数据包**运行。
+
+    返回值：
+    - 1 = 允许
+    - 0 = 丢弃
+
+    每个 cgroup 的网络策略。
+
+    systemd、Cilium 用它处理
+    网络命名空间。
+
+    钩子：cgroup_inet_egress
+  |
+}
+
+sockops: "sock_ops" {
+  style.fill: "#fef3c7"
+  so_body: |md
+    在 TCP **状态事件**（TCP_BPF_* 回调函数）运行：
+    - TIMEOUT_INIT
+    - RWND_INIT
+    - HDR_OPT_LEN_CB
+    - PARSE_HDR_OPT_CB
+    - RTT_CB
+
+    按 cgroup 调整连接参数：
+    - RTO、接收窗口、
+    - 头部选项。
+
+    不太常见，但功能非常强大。
+
+    钩子：tcp_call_bpf
+  |
+}
+
+sk_msg: "sk_msg" {
+  style.fill: "#dcfce7"
+  sm_body: |md
+    在 sockmap 中套接字的**发送**路径上运行。
+
+    可以：
+    - 丢弃、重定向到另一个套接字，
+    - 在 sendmsg 前修改载荷。
+
+    用于 L7 负载均衡和服务网格（旁车卸载）。
+
+    钩子：tcp_bpf_sendmsg
+  |
+}
+
+cg_skb -> sockops -> sk_msg -> hook {style.stroke-dash: 4}
+
+hook: "三者分别位于不同的\n网络协议栈钩子。" {shape: text}

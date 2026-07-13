@@ -1,0 +1,46 @@
+digraph register_file {
+    rankdir=TB;
+    labelloc=t;
+    label="包含 11 个槽位的 BPF 寄存器文件，以及落入 R0 的 OR_NULL";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    nodesep=0.3; ranksep=0.4;
+
+    subgraph cluster_regs {
+        label="寄存器文件（R0-R10，每个均为 64 位）";
+        fontname="Noto Sans CJK SC"; fontsize=11; style="rounded"; color="#2563eb";
+
+        r0  [shape=box, style="filled", fillcolor="#e9d5ff",
+             label="R0   返回值  ->  调用后保存 OR_NULL"];
+        r1  [shape=box, style="filled", fillcolor="#dbeafe",
+             label="R1   参数 / 被调用破坏"];
+        r2  [shape=box, style="filled", fillcolor="#dbeafe",
+             label="R2   参数 / 被调用破坏"];
+        r3  [shape=box, style="filled", fillcolor="#dbeafe",
+             label="R3   参数 / 被调用破坏"];
+        r4  [shape=box, style="filled", fillcolor="#dbeafe",
+             label="R4   参数 / 被调用破坏"];
+        r5  [shape=box, style="filled", fillcolor="#dbeafe",
+             label="R5   参数 / 被调用破坏"];
+        r6  [shape=box, style="filled", fillcolor="#dcfce7",
+             label="R6   被调用者保存（调用后仍保留）"];
+        r7  [shape=box, style="filled", fillcolor="#dcfce7",
+             label="R7   被调用者保存"];
+        r8  [shape=box, style="filled", fillcolor="#dcfce7",
+             label="R8   被调用者保存"];
+        r9  [shape=box, style="filled", fillcolor="#dcfce7",
+             label="R9   被调用者保存"];
+        r10 [shape=box, style="filled", fillcolor="#fef3c7",
+             label="R10  帧指针，只读"];
+
+        r0 -> r1 -> r2 -> r3 -> r4 -> r5 -> r6 -> r7 -> r8 -> r9 -> r10 [style=invis];
+    }
+
+    stack [shape=box, style="filled,rounded", fillcolor="#fde68a", fontsize=10,
+           label="512 字节 BPF 栈\n(MAX_BPF_STACK = 512)\n\nr10-4  <-  key 槽位  *(u32 *)(r10-4) = r1"];
+    r10 -> stack [label="指向", color="#d97706", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+
+    logline [shape=note, style="filled", fillcolor="#dbeafe", fontsize=9,
+             label="6: (85) call bpf_map_lookup_elem#1\l         |\l         v  结果落入 R0\l7: R0 = map_value_or_null(id=2,ks=4,vs=8)\l"];
+    logline -> r0 [label="映射到", color="#2563eb", style=bold, fontname="Noto Sans CJK SC", fontsize=9];
+}

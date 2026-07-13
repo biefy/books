@@ -1,0 +1,22 @@
+---
+config:
+  themeVariables:
+    fontFamily: "Noto Sans CJK SC, PingFang SC, sans-serif"
+---
+stateDiagram-v2
+    direction TB
+    state "未跟踪" as Untracked
+    state "已获取" as Acquired
+    state "已释放" as Released
+    state "退出被拒绝" as RejectExit
+    state "重复释放被拒绝" as RejectDouble
+    [*] --> Untracked
+    Untracked --> Acquired: bpf_task_acquire(t)<br/>（验证器：ref id 1）
+    Acquired --> Released: bpf_task_release(t)
+    Released --> [*]: ref id 1 已关闭
+
+    Acquired --> RejectExit: 程序退出<br/>但未释放
+    RejectExit --> [*]: 验证器拒绝<br/>'unreleased reference id=1'
+
+    Acquired --> RejectDouble: 执行两次 bpf_task_release(t)
+    RejectDouble --> [*]: 验证器拒绝<br/>'release on non-acquired'

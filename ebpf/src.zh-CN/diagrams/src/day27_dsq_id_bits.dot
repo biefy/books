@@ -1,0 +1,25 @@
+digraph dsq_id_bits {
+    rankdir=TB;
+    labelloc=t;
+    label="DSQ id 带有位标签：将 CPU 编号 OR 到内置 id 中";
+    fontname="Noto Sans CJK SC"; fontsize=14;
+    node [fontname="Noto Sans Mono CJK SC", fontsize=10];
+    edge [fontname="Noto Sans CJK SC"];
+    nodesep=0.4; ranksep=0.55;
+
+    bar [shape=record, style="filled", fillcolor="#dbeafe", fontsize=10,
+         label="{ 第 63 位\nBUILTIN = 1 | 第 62 位\nLOCAL_ON = 1 | 第 61..0 位\nCPU 编号 = 5 }"];
+
+    expr [shape=box, style="filled,rounded", fillcolor="#e9d5ff", fontsize=12,
+          label="SCX_DSQ_LOCAL_ON | 5   ->  CPU 5 的本地 DSQ"];
+
+    rows [shape=record, style="filled", fillcolor="#fef3c7", fontsize=10,
+          label="{ id | 高位 | 含义 } | { FALLBACK_DSQ_ID = 0 | 无（普通数字） | 用户创建的 DSQ } | { SCX_DSQ_LOCAL | BUILTIN | 此 CPU 的本地 DSQ } | { SCX_DSQ_LOCAL_ON \| cpu | BUILTIN + LOCAL_ON + cpu | 指定 CPU 的本地 DSQ }"];
+
+    note [shape=note, style="filled", fillcolor="#dcfce7", fontsize=9,
+          label="这一行代码让中央调度成为可能：\lscx_bpf_dsq_insert(p, SCX_DSQ_LOCAL_ON | cpu, ...)\l将任务直接插入远程 CPU 的运行队列。\l"];
+
+    bar -> expr [label="解码", color="#2563eb", style=bold, fontsize=9];
+    expr -> rows [label="与其他 id 对比", color="#7c3aed", style=bold, fontsize=9];
+    rows -> note [style=invis];
+}
